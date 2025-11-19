@@ -736,6 +736,10 @@ We've been in deep implementation mode (ML integration, proxy setup, caching, in
    - When to create new integrations/ vs extending existing
    - Configuration organization (per-integration vs global)
    - Testing strategy for integrations
+   - Global rate limiter vs per-integration?
+   - OAuth token refresh management for multiple services
+   - API call cost tracking (especially for paid APIs)
+   - Unified retry/error handling across integrations
 
 7. **Configuration Management**
    - Config file organization as features grow
@@ -759,7 +763,13 @@ We've been in deep implementation mode (ML integration, proxy setup, caching, in
 - 📄 **`design/architecture/integration_guidelines.md`** - How to add new integrations
 - 📄 **`design/architecture/storage_strategy.md`** - Database, cache, files organization
 - 📄 **`design/architecture/task_queue.md`** - Background job design (if needed)
+- 📄 **`design/architecture/llm_personality.md`** - LLM voice/tone guidelines
 - 🔄 **Updated ROADMAP.md** - Reprioritized based on architectural decisions
+
+**Input Documents (Already Created):**
+- 📄 **`docs/public_apis_evaluation.md`** - 50+ APIs evaluated for integration potential
+- 📄 **`docs/integration_strategy_framework.md`** - Paid vs Self-Built vs Self-Hosted decision framework
+- 📄 **`docs/self_hosted_read_later_evaluation.md`** - Read-it-later case study (Wallabag, etc.)
 
 **Questions to Answer:**
 - Do we need a background daemon now, or can we defer?
