@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..integrations.paperang import PaperangClient, ThermalRenderer
+from ..integrations.paperang.spinitex import MarkdownRenderer
 from ..storage.database import Database
 from ..config import load_config
 
@@ -243,9 +244,9 @@ def print_image(image_path: str, no_dither: bool):
 
 
 @print_group.command("summary")
-@click.option("--font-size", "-s", type=int, default=14, help="Font size (default: 14)")
+@click.option("--font-size", "-s", type=int, default=18, help="Font size (default: 18)")
 @click.option("--font", "-f", type=str, default="FiraCode", help="Font name")
-@click.option("--max-height", "-h", type=int, default=100, help="Max height in mm (default: 100)")
+@click.option("--max-height", "-h", type=int, default=120, help="Max height in mm (default: 120)")
 def print_summary(font_size: int, font: str, max_height: int):
     """Print AI-generated summary of your entire Holocene collection."""
     config = load_config()
@@ -326,14 +327,17 @@ Recent additions:
 Books: {', '.join(recent_books[:2]) if recent_books else 'None'}
 Papers: {', '.join(recent_papers[:2]) if recent_papers else 'None'}
 
-Create a beautiful, concise summary (max 250 words) in plain text format. Include:
-1. A poetic opening line about personal knowledge management
-2. The key statistics in an elegant way
-3. A reflection on the collection's character
-4. Date stamp at the end
+Create a beautiful, concise summary (max 250 words) in markdown format. Include:
+1. A centered title: "# HOLOCENE"
+2. A centered subtitle with current date
+3. A poetic opening paragraph about personal knowledge management
+4. The key statistics formatted elegantly (use **bold** for numbers)
+5. A reflection on the collection's character
+6. Centered footer with date stamp
 
 Style: Literary but concise, like a receipt from a rare bookshop.
-No markdown formatting - just plain text with line breaks.
+Use markdown: # headers, **bold**, centered alignment (@align:center).
+Use horizontal rules (---) to separate sections.
 Make it feel special and personal."""
 
     console.print("[cyan]Generating summary with DeepSeek...[/cyan]")
@@ -356,9 +360,15 @@ Make it feel special and personal."""
     console.print("[green]✓[/green] Summary generated")
     console.print(f"\n[dim]{summary[:200]}...[/dim]\n")
 
-    # Render to bitmap
-    renderer = ThermalRenderer(font_size=font_size, font_name=font)
-    bitmap = renderer.render_text(summary)
+    # Render to bitmap with Spinitex markdown renderer
+    renderer = MarkdownRenderer(
+        width=384,
+        ppi=203,
+        margin_mm=2.0,
+        font_name=font,
+        base_size=font_size
+    )
+    bitmap = renderer.render(summary)
 
     num_lines = len(bitmap) // 48
     height_mm = (num_lines / 203) * 25.4  # Convert pixels to mm
