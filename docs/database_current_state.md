@@ -407,36 +407,256 @@ CREATE TABLE item_tags (
 
 ---
 
-## SQLite vs PostgreSQL Considerations
+## Schema Design Pattern Questions (The Real Issue)
 
-### Reasons to STAY on SQLite
-- ✅ Single-user application (no concurrent writes needed)
-- ✅ Local-first design (no server needed)
-- ✅ Portability (database is a single file)
-- ✅ Backup is simple (copy one file)
-- ✅ Zero configuration
-- ✅ JSON1 extension available for better JSON support
-- ✅ FTS5 extension for full-text search
-- ✅ Current data size is small (< 100MB)
-- ✅ Works well with Python (sqlite3 in stdlib)
+**SQLite is fine.** The real question is: **What schema patterns should we use consistently?**
 
-### Reasons to MIGRATE to PostgreSQL
-- ⚠️ Better JSON support (JSONB with indexing)
-- ⚠️ Better full-text search (tsquery, tsvector)
-- ⚠️ Foreign key enforcement is default
-- ⚠️ More robust for concurrent access (if we add web UI)
-- ⚠️ Better indexing options (partial indexes, expression indexes)
-- ⚠️ Could run on Proxmox server (we have infrastructure!)
-- ⚠️ Better tooling (pgAdmin, DataGrip, etc.)
-- ❌ Requires server setup/maintenance
-- ❌ Backup more complex
-- ❌ Connection strings instead of file paths
-- ❌ Overkill for personal use?
+### Current Inconsistencies
 
-**Current Recommendation:** Stay on SQLite, but use JSON1 extension and FTS5 properly. Migrate to PostgreSQL only if:
-1. We add multi-user support (web UI, family access)
-2. We need better concurrent writes (background daemon + CLI)
-3. We outgrow SQLite (> 1GB database, slow queries)
+**Problem 1: Tags Storage - Three Different Approaches**
+```sql
+-- Approach 1: TEXT column with comma-separated values
+books.enriched_tags TEXT  -- "geology,mining,geostatistics"
+
+-- Approach 2: Separate table with foreign keys
+item_tags(item_id, tag)  -- Proper many-to-many
+
+-- Approach 3: TEXT column (used for tags but stored differently)
+activities.tags TEXT  -- Could be CSV or JSON
+```
+
+**Problem 2: Attributes - EAV vs Fixed Columns**
+```sql
+-- EAV Pattern (flexible, used for items)
+item_attributes(item_id, key, value)  -- Can store ANY attribute
+
+-- Fixed Columns (rigid, used for ML favorites)
+mercadolivre_favorites.seller_nickname TEXT
+mercadolivre_favorites.seller_reputation TEXT
+mercadolivre_favorites.reviews_rating REAL
+-- What if ML adds new fields? ALTER TABLE again?
+
+-- JSON Blob (hybrid, but stored as Python repr)
+mercadolivre_favorites.specifications TEXT  -- "{'Brand': 'Sony', 'Model': 'PS5'}"
+```
+
+**Problem 3: Relationships - Denormalized Text vs Foreign Keys**
+```sql
+-- Denormalized (current approach for books/papers)
+books.ref_list TEXT  -- "10.1234/abc, 10.5678/def"
+papers.reference_dois TEXT  -- "10.1234/abc, 10.5678/def"
+
+-- Proper relationship (only used in items)
+item_attributes.item_id INTEGER FOREIGN KEY REFERENCES items(id)
+
+-- Orphaned reference (no enforcement)
+items.mercadolivre_item_id TEXT  -- Should be FK but isn't
+```
+
+### Questions We Need to Answer
+
+#### 1. When to use EAV (Entity-Attribute-Value)?
+
+**Current:** Only `item_attributes` table uses EAV
+```sql
+item_attributes(item_id, key, value)
+-- Flexible: Can store ANY attribute without schema changes
+-- Query: SELECT value WHERE item_id=1 AND key='Brand'
+```
+
+**Pros:**
+- ✅ Extreme flexibility (add any attribute without ALTER TABLE)
+- ✅ Good for user-defined metadata
+- ✅ Works well for sparse data (not every item has every attribute)
+
+**Cons:**
+- ❌ Harder to query (can't do `SELECT Brand FROM items`)
+- ❌ No type safety (everything is TEXT)
+- ❌ Harder to index efficiently
+- ❌ JOIN-heavy queries
+
+**When to use EAV?**
+- User-defined custom fields
+- Sparse attributes (most items don't have them)
+- Attributes vary wildly across item types
+
+**When NOT to use EAV?**
+- Core fields everyone has (name, description)
+- Need type safety (numbers, dates, booleans)
+- Need fast queries on the attribute
+- Need aggregations (AVG, SUM, etc.)
+
+#### 2. How to store tags/categories?
+
+**Option A: Separate table (many-to-many)**
+```sql
+CREATE TABLE tags (
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL
+);
+
+CREATE TABLE item_tags (
+    item_id INTEGER,
+    tag_id INTEGER,
+    FOREIGN KEY (item_id) REFERENCES items(id),
+    FOREIGN KEY (tag_id) REFERENCES tags(id)
+);
+```
+**Pros:** Proper normalization, can query "all items with tag X", can count tag usage
+**Cons:** More tables, more JOINs, more complexity
+
+**Option B: JSON array in column**
+```sql
+items.tags TEXT  -- '["geology", "mining", "geostatistics"]'
+-- Query: json_each(tags) for SQLite JSON1 extension
+```
+**Pros:** Simple, single column, good for read-heavy workloads
+**Cons:** Harder to query "all items with tag X", no tag reuse/normalization
+
+**Option C: Comma-separated TEXT**
+```sql
+items.tags TEXT  -- "geology,mining,geostatistics"
+```
+**Pros:** Simplest to implement
+**Cons:** No data integrity, hard to query, no type safety, fragile
+
+**Recommendation needed:** Pick ONE approach and use consistently
+
+#### 3. How to handle variable attributes (ML specifications, book metadata)?
+
+**Current mess:**
+```sql
+-- Python dict repr as TEXT
+mercadolivre_favorites.specifications TEXT
+-- "{'Brand': 'Sony', 'Model': 'PS5', 'Year': 2020}"
+
+-- Multiple fixed columns
+mercadolivre_favorites.seller_nickname TEXT
+mercadolivre_favorites.seller_reputation TEXT
+mercadolivre_favorites.reviews_rating REAL
+
+-- EAV table
+item_attributes(item_id, key, value)
+```
+
+**Option A: JSON column (SQLite JSON1)**
+```sql
+mercadolivre_favorites.specifications TEXT  -- Proper JSON
+-- Store: {"Brand": "Sony", "Model": "PS5"}
+-- Query: json_extract(specifications, '$.Brand')
+```
+
+**Option B: EAV table**
+```sql
+ml_attributes(item_id, key, value)
+```
+
+**Option C: Fixed columns for common fields + JSON for extras**
+```sql
+-- Common fields everyone has
+mercadolivre_favorites.title TEXT NOT NULL
+mercadolivre_favorites.price REAL NOT NULL
+
+-- Variable fields as JSON
+mercadolivre_favorites.extra_attributes TEXT  -- JSON
+```
+
+**Recommendation needed:** When to use which pattern?
+
+#### 4. How to handle relationships between entities?
+
+**Current:** Almost no foreign keys, lots of TEXT references
+
+**Example: Books reference Papers**
+```sql
+-- Current (denormalized)
+books.ref_list TEXT  -- "10.1234/abc, 10.5678/def"
+
+-- Option A: Many-to-many table
+CREATE TABLE book_paper_citations (
+    book_id INTEGER,
+    paper_id INTEGER,
+    FOREIGN KEY (book_id) REFERENCES books(id),
+    FOREIGN KEY (paper_id) REFERENCES papers(id)
+);
+
+-- Option B: Keep denormalized but use JSON
+books.ref_list TEXT  -- '["10.1234/abc", "10.5678/def"]'
+```
+
+**Trade-offs:**
+- Normalization = Data integrity, easier queries, can JOIN
+- Denormalization = Simpler schema, faster reads, no JOINs
+
+**When to normalize?**
+- Frequently queried relationships
+- Need CASCADE deletes
+- Need to prevent orphans
+- Need bidirectional queries
+
+**When to keep denormalized?**
+- Rarely queried
+- Read-only references (won't delete)
+- Simpler is better (personal use)
+
+#### 5. How to handle flexible metadata that changes over time?
+
+**Example:** Mercado Livre might add new product fields tomorrow.
+
+**Option A: Schemaless (JSON)**
+```sql
+-- Everything in JSON, ultra-flexible
+mercadolivre_favorites.data TEXT  -- Entire product as JSON
+```
+
+**Option B: Core fields + flexible extras**
+```sql
+-- Fixed columns for what we always need
+mercadolivre_favorites.title TEXT NOT NULL
+mercadolivre_favorites.price REAL NOT NULL
+
+-- JSON for variable stuff
+mercadolivre_favorites.extra_data TEXT  -- JSON
+```
+
+**Option C: ALTER TABLE as needed**
+```sql
+-- Add columns when we see new fields
+ALTER TABLE mercadolivre_favorites ADD COLUMN new_field TEXT
+```
+
+**Current:** We're doing Option C (ALTER TABLE) which causes schema drift
+
+### Proposed Schema Pattern Guidelines
+
+**For Architecture Review - Need to Decide:**
+
+1. **Tags/Categories Pattern**
+   - ⬜ Separate `tags` table (normalized, many-to-many)
+   - ⬜ JSON array in column (denormalized, simple)
+   - ⬜ Hybrid: Core tags normalized, user tags as JSON
+
+2. **Flexible Attributes Pattern**
+   - ⬜ EAV tables for user-defined attributes
+   - ⬜ JSON columns for variable external data (ML specs)
+   - ⬜ Fixed columns for common fields + JSON for extras
+
+3. **Relationships Pattern**
+   - ⬜ Normalize critical relationships (books ↔ papers)
+   - ⬜ Keep denormalized for references (less critical)
+   - ⬜ Enable foreign key enforcement (PRAGMA foreign_keys = ON)
+
+4. **Schema Evolution Pattern**
+   - ⬜ Stop ad-hoc ALTER TABLE, use migration system
+   - ⬜ JSON for new/variable fields from integrations
+   - ⬜ Fixed columns only for core, stable fields
+
+5. **Type Safety Pattern**
+   - ⬜ Use proper SQL types (INTEGER, REAL, BOOLEAN) when possible
+   - ⬜ Store timestamps consistently (ISO TEXT? INTEGER Unix? REAL Julian?)
+   - ⬜ JSON for truly variable/nested data
+
+**Goal:** Pick patterns and apply consistently across all tables
 
 ---
 

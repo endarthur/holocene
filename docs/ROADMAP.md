@@ -798,17 +798,24 @@ We've been in deep implementation mode (ML integration, proxy setup, caching, in
 - What's the right balance between LLM creativity and directness?
 - Should we have different LLM personalities for different command contexts?
 
-**Database-Specific Questions:**
-- SQLite vs PostgreSQL: When to migrate? Stay on SQLite?
-- Schema migrations: Alembic? Custom? Continue ad-hoc ALTER TABLE?
-- Indexing: What queries are slow? What indexes do we need?
-- Foreign keys: Should we enforce relationships? (books → papers via citations?)
-- JSON columns: Use SQLite JSON1 extension? Store as TEXT? Migrate to JSONB (PostgreSQL)?
-- Full-text search: Implement FTS5 for papers/books/links? Or external search engine?
-- Data integrity: Add NOT NULL, UNIQUE, CHECK constraints retroactively?
-- Column naming: Standardize conventions (enriched_at vs enrichment_timestamp)?
-- Soft deletes: Add deleted_at columns? Or hard deletes OK?
-- Audit trail: Track changes to enrichment data? Or unnecessary for personal use?
+**Database Schema Pattern Questions (The Real Issue):**
+- **Tags storage:** Separate `tags` table (normalized)? JSON arrays? CSV TEXT? Pick ONE pattern
+- **Flexible attributes:** When to use EAV tables? When to use JSON columns? When fixed columns?
+- **Relationships:** Normalize (books ↔ papers FK)? Or keep denormalized TEXT references?
+- **Variable metadata:** ML specifications - JSON column? EAV table? Fixed columns + JSON extras?
+- **Schema evolution:** Stop ad-hoc ALTER TABLE? Use migrations? JSON for new integration fields?
+- **Type safety:** Proper SQL types vs TEXT for everything? How to handle timestamps consistently?
+- **Foreign keys:** Enable enforcement (PRAGMA foreign_keys = ON)? Add FK constraints?
+- **Indexing:** What queries are slow? Add missing indexes (trust_tier, enriched_at, source)?
+- **Column naming:** Standardize conventions (enriched_at vs date_added vs first_synced)?
+- **Full-text search:** Implement FTS5 for papers/books/links?
+
+**Current Problems:**
+- Tags stored 3 different ways (CSV, separate table, JSON-ish)
+- EAV for `item_attributes` but fixed columns everywhere else
+- `specifications` stored as Python dict repr TEXT instead of proper JSON
+- No foreign keys enforced (books reference papers via TEXT field)
+- 14 columns added ad-hoc to `books` table (extreme schema drift)
 
 **Estimated Time:** 1-2 full sessions (4-6 hours)
 **Outcome:** Clear architectural vision before Phase 4.3+
