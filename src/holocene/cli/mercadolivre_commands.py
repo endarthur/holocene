@@ -935,6 +935,9 @@ def enrich_proxy(limit: int, delay: int):
     console.print("\n[cyan]Starting scraping...[/cyan]\n")
 
     enriched_count = 0
+    robots_txt_errors = 0
+    other_errors = 0
+
     for i, fav in enumerate(favorites, 1):
         try:
             # Fetch page through proxy with caching
@@ -1017,9 +1020,26 @@ def enrich_proxy(limit: int, delay: int):
                 time.sleep(sleep_time)
 
         except Exception as e:
-            console.print(f"[red]✗ Error: {str(e)}[/red]")
+            error_str = str(e)
+            console.print(f"[red]✗ Error: {error_str[:120]}[/red]")
+
+            # Track robots.txt errors for reporting
+            if "robots.txt" in error_str:
+                robots_txt_errors += 1
+                console.print(f"[dim]  (Bright Data robots.txt restriction - contact support to whitelist ML)[/dim]")
+            else:
+                other_errors += 1
 
     console.print(f"\n[green]✓ Enriched {enriched_count}/{len(favorites)} favorites![/green]")
     console.print(f"[dim]Data used: ~{(enriched_count * 0.5):.1f} MB[/dim]")
+
+    # Error summary
+    if robots_txt_errors > 0 or other_errors > 0:
+        console.print(f"\n[yellow]Errors encountered:[/yellow]")
+        if robots_txt_errors > 0:
+            console.print(f"  • {robots_txt_errors} robots.txt restrictions (Bright Data policy)")
+            console.print(f"    [dim]→ Contact Bright Data support to whitelist mercadolivre.com.br[/dim]")
+        if other_errors > 0:
+            console.print(f"  • {other_errors} other errors (network, parsing, etc.)")
 
     db.close()
