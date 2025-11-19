@@ -314,7 +314,7 @@ def print_summary(font_size: int, font: str, max_height: int):
                   f"Inventory: {stats['inventory_items']}[/dim]")
 
     # Build prompt for DeepSeek
-    prompt = f"""You are creating a concise, elegant summary for a thermal receipt printer.
+    prompt = f"""You are creating a snapshot summary for a thermal receipt printer.
 
 Collection Statistics:
 - Books: {stats['books']} ({stats['classified_books']} classified with Dewey)
@@ -327,18 +327,18 @@ Recent additions:
 Books: {', '.join(recent_books[:2]) if recent_books else 'None'}
 Papers: {', '.join(recent_papers[:2]) if recent_papers else 'None'}
 
-Create a beautiful, concise summary (max 250 words) in markdown format. Include:
+Create a concise summary (max 250 words) in markdown format. Include:
 1. A centered title: "# HOLOCENE"
 2. A centered subtitle with current date
-3. A poetic opening paragraph about personal knowledge management
-4. The key statistics formatted elegantly (use **bold** for numbers)
-5. A reflection on the collection's character
+3. A brief, direct paragraph about what this collection represents
+4. The key statistics formatted clearly (use **bold** for numbers)
+5. A thoughtful observation about patterns or focus areas in the collection
 6. Centered footer with date stamp
 
-Style: Literary but concise, like a receipt from a rare bookshop.
+Style: Direct and conversational, like a knowledgeable colleague summarizing findings.
+Avoid flowery or grandiose language - be insightful but grounded.
 Use markdown: # headers, **bold**, centered alignment (@align:center).
-Use horizontal rules (---) to separate sections.
-Make it feel special and personal."""
+Use horizontal rules (---) to separate sections."""
 
     console.print("[cyan]Generating summary with DeepSeek...[/cyan]")
 
