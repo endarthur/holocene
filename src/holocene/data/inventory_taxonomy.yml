@@ -1,0 +1,459 @@
+# Holocene Inventory Taxonomy
+#
+# License: CC0 1.0 Universal (Public Domain)
+#
+# To the extent possible under law, the author(s) have dedicated all copyright
+# and related and neighboring rights to this software to the public domain
+# worldwide. This software is distributed without any warranty.
+#
+# You should have received a copy of the CC0 Public Domain Dedication along
+# with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
+#
+# This taxonomy is community maintained and open for contributions.
+# Cross-references to Wikipedia, Wikidata, and Schema.org are provided where available.
+
+version: "1.0.0"
+last_updated: "2025-11-18"
+
+categories:
+  # ============================================================================
+  # TOOLS - Physical tools for fabrication, measurement, assembly
+  # ============================================================================
+  T:
+    label: "Tools"
+    description: "Physical tools for fabrication, measurement, assembly, and modification"
+    aliases: ["tool", "tools", "ferramenta", "ferramentas"]
+    wikipedia: "https://en.wikipedia.org/wiki/Category:Tools"
+    schema_org: "https://schema.org/Product"
+
+    MEAS:
+      label: "Measurement & Inspection"
+      description: "Tools for measuring dimensions, angles, and physical properties"
+      aliases: ["measurement", "measure", "measuring", "medição", "medicao"]
+      wikipedia: "https://en.wikipedia.org/wiki/Category:Measuring_instruments"
+
+      CAL:
+        label: "Calipers"
+        aliases: ["caliper", "calipers", "paquímetro", "paquimetro"]
+        wikidata: "Q467281"
+        schema_org: "https://schema.org/Product"
+
+      MIC:
+        label: "Micrometers"
+        aliases: ["micrometer", "micrometers", "micrômetro", "micrometro"]
+        wikidata: "Q213186"
+
+      IND:
+        label: "Dial Indicators"
+        aliases: ["indicator", "dial indicator", "relógio comparador"]
+        wikidata: "Q1207668"
+
+      ANG:
+        label: "Angle Measurement"
+        aliases: ["protractor", "angle gauge", "goniômetro", "transferidor"]
+
+      HRD:
+        label: "Hardness Testers"
+        aliases: ["hardness tester", "durometer", "durômetro"]
+        wikidata: "Q901881"
+
+    CUT:
+      label: "Cutting & Sawing"
+      description: "Tools for cutting, sawing, and material removal"
+      aliases: ["cutting", "cut", "saw", "corte"]
+
+      SAW:
+        label: "Saws & Blades"
+        aliases: ["saw", "blade", "serra"]
+
+      DRL:
+        label: "Drills & Bits"
+        aliases: ["drill", "bit", "furadeira", "broca"]
+
+      MIL:
+        label: "Milling Tools"
+        aliases: ["mill", "end mill", "fresa"]
+
+      LAT:
+        label: "Lathe Tools"
+        aliases: ["lathe tool", "turning tool", "torno"]
+
+    ASM:
+      label: "Assembly & Fastening"
+      aliases: ["assembly", "fastening", "montagem"]
+
+      PLR:
+        label: "Pliers & Grips"
+        aliases: ["pliers", "grip", "alicate"]
+
+      WRN:
+        label: "Wrenches"
+        aliases: ["wrench", "spanner", "chave"]
+
+      SDR:
+        label: "Screwdrivers"
+        aliases: ["screwdriver", "chave de fenda", "phillips"]
+
+    FIN:
+      label: "Finishing & Surface"
+      aliases: ["finishing", "surface", "acabamento"]
+
+      SND:
+        label: "Sanders & Abrasives"
+        aliases: ["sander", "sandpaper", "lixa"]
+
+      POL:
+        label: "Polishing"
+        aliases: ["polish", "buff", "polimento"]
+
+  # ============================================================================
+  # ELECTRONICS - Components, modules, and electronic tools
+  # ============================================================================
+  E:
+    label: "Electronics"
+    description: "Electronic components, modules, development boards, and tools"
+    aliases: ["electronics", "electronic", "eletrônica", "eletronica"]
+    wikipedia: "https://en.wikipedia.org/wiki/Category:Electronics"
+
+    COMP:
+      label: "Components"
+      description: "Electronic components and discrete parts"
+      aliases: ["component", "componente"]
+
+      MCU:
+        label: "Microcontrollers"
+        aliases: ["mcu", "microcontroller", "microcontrolador"]
+        wikidata: "Q165436"
+
+      SNS:
+        label: "Sensors"
+        aliases: ["sensor"]
+
+      RES:
+        label: "Resistors"
+        aliases: ["resistor", "resistance"]
+        wikidata: "Q101333"
+
+      CAP:
+        label: "Capacitors"
+        aliases: ["capacitor", "cap"]
+        wikidata: "Q5322"
+
+      IC:
+        label: "Integrated Circuits"
+        aliases: ["ic", "chip", "ci"]
+        wikidata: "Q122908"
+
+    MOD:
+      label: "Modules & Breakouts"
+      aliases: ["module", "breakout", "módulo", "modulo"]
+
+      DSP:
+        label: "Displays"
+        aliases: ["display", "screen", "tela"]
+
+      COM:
+        label: "Communication Modules"
+        aliases: ["wifi", "bluetooth", "radio", "comunicação"]
+
+      PWR:
+        label: "Power Modules"
+        aliases: ["power supply", "regulator", "fonte"]
+
+    DEV:
+      label: "Development Boards"
+      aliases: ["dev board", "development", "placa de desenvolvimento"]
+
+      ARD:
+        label: "Arduino"
+        aliases: ["arduino"]
+
+      ESP:
+        label: "ESP32/ESP8266"
+        aliases: ["esp32", "esp8266", "esp"]
+
+      RPI:
+        label: "Raspberry Pi"
+        aliases: ["raspberry", "rpi", "pi"]
+
+    TOOL:
+      label: "Electronic Tools"
+
+      SOL:
+        label: "Soldering Equipment"
+        aliases: ["solder", "soldering iron", "ferro de solda"]
+
+      TST:
+        label: "Test Equipment"
+        aliases: ["multimeter", "oscilloscope", "osciloscópio"]
+
+  # ============================================================================
+  # MATERIALS - Raw materials, consumables, stock
+  # ============================================================================
+  M:
+    label: "Materials"
+    description: "Raw materials, stock, and consumables"
+    aliases: ["material", "materials", "matéria-prima"]
+
+    FIL:
+      label: "3D Printer Filament"
+      aliases: ["filament", "filamento"]
+
+      PLA:
+        label: "PLA"
+        aliases: ["pla"]
+
+      PTG:
+        label: "PETG"
+        aliases: ["petg"]
+
+      ABS:
+        label: "ABS"
+        aliases: ["abs"]
+
+    MET:
+      label: "Metal Stock"
+      aliases: ["metal", "stock"]
+
+      ALU:
+        label: "Aluminum"
+        aliases: ["aluminum", "aluminium", "alumínio", "aluminio"]
+
+      STL:
+        label: "Steel"
+        aliases: ["steel", "aço", "aco"]
+
+      BRS:
+        label: "Brass"
+        aliases: ["brass", "latão", "latao"]
+
+    CHM:
+      label: "Chemicals & Fluids"
+      aliases: ["chemical", "fluid", "químico", "quimico"]
+
+      SOL:
+        label: "Solvents"
+        aliases: ["solvent", "solvente"]
+
+      ADH:
+        label: "Adhesives"
+        aliases: ["adhesive", "glue", "cola", "adesivo"]
+
+  # ============================================================================
+  # GEOLOGY - Geological tools, samples, and equipment
+  # ============================================================================
+  G:
+    label: "Geology"
+    description: "Geological tools, rock/mineral samples, and field equipment"
+    aliases: ["geology", "geological", "geologia"]
+    wikipedia: "https://en.wikipedia.org/wiki/Category:Geology"
+
+    TOOL:
+      label: "Geological Tools"
+      aliases: ["geo tool", "field tool"]
+
+      HAM:
+        label: "Rock Hammers"
+        aliases: ["rock hammer", "geology hammer", "martelo geológico"]
+        wikidata: "Q1430115"
+
+      HND:
+        label: "Hand Lenses"
+        aliases: ["hand lens", "loupe", "lupa"]
+        wikidata: "Q222031"
+
+      CMP:
+        label: "Compasses"
+        aliases: ["compass", "brunton", "bússola", "bussola"]
+        wikidata: "Q1068072"
+
+      HRD:
+        label: "Hardness Test Kits"
+        aliases: ["mohs", "hardness kit", "dureza"]
+
+    SAMP:
+      label: "Samples"
+      description: "Rock, mineral, and soil samples"
+      aliases: ["sample", "specimen", "amostra"]
+
+      ROC:
+        label: "Rock Samples"
+        aliases: ["rock", "rocha"]
+        wikidata: "Q8063"
+
+      MIN:
+        label: "Mineral Samples"
+        aliases: ["mineral"]
+        wikidata: "Q7946"
+
+      FOS:
+        label: "Fossils"
+        aliases: ["fossil", "fóssil", "fossil"]
+        wikidata: "Q40614"
+
+      SOL:
+        label: "Soil Samples"
+        aliases: ["soil", "sediment", "solo"]
+
+    INST:
+      label: "Instruments"
+      description: "Geological measurement and analysis instruments"
+
+      GPR:
+        label: "Ground Penetrating Radar"
+        aliases: ["gpr", "radar"]
+
+      MAG:
+        label: "Magnetometers"
+        aliases: ["magnetometer", "mag"]
+
+      GPS:
+        label: "GPS/GNSS Equipment"
+        aliases: ["gps", "gnss", "receiver"]
+
+  # ============================================================================
+  # FABRICATION - Digital fabrication machines and equipment
+  # ============================================================================
+  F:
+    label: "Fabrication Equipment"
+    description: "CNC, 3D printers, laser cutters, and fabrication machinery"
+    aliases: ["fabrication", "fab", "fabricação", "fabricacao"]
+
+    3DP:
+      label: "3D Printers"
+      aliases: ["3d printer", "printer", "impressora 3d"]
+      wikidata: "Q229367"
+
+    CNC:
+      label: "CNC Machines"
+      aliases: ["cnc", "router", "mill"]
+
+      ROU:
+        label: "CNC Routers"
+        aliases: ["router"]
+
+      MIL:
+        label: "CNC Mills"
+        aliases: ["mill", "milling machine", "fresadora"]
+
+      LAT:
+        label: "CNC Lathes"
+        aliases: ["lathe", "torno cnc"]
+
+    LAS:
+      label: "Laser Equipment"
+      aliases: ["laser"]
+
+      CUT:
+        label: "Laser Cutters"
+        aliases: ["laser cutter", "co2 laser"]
+
+      ENG:
+        label: "Laser Engravers"
+        aliases: ["laser engraver", "gravador laser"]
+
+  # ============================================================================
+  # LAB - Laboratory equipment and instruments
+  # ============================================================================
+  L:
+    label: "Laboratory Equipment"
+    description: "Lab instruments, analytical equipment, and scientific tools"
+    aliases: ["lab", "laboratory", "laboratório", "laboratorio"]
+
+    OPT:
+      label: "Optical Equipment"
+      aliases: ["optical", "optics", "óptica", "otica"]
+
+      MIC:
+        label: "Microscopes"
+        aliases: ["microscope", "microscópio", "microscopio"]
+        wikidata: "Q189588"
+
+      CAM:
+        label: "Cameras"
+        aliases: ["camera", "câmera", "camera"]
+
+    PSU:
+      label: "Power Supplies"
+      aliases: ["power supply", "psu", "fonte"]
+
+    SCP:
+      label: "Oscilloscopes"
+      aliases: ["oscilloscope", "scope", "osciloscópio", "osciloscopio"]
+      wikidata: "Q190117"
+
+  # ============================================================================
+  # CONSUMABLES - Supplies that are regularly depleted
+  # ============================================================================
+  C:
+    label: "Consumables"
+    description: "Regularly depleted supplies and replacement parts"
+    aliases: ["consumable", "supply", "consumível", "consumivel"]
+
+    FAS:
+      label: "Fasteners"
+      aliases: ["fastener", "screw", "bolt", "parafuso"]
+
+      SCR:
+        label: "Screws"
+        aliases: ["screw", "parafuso"]
+
+      BLT:
+        label: "Bolts & Nuts"
+        aliases: ["bolt", "nut", "porca"]
+
+      INS:
+        label: "Threaded Inserts"
+        aliases: ["insert", "heat insert", "rosca"]
+
+    ABR:
+      label: "Abrasives"
+      aliases: ["abrasive", "abrasivo"]
+
+      SND:
+        label: "Sandpaper"
+        aliases: ["sandpaper", "lixa"]
+
+      WHE:
+        label: "Grinding Wheels"
+        aliases: ["grinding wheel", "disco de corte"]
+
+  # ============================================================================
+  # MEDIA - Documentation and content creation equipment
+  # ============================================================================
+  D:
+    label: "Documentation & Media"
+    description: "Photography, video, and documentation equipment"
+    aliases: ["media", "documentation", "photo", "video", "mídia", "midia"]
+
+    CAM:
+      label: "Cameras"
+      aliases: ["camera", "câmera", "camera"]
+
+      MIR:
+        label: "Mirrorless Cameras"
+        aliases: ["mirrorless"]
+
+      FIL:
+        label: "Film Cameras"
+        aliases: ["film", "analog", "analógica", "analogica"]
+
+    LGT:
+      label: "Lighting"
+      aliases: ["light", "lighting", "iluminação", "iluminacao"]
+
+      LED:
+        label: "LED Lights"
+        aliases: ["led", "led light"]
+
+      STR:
+        label: "Strobes & Flashes"
+        aliases: ["strobe", "flash"]
+
+    AUD:
+      label: "Audio Equipment"
+      aliases: ["audio", "sound", "áudio", "audio"]
+
+      MIC:
+        label: "Microphones"
+        aliases: ["microphone", "mic", "microfone"]
