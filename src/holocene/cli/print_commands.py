@@ -314,7 +314,7 @@ def print_summary(font_size: int, font: str, max_height: int):
                   f"Inventory: {stats['inventory_items']}[/dim]")
 
     # Build prompt for DeepSeek
-    current_date = datetime.now().strftime("%B %d, %Y")
+    current_date = datetime.now().strftime("%Y-%m-%d")
 
     prompt = f"""You are creating a snapshot summary for a thermal receipt printer.
 
