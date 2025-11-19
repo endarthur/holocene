@@ -866,7 +866,7 @@ def enrich_proxy(limit: int, delay: int):
         db.close()
         return
 
-    # Ensure cached_html_path column exists
+    # Ensure columns exist
     cursor = db.conn.cursor()
     try:
         cursor.execute("ALTER TABLE mercadolivre_favorites ADD COLUMN cached_html_path TEXT")
@@ -874,11 +874,19 @@ def enrich_proxy(limit: int, delay: int):
     except Exception:
         pass  # Column already exists
 
-    # Get unenriched favorites
+    try:
+        cursor.execute("ALTER TABLE mercadolivre_favorites ADD COLUMN brightdata_blocked BOOLEAN DEFAULT 0")
+        db.conn.commit()
+    except Exception:
+        pass  # Column already exists
+
+    # Get unenriched favorites (excluding Bright Data blocked items)
     query = """
         SELECT item_id, title, url
         FROM mercadolivre_favorites
-        WHERE enriched_at IS NULL AND url IS NOT NULL
+        WHERE enriched_at IS NULL
+          AND url IS NOT NULL
+          AND (brightdata_blocked IS NULL OR brightdata_blocked = 0)
         ORDER BY first_synced DESC
     """
 
@@ -1026,7 +1034,18 @@ def enrich_proxy(limit: int, delay: int):
             # Track robots.txt errors for reporting
             if "robots.txt" in error_str:
                 robots_txt_errors += 1
-                console.print(f"[dim]  (Bright Data robots.txt restriction - contact support to whitelist ML)[/dim]")
+                console.print(f"[dim]  (Bright Data blocked - won't retry)[/dim]")
+
+                # Mark as Bright Data blocked so we don't retry
+                cursor.execute(
+                    """
+                    UPDATE mercadolivre_favorites
+                    SET brightdata_blocked = 1
+                    WHERE item_id = ?
+                    """,
+                    (fav['item_id'],)
+                )
+                db.conn.commit()
             else:
                 other_errors += 1
 
@@ -1037,9 +1056,10 @@ def enrich_proxy(limit: int, delay: int):
     if robots_txt_errors > 0 or other_errors > 0:
         console.print(f"\n[yellow]Errors encountered:[/yellow]")
         if robots_txt_errors > 0:
-            console.print(f"  • {robots_txt_errors} robots.txt restrictions (Bright Data policy)")
-            console.print(f"    [dim]→ Contact Bright Data support to whitelist mercadolivre.com.br[/dim]")
+            console.print(f"  • {robots_txt_errors} robots.txt restrictions (marked as blocked, won't retry)")
+            console.print(f"    [dim]→ These items will be skipped in future runs[/dim]")
+            console.print(f"    [dim]→ Contact Bright Data support if you need them whitelisted[/dim]")
         if other_errors > 0:
-            console.print(f"  • {other_errors} other errors (network, parsing, etc.)")
+            console.print(f"  • {other_errors} other errors (will retry next time)")
 
     db.close()
