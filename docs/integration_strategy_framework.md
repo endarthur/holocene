@@ -19,6 +19,31 @@ Before making integration decisions, align with project philosophy:
 
 ---
 
+## Available Infrastructure
+
+**Home Server:**
+- **Hardware:** Beelink U59 (Intel N5095 11th gen, 16GB RAM)
+- **OS:** Proxmox VE (virtualization platform)
+- **Current Services:** Home Assistant
+- **Capabilities:** Can run Docker containers, LXC containers, or full VMs
+- **Uptime:** 24/7 (home server)
+- **Network:** Local network access
+
+**Development Machine:**
+- **Hardware:** Framework 13 (i7, 40GB RAM)
+- **Use:** Primary development workstation
+- **Capabilities:** Can run local services when docked
+- **Uptime:** Work hours only
+
+**Mobile Devices:**
+- **Phone:** Samsung S24+ (high-end Android)
+- **Tablets:** 2x Android tablets (specs TBD)
+- **Capabilities:** Could run Termux, dedicated apps, or be repurposed
+
+**Key Insight:** Having Proxmox server means self-hosting is **much more viable** than typical setup. Infrastructure already exists, paid, and maintained.
+
+---
+
 ## Decision Matrix
 
 ### When to Use PAID Services
@@ -135,11 +160,12 @@ Before making integration decisions, align with project philosophy:
    - Can add integrations
    - Example: Calibre library management
 
-6. **You Have Infrastructure**
-   - Already running a server
-   - Have backup/monitoring setup
-   - Comfortable with Docker/ops
-   - Example: If you already have a home server
+6. **You Have Infrastructure** ✅ **WE HAVE THIS!**
+   - Already running Proxmox server
+   - Home Assistant shows Docker/ops comfort
+   - Backups presumably configured
+   - 16GB RAM can handle multiple services
+   - Example: Wallabag, Linkding, monitoring tools
 
 **⚠️ Self-Host Warning Signs:**
 - Requires constant security patches
@@ -148,14 +174,24 @@ Before making integration decisions, align with project philosophy:
 - Poorly documented
 - Inactive development (no updates in 1+ years)
 
+**💡 Our Proxmox Advantage:**
+- **Zero additional infrastructure cost** - Server already running 24/7
+- **Easy deployment** - LXC containers or Docker via Portainer
+- **Resource headroom** - 16GB RAM, quad-core CPU plenty for services
+- **Home Assistant integration** - Can trigger Holocene from HA automations
+- **Local network access** - Fast, no internet latency
+- **Full control** - Can snapshot VMs, rollback if needed
+
 **Real Examples from Holocene:**
-- 🤔 **Wallabag** - Good self-host candidate (Docker, mature, active)
-- ❌ **LLM Inference** - Bad candidate (expensive GPU, maintenance)
-- 🤔 **Calibre Content Server** - Already integrated, running on demand
+- ✅ **Wallabag** - STRONG self-host candidate (Docker, mature, have infrastructure)
+- ❌ **LLM Inference** - Still bad (N5095 has no GPU, would be slow)
+- ✅ **Calibre Content Server** - Already integrated, could run 24/7 on Proxmox
+- ✅ **Monitoring/logging** - Could add Grafana, Prometheus on Proxmox
+- ✅ **Backup services** - Could run automated backup jobs
 
 ---
 
-## Decision Tree
+## Decision Tree (Updated for Proxmox Setup)
 
 ```
 ┌─────────────────────────────────┐
@@ -164,7 +200,7 @@ Before making integration decisions, align with project philosophy:
                │
                ▼
        ┌───────────────┐
-       │ Is data        │──Yes──▶ Prefer: Build or Self-Host
+       │ Is data        │──Yes──▶ Prefer: Build or Self-Host on Proxmox
        │ sensitive?     │
        └───────┬────────┘
                │ No
@@ -187,8 +223,8 @@ Before making integration decisions, align with project philosophy:
                ▼                  │
        ┌───────────────┐         │
        │ Good self-     │◀────────┘
-       │ hosted exists? │──Yes──▶ Self-Host (if have infra)
-       └───────┬────────┘
+       │ hosted exists? │──Yes──▶ Self-Host on Proxmox ✅
+       └───────┬────────┘         (We have infrastructure!)
                │ No
                ▼
        ┌───────────────┐
@@ -196,6 +232,136 @@ Before making integration decisions, align with project philosophy:
        │ or skip feature│
        └────────────────┘
 ```
+
+---
+
+## Deployment Targets: Where to Run What
+
+### 🏠 Proxmox Server (Beelink U59 - Primary Self-Hosting)
+
+**Best For:**
+- 24/7 services (Wallabag, monitoring, backups)
+- Database servers (PostgreSQL, Redis)
+- Web services accessible from phone/tablet
+- Home Assistant automations
+- Background jobs (scheduled tasks, scrapers)
+
+**Resource Allocation:**
+- **Light Services** (< 512MB RAM): LXC containers (faster, lighter)
+- **Medium Services** (512MB-2GB): Docker containers
+- **Heavy Services** (2GB+): Full VMs (if needed)
+
+**Examples for Holocene:**
+- ✅ Wallabag (read-it-later) - ~256MB RAM Docker container
+- ✅ Calibre Content Server - ~128MB RAM, on-demand
+- ✅ PostgreSQL (if we migrate from SQLite) - ~256-512MB
+- ✅ Backup automation - Cron jobs in LXC container
+- ✅ Web API endpoint for mobile quick-saves
+- ⚠️ LLM inference - NO (no GPU, would be slow)
+
+**Deployment Pattern:**
+```bash
+# Proxmox → LXC container → Docker Compose
+docker-compose up -d wallabag
+docker-compose up -d calibre-web
+```
+
+---
+
+### 💻 Framework 13 (i7, 40GB RAM - Development Machine)
+
+**Best For:**
+- Main Holocene CLI (`holo` commands)
+- Active development work
+- LLM-heavy operations (DeepSeek via NanoGPT)
+- Large data processing (batch enrichment)
+- Testing before deploying to Proxmox
+
+**Resource Allocation:**
+- Can spare 10-20GB RAM for local services
+- SSD for fast database operations
+- Full development environment
+
+**Examples for Holocene:**
+- ✅ Primary `holo` CLI usage
+- ✅ `holo books enrich --batch` (LLM calls)
+- ✅ `holo mercadolivre enrich-proxy` (Bright Data)
+- ✅ Local SQLite database (fast SSD access)
+- ✅ Development testing of new features
+- ⚠️ 24/7 services - NO (laptop sleeps/travels)
+
+---
+
+### 📱 Samsung S24+ (Mobile Quick Access)
+
+**Best For:**
+- Quick capture (Telegram bot, shortcuts)
+- Mobile-first interfaces
+- On-the-go access to Holocene data
+- Field work data collection
+
+**Capabilities:**
+- Termux for CLI access
+- Tasker for automation
+- Telegram for quick saves
+- SSH to Proxmox server
+
+**Examples for Holocene:**
+- ✅ Telegram bot → save links/notes
+- ✅ SSH to Proxmox, run `holo` commands
+- ✅ Tasker automation (share → Holocene)
+- ✅ Access Calibre web interface (if on Proxmox)
+- ⚠️ Running `holo` locally - Possible via Termux, but slow
+
+---
+
+### 📋 Android Tablets (Repurpose Options)
+
+**Option 1: Dedicated Dashboard**
+- Home Assistant dashboard
+- Holocene stats/visualizations (if we build web UI)
+- Research dashboard (current papers, todos)
+- Wall-mounted information display
+
+**Option 2: Field Device**
+- Rugged case, bring to field sites
+- Offline data collection
+- Geology field notes
+- Photo documentation with metadata
+
+**Option 3: Development Test Device**
+- Test Holocene mobile interfaces
+- Browser extension testing
+- Termux development environment
+
+**Decision:** Get tablet specs first, then decide best use
+
+---
+
+## Updated Cost Guidelines (With Proxmox)
+
+### Self-Hosting Costs (Already Paid!)
+- **Proxmox Server Electricity:** ~$5-10/mo (already running for HA)
+- **Backup Storage:** Minimal (local drives or cloud backup)
+- **Domain/SSL (if exposing):** $10-20/year (optional)
+
+**Conclusion:** Marginal cost of adding services to Proxmox is **nearly zero**. This tips the scales heavily toward self-hosting vs paid services.
+
+### Revised Monthly Budget
+- **Paid Services:** < $50/mo total
+- **Self-Hosting (Proxmox):** $0/mo additional (electricity already paid)
+- **Development Time:** Willing to invest if reusable
+
+### Updated ROI Calculation
+
+**Before (No Server):**
+- Self-host = Need to rent VPS ($5-10/mo) + setup time
+- Paid service at $9/mo might be cheaper
+
+**After (With Proxmox):**
+- Self-host = Zero additional cost + setup time
+- Paid service at $9/mo = $108/year for something we could host free
+- **Break-even:** If setup takes < ~10 hours, self-hosting wins
 
 ---
 
@@ -316,11 +482,11 @@ Before making integration decisions, align with project philosophy:
 
 ## Case Studies for Architecture Review
 
-### Case Study 1: Read-It-Later (Current Decision)
+### Case Study 1: Read-It-Later (UPDATED with Proxmox)
 
 **Options:**
 1. Pay for hosted Wallabag (€9/year)
-2. Self-host Wallabag (Docker)
+2. Self-host Wallabag on Proxmox (Docker)
 3. Build Telegram bot integration
 4. Use existing `holo links` + browser bookmarklet
 
@@ -329,11 +495,17 @@ Before making integration decisions, align with project philosophy:
 - Complexity: Moderate (text extraction, mobile apps)
 - Existing: Have 1,145 links in `holo links` already
 - Usage: Unknown - do we need offline reading?
+- **Infrastructure: Have Proxmox with 16GB RAM** ✅
 
-**Recommendation:**
+**Updated Recommendation:**
 - **Phase 1:** Build Telegram bot (2-3 hours) - Test usage patterns
-- **Phase 2:** Evaluate after 1 month - Self-host Wallabag if needed
-- Rationale: Start simple, add complexity only if justified
+- **Phase 2:** Self-host Wallabag on Proxmox (Docker, 1-2 hours setup)
+  - Zero ongoing cost vs €9/year hosted
+  - Full control over data
+  - Can integrate with Home Assistant
+  - Mobile apps work with local server (via Tailscale/WireGuard)
+- **Phase 3:** Sync Wallabag → `holo links` periodically for research integration
+- Rationale: With Proxmox, self-hosting is cheaper AND better (control, privacy)
 
 ---
 
@@ -399,26 +571,93 @@ Before making integration decisions, align with project philosophy:
 
 ---
 
+## How Proxmox Changes Our Strategy
+
+### Before (No Home Server)
+```
+Self-Hosting = Need VPS ($5-10/mo) + maintenance
+    ↓
+Paid services often cheaper for simple needs
+    ↓
+Build only when truly custom or privacy-critical
+```
+
+### After (With Proxmox Server)
+```
+Self-Hosting = Zero marginal cost + one-time setup
+    ↓
+Self-hosting now preferred for most services
+    ↓
+Paid services only when significantly better or time-critical
+```
+
+### Strategic Shift
+
+**Services to Reconsider Self-Hosting:**
+1. ✅ **Wallabag** - Was maybe €9/year, now FREE on Proxmox
+2. ✅ **Calibre Web** - Can run 24/7 for family access
+3. ✅ **PostgreSQL** - If we migrate from SQLite, run on Proxmox
+4. ✅ **Monitoring** - Grafana/Prometheus for Holocene metrics
+5. ✅ **Backup automation** - Scheduled DB backups to cloud
+6. ✅ **Web API** - REST API for mobile quick-saves
+
+**Services Still Better Paid:**
+1. ✅ **NanoGPT** - GPU inference not feasible on N5095
+2. ✅ **Bright Data** - Anti-bot expertise we don't have
+3. ✅ **GitHub** - Git hosting is a pain, free tier is generous
+4. ⚠️ **Email/SMS** - If needed, complexity too high
+
+### Home Assistant Synergy
+
+**Automation Opportunities:**
+- HA automation → triggers `holo` commands on Proxmox
+- Daily backups scheduled via HA
+- Telegram bot hosted on Proxmox, controlled via HA
+- Presence detection → pause background jobs when away
+- Morning routine → print thermal summary of today's tasks
+
+**Example:**
+```yaml
+# Home Assistant automation
+- alias: "Morning Holocene Summary"
+  trigger:
+    - platform: time
+      at: "07:00:00"
+  action:
+    - service: shell_command.holo_print_summary
+      # SSH to Proxmox, run: holo print summary
+```
+
+---
+
 ## Action Items for Architecture Review
 
 1. **Review Current Integrations**
    - Which paid services are we using? Cost? ROI?
-   - Which self-built features could use paid alternatives?
-   - Which could be self-hosted for better control?
+   - Which self-built features could be Proxmox-hosted?
+   - Which should stay on Framework 13 vs move to Proxmox?
 
 2. **Establish Budget**
-   - Max monthly spend for paid services
-   - VPS budget for self-hosting
-   - Time budget for building features
+   - Max monthly spend for paid services: < $50/mo
+   - Self-hosting budget: $0/mo (Proxmox already running)
+   - Time budget for building features: ~5-10 hrs/mo
 
 3. **Create Integration Checklist**
    - Template for evaluating new integrations
    - Force decision tree evaluation
    - Document rationale for future reference
+   - Add "Can this run on Proxmox?" question
 
-4. **Plan for Changes**
-   - When to migrate paid → self-hosted?
-   - When to migrate self-built → paid?
+4. **Plan Proxmox Deployments**
+   - Which services to deploy first? (Wallabag, Calibre Web)
+   - LXC vs Docker for each service?
+   - Backup strategy for Proxmox containers
+   - Network access strategy (local only vs VPN vs public)
+
+5. **Plan for Changes**
+   - When to migrate paid → Proxmox-hosted?
+   - When to migrate Framework 13 → Proxmox (24/7 services)?
+   - When to keep paid despite Proxmox (NanoGPT, Bright Data)?
    - Exit strategies for vendor lock-in
 
 ---

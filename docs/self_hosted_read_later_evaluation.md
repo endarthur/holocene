@@ -237,50 +237,68 @@ Wallabag (€9/year hosted) ← Save articles
 
 ---
 
-## Recommendation
+## Recommendation (UPDATED with Proxmox Infrastructure)
+
+### Infrastructure Context
+**We have:** Beelink U59 (Intel N5095, 16GB RAM) running Proxmox + Home Assistant
+**This changes everything:** Self-hosting now has zero marginal cost
 
 ### For Holocene Philosophy (Privacy-First, Local-First):
 
 **Phase 1 (Quick Win):** Telegram Bot Integration
 - Build simple bot that saves to `holo links`
 - Add optional IA archiving trigger
-- Leverage existing infrastructure
+- Can run bot on Proxmox 24/7
 - **Effort:** 2-3 hours implementation
+- **Cost:** $0/mo (runs on Proxmox)
 
-**Phase 2 (If Needed):** Add article text extraction
-- Either via Wallabag API (without self-hosting)
-- Or add Mercury/Readability.js to Holocene directly
-- Store cleaned text in database
-- **Effort:** 4-6 hours
+**Phase 2 (Recommended):** Self-Host Wallabag on Proxmox
+- Docker container (~256MB RAM)
+- Full read-it-later experience
+- Mobile apps + browser extensions
+- Article text extraction built-in
+- Offline reading capability
+- **Effort:** 1-2 hours setup + Docker Compose
+- **Cost:** $0/mo vs €9/year hosted
+- **Break-even:** Setup pays for itself in 2 months
 
-**Phase 3 (Long-term):** Consider self-hosting Wallabag if...
-- We need offline reading
-- We want mobile apps
-- Article extraction becomes critical
-- We're comfortable maintaining another service
+**Phase 3 (Integration):** Sync Wallabag → Holocene
+- Periodic sync via Wallabag API
+- Import saved articles to `holo links`
+- Use for research integration
+- Best of both worlds
+- **Effort:** 3-4 hours
+- **Benefit:** Full-featured reading + Holocene research tools
 
 ---
 
-## Decision Framework
+## Decision Framework (Updated for Proxmox)
 
 ### Use Telegram Bot When:
 - ✅ Quick mobile saves are primary need
-- ✅ Want minimal maintenance overhead
+- ✅ Want minimal setup time (2-3 hours)
 - ✅ Already using Telegram regularly
-- ✅ Don't need offline reading immediately
+- ✅ Testing usage patterns before committing to infrastructure
+- ⚠️ Can run on Proxmox 24/7 for $0/mo
 
-### Self-Host Wallabag When:
+### Self-Host Wallabag When: ⭐ **RECOMMENDED (We Have Proxmox!)**
+- ✅ **Zero marginal cost** (Proxmox already running)
 - ✅ Need full read-it-later experience
 - ✅ Want mobile apps + browser extensions
-- ✅ Comfortable maintaining Docker services
+- ✅ Already comfortable with Docker (have Home Assistant)
 - ✅ Need article text extraction
 - ✅ Want offline reading
+- ✅ Full data sovereignty
+- ✅ Can integrate with Home Assistant
+- **Break-even:** Setup time < 10 hours = cheaper than €9/year forever
 
 ### Use Hosted Wallabag When:
-- ✅ Want zero maintenance
-- ✅ €9/year is acceptable
-- ✅ Don't need full data sovereignty
-- ✅ Want professional service reliability
+- ❌ Don't have Proxmox (but we do!)
+- ❌ €9/year acceptable (but free is better)
+- ⚠️ Want zero setup time (but 1-2 hours is reasonable)
+- ⚠️ Need professional uptime (but Proxmox is reliable)
+
+**Verdict:** With Proxmox, self-hosting Wallabag is the clear winner.
 
 ---
 
