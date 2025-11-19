@@ -744,6 +744,14 @@ We've been in deep implementation mode (ML integration, proxy setup, caching, in
    - Migration strategy for config changes
    - Validation and error reporting
 
+8. **LLM Personality & Voice Design**
+   - System prompt strategy (default tone/personality)
+   - Context-specific voices (research vs thermal receipts vs enrichment)
+   - Tone guidelines (direct/grounded vs creative vs formal)
+   - Consistency across commands
+   - User preference configuration
+   - OS-tan for Holocene? (character design if going full weeb)
+
 **Deliverables:**
 - 📄 **`design/architecture/SYSTEM_OVERVIEW.md`** - High-level architecture diagram + explanations
 - 📄 **`design/architecture/data_flows.md`** - Data flow diagrams for major operations
@@ -760,6 +768,8 @@ We've been in deep implementation mode (ML integration, proxy setup, caching, in
 - Do we need a proper ETL pipeline abstraction?
 - How do we handle long-running enrichment operations?
 - Should proxy routing be configurable per-command?
+- What's the right balance between LLM creativity and directness?
+- Should we have different LLM personalities for different command contexts?
 
 **Estimated Time:** 1-2 full sessions (4-6 hours)
 **Outcome:** Clear architectural vision before Phase 4.3+
