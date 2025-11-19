@@ -708,6 +708,22 @@ We've been in deep implementation mode (ML integration, proxy setup, caching, in
    - Cleanup/rotation policies for cached data
    - Backup and migration strategy
 
+2a. **Database Architecture** (Expanded Database Review)
+   - Current schema analysis (books, papers, links, ML favorites, inventory)
+   - SQLite vs PostgreSQL decision (when to migrate? stay on SQLite?)
+   - Table relationships and foreign keys (currently minimal)
+   - Indexing strategy (performance optimization)
+   - Schema migration strategy (Alembic? Custom? Ad-hoc ALTER TABLE?)
+   - Normalization vs denormalization trade-offs
+   - Column naming conventions (e.g., enriched_at vs enrichment_date)
+   - Data integrity constraints (NOT NULL, UNIQUE, CHECK constraints)
+   - Full-text search strategy (FTS5 for SQLite? PostgreSQL tsquery?)
+   - JSON storage patterns (specifications column as text vs proper JSON)
+   - Timestamps: CURRENT_TIMESTAMP vs ISO strings vs Unix epochs
+   - Soft deletes vs hard deletes
+   - Audit trail / change history (do we need it?)
+   - Query performance monitoring
+
 3. **Operating Modes Reconciliation**
    - On-demand mode (current: `holo <command>`)
    - Autonomous daemon mode (planned: background processing)
@@ -762,6 +778,7 @@ We've been in deep implementation mode (ML integration, proxy setup, caching, in
 - 📄 **`design/architecture/operating_modes.md`** - Daemon vs CLI mode reconciliation
 - 📄 **`design/architecture/integration_guidelines.md`** - How to add new integrations
 - 📄 **`design/architecture/storage_strategy.md`** - Database, cache, files organization
+- 📄 **`design/architecture/database_schema.md`** - Current schema, migration strategy, SQLite vs PostgreSQL decision
 - 📄 **`design/architecture/task_queue.md`** - Background job design (if needed)
 - 📄 **`design/architecture/llm_personality.md`** - LLM voice/tone guidelines
 - 🔄 **Updated ROADMAP.md** - Reprioritized based on architectural decisions
@@ -780,6 +797,18 @@ We've been in deep implementation mode (ML integration, proxy setup, caching, in
 - Should proxy routing be configurable per-command?
 - What's the right balance between LLM creativity and directness?
 - Should we have different LLM personalities for different command contexts?
+
+**Database-Specific Questions:**
+- SQLite vs PostgreSQL: When to migrate? Stay on SQLite?
+- Schema migrations: Alembic? Custom? Continue ad-hoc ALTER TABLE?
+- Indexing: What queries are slow? What indexes do we need?
+- Foreign keys: Should we enforce relationships? (books → papers via citations?)
+- JSON columns: Use SQLite JSON1 extension? Store as TEXT? Migrate to JSONB (PostgreSQL)?
+- Full-text search: Implement FTS5 for papers/books/links? Or external search engine?
+- Data integrity: Add NOT NULL, UNIQUE, CHECK constraints retroactively?
+- Column naming: Standardize conventions (enriched_at vs enrichment_timestamp)?
+- Soft deletes: Add deleted_at columns? Or hard deletes OK?
+- Audit trail: Track changes to enrichment data? Or unnecessary for personal use?
 
 **Estimated Time:** 1-2 full sessions (4-6 hours)
 **Outcome:** Clear architectural vision before Phase 4.3+
