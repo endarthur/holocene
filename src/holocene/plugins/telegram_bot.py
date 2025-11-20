@@ -507,7 +507,7 @@ You'll receive updates when:
             # Check Open Access
             oa_info = {}
             try:
-                oa_data = unpaywall.get_by_doi(doi)
+                oa_data = unpaywall.get_oa_status(doi)
                 if oa_data:
                     oa_info = {
                         'is_oa': oa_data.get('is_oa', False),
@@ -523,7 +523,7 @@ You'll receive updates when:
                 title=paper['title'],
                 authors=paper.get('authors', []),
                 doi=doi,
-                year=paper.get('year'),
+                publication_date=str(paper.get('year')) if paper.get('year') else None,
                 journal=paper.get('journal'),
                 url=paper.get('url'),
                 is_open_access=oa_info.get('is_oa', False),
