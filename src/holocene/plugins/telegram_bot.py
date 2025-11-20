@@ -347,6 +347,7 @@ You'll receive updates when:
         plugins_msg = "🔌 *Active Plugins*\n\n"
 
         # Get plugin status from registry
+        # (Direct registry access is more reliable than HTTP)
         try:
             if hasattr(self.core, 'registry') and self.core.registry:
                 for name, plugin in self.core.registry.plugins.items():
@@ -357,10 +358,24 @@ You'll receive updates when:
                     if plugin.metadata.get('description'):
                         desc = plugin.metadata['description'][:60]
                         plugins_msg += f"  _{desc}_\n"
+
+                # Add debug info about API accessibility
+                plugins_msg += f"\n_Registry: Direct access_"
+
+                # Test API accessibility for diagnostics
+                try:
+                    import requests
+                    test_response = requests.get('http://localhost:5555/health', timeout=1)
+                    plugins_msg += f"\n_API: ✅ {test_response.status_code}_"
+                except ImportError:
+                    plugins_msg += f"\n_API: ⚠️ requests not installed_"
+                except Exception as api_err:
+                    plugins_msg += f"\n_API: ❌ {type(api_err).__name__}_"
+                    self.logger.warning(f"REST API test failed: {api_err}")
             else:
                 plugins_msg += "⚠️ Registry not available"
         except Exception as e:
-            self.logger.error(f"Failed to get plugins: {e}")
+            self.logger.error(f"Failed to get plugins: {e}", exc_info=True)
             plugins_msg += f"⚠️ Error: {str(e)[:50]}"
 
         await update.message.reply_text(plugins_msg, parse_mode='Markdown')
