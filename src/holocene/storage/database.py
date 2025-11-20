@@ -149,7 +149,9 @@ class Database:
 
     def _init_db(self):
         """Initialize database schema."""
-        self.conn = sqlite3.connect(str(self.db_path))
+        # check_same_thread=False allows Flask API threads to use the connection
+        # This is safe because we use WAL mode and mostly do read operations in API
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Access columns by name
 
         # CRITICAL: Enable foreign keys on EVERY connection

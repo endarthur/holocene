@@ -4,7 +4,15 @@
       "Bash(git commit:*)",
       "Bash(git mv:*)",
       "Bash(git log:*)",
-      "Bash(git grep:*)"
+      "Bash(git grep:*)",
+      "Bash(bash -n:*)",
+      "Bash(shellcheck:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)",
+      "Bash(wsl shellcheck scripts/setup-holocene-lxc.sh)",
+      "Bash(wsl shellcheck:*)",
+      "Bash(git push:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

@@ -257,6 +257,7 @@ def test_holod_api_endpoints():
         # List books
         response = requests.get(f"{base_url}/books")
         books = response.json()
+        print(f"   Response: {books}")  # Debug
         print(f"   ✓ GET /books: {books['count']} books")
 
         print()

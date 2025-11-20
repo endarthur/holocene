@@ -270,25 +270,19 @@ class APIServer:
     # Book endpoints
 
     def _books(self):
-        """GET /books - List books, POST /books - Add book.
-
-        Note: Direct database access from API threads may fail due to SQLite threading constraints.
-        Alternative: Use channels to publish events that plugins can handle in the main thread.
-        """
+        """GET /books - List books, POST /books - Add book."""
         try:
             if request.method == "GET":
                 # List books
-                # NOTE: May fail with "SQLite objects created in a thread can only be used in that same thread"
-                # This is a known limitation. Use plugin events for database operations instead.
                 cursor = self.core.db.conn.cursor()
 
                 limit = request.args.get('limit', 100, type=int)
                 offset = request.args.get('offset', 0, type=int)
 
                 cursor.execute("""
-                    SELECT id, title, author, year, isbn, source, added_at
+                    SELECT id, title, author, publication_year, isbn, source, date_added
                     FROM books
-                    ORDER BY added_at DESC
+                    ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
                 """, (limit, offset))
 
@@ -363,9 +357,9 @@ class APIServer:
                 offset = request.args.get('offset', 0, type=int)
 
                 cursor.execute("""
-                    SELECT id, url, title, source, status, added_at, last_checked
+                    SELECT id, url, title, source, archived, first_seen, last_checked, trust_tier
                     FROM links
-                    ORDER BY added_at DESC
+                    ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
                 """, (limit, offset))
 
