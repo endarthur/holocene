@@ -422,9 +422,44 @@ pytest --cov=holocene tests/
 2. Make changes in `src/holocene/`
 3. Add tests in `tests/`
 4. Test locally: `pytest`
-5. Format code: `black src/ tests/`
-6. Lint: `ruff check src/ tests/`
-7. Commit with descriptive message
+5. **Check dependencies**: `python scripts/check_dependencies.py`
+6. Format code: `black src/ tests/`
+7. Lint: `ruff check src/ tests/`
+8. Commit with descriptive message
+
+### Dependency Management
+
+**IMPORTANT:** Before committing changes that add new imports, always run:
+
+```bash
+python scripts/check_dependencies.py
+```
+
+This script scans the entire codebase for imports and validates them against `pyproject.toml`. It will catch missing dependencies before they break production deployments.
+
+**What it does:**
+- AST-based parsing of all Python files
+- Filters out stdlib and internal holocene modules
+- Maps import names to package names (e.g., `bs4` → `beautifulsoup4`)
+- Reports missing dependencies with file locations
+
+**Example output:**
+```
+❌ Missing dependencies found:
+  📦 bibtexparser (imported as 'bibtexparser')
+     - src/holocene/research/bibtex_importer.py
+```
+
+**Adding dependencies:** Place them in the appropriate optional dependency group in `pyproject.toml`:
+- `daemon` - holod REST API, Flask
+- `pdf` - PDF processing, BibTeX
+- `mercadolivre` - MercadoLivre scraping
+- `telegram` - Telegram bot
+- `paperang` - Thermal printer
+- `research` - ChromaDB embeddings
+- `integrations` - External services (Apify, etc.)
+
+Add to `[all]` group if it should be included in full server installs.
 
 ## Known Issues & Gotchas
 
