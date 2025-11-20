@@ -170,13 +170,41 @@ class TelegramBotPlugin(Plugin):
             except:
                 pass
 
+    def _is_authorized(self, chat_id: int) -> bool:
+        """Check if user is authorized to use bot.
+
+        Args:
+            chat_id: Telegram chat ID
+
+        Returns:
+            True if authorized, False otherwise
+        """
+        # If no chat_id configured yet, first user becomes authorized
+        if not self.chat_id:
+            return True
+
+        # Otherwise, only configured chat_id is authorized
+        return chat_id == self.chat_id
+
     async def _cmd_start(self, update, context):
         """Handle /start command."""
         self.commands_received += 1
 
-        # Save chat ID for notifications
+        chat_id = update.effective_chat.id
+
+        # Check authorization
+        if not self._is_authorized(chat_id):
+            await update.message.reply_text(
+                "❌ *Unauthorized*\n\n"
+                "This bot is private and only responds to its owner.",
+                parse_mode='Markdown'
+            )
+            self.logger.warning(f"Unauthorized access attempt from chat_id: {chat_id}")
+            return
+
+        # Save chat ID for notifications (first time only)
         if not self.chat_id:
-            self.chat_id = update.effective_chat.id
+            self.chat_id = chat_id
             self.logger.info(f"Chat ID saved: {self.chat_id}")
 
         welcome_msg = """🌍 *Holocene Bot*
@@ -201,6 +229,11 @@ Available commands:
         """Handle /help command."""
         self.commands_received += 1
 
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
         help_msg = """📚 *Holocene Commands*
 
 /start - Initialize bot
@@ -221,6 +254,11 @@ You'll receive updates when:
     async def _cmd_stats(self, update, context):
         """Handle /stats command."""
         self.commands_received += 1
+
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
 
         # Gather stats from plugins
         stats_msg = f"""📊 *Holocene Stats*
@@ -259,6 +297,11 @@ You'll receive updates when:
         """Handle /plugins command."""
         self.commands_received += 1
 
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
         plugins_msg = "🔌 *Active Plugins*\n\n"
 
         # This is a bit tricky - we need to access the registry
@@ -274,6 +317,11 @@ You'll receive updates when:
     async def _cmd_status(self, update, context):
         """Handle /status command."""
         self.commands_received += 1
+
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
 
         status_msg = f"""⚡ *System Status*
 
