@@ -77,24 +77,28 @@ pct enter 100
 ssh root@holocene.local
 ```
 
-### Step 3: Configure Holocene
+### Step 3: Configure API Keys
 
 ```bash
-# Edit configuration
-nano ~/.config/holocene/config.yml
+# Switch to holocene user
+su - holocene
 
-# Add your NanoGPT API key
-llm:
-  api_key: "your-nanogpt-api-key"
+# Run interactive setup wizard
+cd holocene
+source venv/bin/activate
+holo config setup
 
-# Add Telegram bot token (optional)
-telegram:
-  bot_token: "your-telegram-bot-token"
-  chat_id: your-chat-id
-
-# Restart daemon
+# Restart daemon to apply changes
+exit  # Back to root
 systemctl restart holod
 ```
+
+The wizard will prompt for:
+- **NanoGPT API Key** (required) - Get at: https://nano-gpt.com
+- **GitHub Token** (optional)
+- **Internet Archive credentials** (optional)
+- **Apify API Key** (optional)
+- **MercadoLivre OAuth** (optional)
 
 ### Step 4: Verify Installation
 
@@ -210,9 +214,26 @@ sudo systemctl start holod
 
 ## Post-Deployment Configuration
 
-### API Keys
+### API Keys (Interactive Setup - Recommended)
 
-Edit `~/.config/holocene/config.yml`:
+```bash
+# As holocene user
+su - holocene
+cd holocene
+source venv/bin/activate
+holo config setup
+```
+
+This will walk you through configuring:
+- NanoGPT API key (required for LLM features)
+- GitHub token (optional for git integrations)
+- Internet Archive (optional for archiving)
+- Apify (optional for web scraping)
+- MercadoLivre (optional for ML integration)
+
+### API Keys (Manual Configuration)
+
+Alternatively, edit `~/.config/holocene/config.yml`:
 
 ```yaml
 llm:
@@ -687,13 +708,15 @@ Access Methods:
 
 After deployment:
 
-1. ✅ Configure API keys in config.yml
-2. ✅ Test API from wmut: `curl http://holocene-rei.local:5555/status`
-3. ✅ Set up Telegram bot for mobile (eunice)
-4. ✅ Configure Cloudflare Tunnel for external access
-5. ✅ Install Tailscale for secure remote access
-6. ✅ Set up automated backups
-7. ✅ Build balloc and dixie plugins!
+1. ✅ **Configure API keys**: `holo config setup` (recommended)
+2. ✅ **Restart daemon**: `systemctl restart holod`
+3. ✅ **Test API from wmut**: `curl http://holocene-rei.local:5555/status`
+4. ✅ **Verify plugins loaded**: `curl http://holocene-rei.local:5555/plugins`
+5. ✅ **Set up Telegram bot** for mobile notifications (eunice)
+6. ✅ **Configure Cloudflare Tunnel** for external access (optional)
+7. ✅ **Install Tailscale** for secure remote access (optional)
+8. ✅ **Set up automated backups** with Proxmox snapshots
+9. ✅ **Build custom plugins!** (balloc, dixie, etc.)
 
 ---
 
