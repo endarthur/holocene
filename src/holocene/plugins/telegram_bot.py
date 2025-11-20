@@ -355,12 +355,11 @@ You'll receive updates when:
                     version = metadata.get('version', '1.0.0')
                     enabled = plugin.enabled
                     status = "✅" if enabled else "⏸️"
-                    plugins_msg += f"• {name} {status} v{version}\n"
+                    plugins_msg += f"• `{name}` {status} v{version}\n"
                     if metadata.get('description'):
                         desc = metadata['description'][:60]
-                        # Escape markdown special chars in description
-                        desc = desc.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
-                        plugins_msg += f"  _{desc}_\n"
+                        # Don't use markdown formatting for description - just plain text
+                        plugins_msg += f"  {desc}\n"
 
                 # Add debug info about API accessibility
                 plugins_msg += f"\n`Registry: Direct access`"
