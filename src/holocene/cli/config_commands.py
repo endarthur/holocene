@@ -365,3 +365,166 @@ def locations():
         )
 
     console.print(table)
+
+
+@config.command()
+@click.option('--test', is_flag=True, help='Test existing keys without prompting')
+def setup(test: bool):
+    """Interactive setup wizard for API keys and credentials.
+
+    Checks which API keys are missing or not working, and prompts
+    for configuration. Use --test to just test existing keys.
+    """
+    cfg = load_config()
+    console.print(Panel.fit(
+        "[bold cyan]Holocene Configuration Setup[/bold cyan]\n"
+        "Let's configure your API keys and credentials",
+        border_style="cyan"
+    ))
+    console.print()
+
+    changes_made = False
+
+    # Check NanoGPT API Key
+    console.print("[bold]1. NanoGPT API Key[/bold]")
+    console.print("   Used for: LLM model routing (DeepSeek, Qwen, etc.)")
+
+    if cfg.llm.api_key:
+        console.print(f"   [green]✓ Currently set[/green]")
+        if not test:
+            if click.confirm("   Update NanoGPT API key?", default=False):
+                new_key = click.prompt("   Enter NanoGPT API key", hide_input=True)
+                cfg.llm.api_key = new_key
+                changes_made = True
+                console.print("   [green]✓ Updated[/green]")
+    else:
+        console.print(f"   [yellow]✗ Not set[/yellow]")
+        if not test:
+            if click.confirm("   Configure NanoGPT API key now?", default=True):
+                new_key = click.prompt("   Enter NanoGPT API key", hide_input=True)
+                cfg.llm.api_key = new_key
+                changes_made = True
+                console.print("   [green]✓ Set[/green]")
+            else:
+                console.print("   [yellow]Skipped - set NANOGPT_API_KEY environment variable[/yellow]")
+    console.print()
+
+    # GitHub Token
+    console.print("[bold]2. GitHub Token (optional)[/bold]")
+    console.print("   Used for: Git repository scanning and activity tracking")
+
+    if cfg.integrations.github_token:
+        console.print(f"   [green]✓ Currently set[/green]")
+        if not test:
+            if click.confirm("   Update GitHub token?", default=False):
+                new_token = click.prompt("   Enter GitHub token", hide_input=True)
+                cfg.integrations.github_token = new_token
+                cfg.integrations.github_enabled = True
+                changes_made = True
+                console.print("   [green]✓ Updated[/green]")
+    else:
+        console.print(f"   [dim]✗ Not set[/dim]")
+        if not test and click.confirm("   Configure GitHub token?", default=False):
+            new_token = click.prompt("   Enter GitHub token", hide_input=True)
+            cfg.integrations.github_token = new_token
+            cfg.integrations.github_enabled = True
+            changes_made = True
+            console.print("   [green]✓ Set[/green]")
+    console.print()
+
+    # Internet Archive
+    console.print("[bold]3. Internet Archive Keys (optional)[/bold]")
+    console.print("   Used for: Uploading to Internet Archive, accessing restricted items")
+
+    if cfg.integrations.ia_access_key and cfg.integrations.ia_secret_key:
+        console.print(f"   [green]✓ Currently set[/green]")
+        if not test and click.confirm("   Update IA keys?", default=False):
+            access_key = click.prompt("   Enter IA access key", hide_input=True)
+            secret_key = click.prompt("   Enter IA secret key", hide_input=True)
+            cfg.integrations.ia_access_key = access_key
+            cfg.integrations.ia_secret_key = secret_key
+            cfg.integrations.internet_archive_enabled = True
+            changes_made = True
+            console.print("   [green]✓ Updated[/green]")
+    else:
+        console.print(f"   [dim]✗ Not set[/dim]")
+        if not test and click.confirm("   Configure Internet Archive keys?", default=False):
+            console.print("   [dim]Get keys from: https://archive.org/account/s3.php[/dim]")
+            access_key = click.prompt("   Enter IA access key", hide_input=True)
+            secret_key = click.prompt("   Enter IA secret key", hide_input=True)
+            cfg.integrations.ia_access_key = access_key
+            cfg.integrations.ia_secret_key = secret_key
+            cfg.integrations.internet_archive_enabled = True
+            changes_made = True
+            console.print("   [green]✓ Set[/green]")
+    console.print()
+
+    # Apify
+    console.print("[bold]4. Apify API Key (optional)[/bold]")
+    console.print("   Used for: Web scraping (MercadoLivre, etc.)")
+
+    if cfg.integrations.apify_api_key:
+        console.print(f"   [green]✓ Currently set[/green]")
+        if not test and click.confirm("   Update Apify API key?", default=False):
+            new_key = click.prompt("   Enter Apify API key", hide_input=True)
+            cfg.integrations.apify_api_key = new_key
+            cfg.integrations.apify_enabled = True
+            changes_made = True
+            console.print("   [green]✓ Updated[/green]")
+    else:
+        console.print(f"   [dim]✗ Not set[/dim]")
+        if not test and click.confirm("   Configure Apify API key?", default=False):
+            console.print("   [dim]Get key from: https://console.apify.com/account/integrations[/dim]")
+            new_key = click.prompt("   Enter Apify API key", hide_input=True)
+            cfg.integrations.apify_api_key = new_key
+            cfg.integrations.apify_enabled = True
+            changes_made = True
+            console.print("   [green]✓ Set[/green]")
+    console.print()
+
+    # MercadoLivre
+    console.print("[bold]5. MercadoLivre OAuth (optional)[/bold]")
+    console.print("   Used for: Syncing MercadoLivre favorites")
+
+    if cfg.mercadolivre.client_id and cfg.mercadolivre.client_secret:
+        console.print(f"   [green]✓ Currently set[/green]")
+        if not test and click.confirm("   Update MercadoLivre credentials?", default=False):
+            client_id = click.prompt("   Enter client ID")
+            client_secret = click.prompt("   Enter client secret", hide_input=True)
+            cfg.mercadolivre.client_id = client_id
+            cfg.mercadolivre.client_secret = client_secret
+            cfg.mercadolivre.enabled = True
+            changes_made = True
+            console.print("   [green]✓ Updated[/green]")
+    else:
+        console.print(f"   [dim]✗ Not set[/dim]")
+        if not test and click.confirm("   Configure MercadoLivre OAuth?", default=False):
+            console.print("   [dim]Create app at: https://developers.mercadolivre.com.br/[/dim]")
+            client_id = click.prompt("   Enter client ID")
+            client_secret = click.prompt("   Enter client secret", hide_input=True)
+            cfg.mercadolivre.client_id = client_id
+            cfg.mercadolivre.client_secret = client_secret
+            cfg.mercadolivre.enabled = True
+            changes_made = True
+            console.print("   [green]✓ Set[/green]")
+    console.print()
+
+    # Save if changes were made
+    if changes_made:
+        save_config(cfg)
+        console.print(Panel.fit(
+            "[bold green]✓ Configuration saved[/bold green]\n"
+            f"Location: {get_config_path()}",
+            border_style="green"
+        ))
+    elif test:
+        console.print(Panel.fit(
+            "[bold cyan]Configuration Check Complete[/bold cyan]\n"
+            "Run without --test to update keys",
+            border_style="cyan"
+        ))
+    else:
+        console.print(Panel.fit(
+            "[bold yellow]No changes made[/bold yellow]",
+            border_style="yellow"
+        ))
