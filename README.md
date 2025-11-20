@@ -4,13 +4,22 @@
 
 Holocene is a privacy-focused activity tracking and AI assistant system designed to help you understand your behavior patterns without judgment.
 
-## Quick Deploy (Proxmox)
+## Quick Deploy (Proxmox) - Recommended
+
+Deploy Holocene to a Proxmox LXC container in one command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/endarthur/holocene/main/scripts/setup-holocene-lxc.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/endarthur/holocene/main/scripts/setup-holocene-lxc.sh)
 ```
 
-See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete instructions.
+This will:
+- Create an Ubuntu 22.04 LXC container
+- Install holod daemon with systemd service
+- Configure mDNS for `holocene-rei.local` access
+- Set up the REST API on port 5555
+- Enable automatic startup on boot
+
+See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete instructions and customization options.
 
 ## Status: Plugin Architecture Complete ✅
 
