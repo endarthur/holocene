@@ -4,6 +4,7 @@ import sqlite3
 import re
 import unicodedata
 import logging
+import threading
 from pathlib import Path
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
@@ -145,6 +146,7 @@ class Database:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.RLock()  # Reentrant lock for thread-safe operations
         self._init_db()
 
     def _init_db(self):
@@ -763,6 +765,21 @@ class Database:
         migrations.apply_migrations(self.conn)
 
         self.conn.commit()
+
+    def cursor(self):
+        """Get a thread-safe cursor.
+
+        This method provides proper synchronization for multi-threaded access
+        (e.g., from Flask API handlers).
+
+        Note: Cursor operations are NOT automatically locked. If you need
+        transaction safety, use execute() or a with statement.
+
+        Returns:
+            sqlite3.Cursor: Database cursor
+        """
+        with self._lock:
+            return self.conn.cursor()
 
     def _migrate_papers_doi_nullable(self, cursor):
         """Migrate papers table to make DOI nullable instead of NOT NULL."""

@@ -274,7 +274,7 @@ class APIServer:
         try:
             if request.method == "GET":
                 # List books
-                cursor = self.core.db.conn.cursor()
+                cursor = self.core.db.cursor()
 
                 limit = request.args.get('limit', 100, type=int)
                 offset = request.args.get('offset', 0, type=int)
@@ -330,7 +330,7 @@ class APIServer:
     def _get_book(self, book_id: int):
         """GET /books/<id> - Get book details."""
         try:
-            cursor = self.core.db.conn.cursor()
+            cursor = self.core.db.cursor()
             cursor.execute("SELECT * FROM books WHERE id = ?", (book_id,))
             row = cursor.fetchone()
 
@@ -351,7 +351,7 @@ class APIServer:
         try:
             if request.method == "GET":
                 # List links
-                cursor = self.core.db.conn.cursor()
+                cursor = self.core.db.cursor()
 
                 limit = request.args.get('limit', 100, type=int)
                 offset = request.args.get('offset', 0, type=int)
@@ -405,7 +405,7 @@ class APIServer:
     def _get_link(self, link_id: int):
         """GET /links/<id> - Get link details."""
         try:
-            cursor = self.core.db.conn.cursor()
+            cursor = self.core.db.cursor()
             cursor.execute("SELECT * FROM links WHERE id = ?", (link_id,))
             row = cursor.fetchone()
 
