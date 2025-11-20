@@ -19,6 +19,13 @@ This will:
 - Set up the REST API on port 5555
 - Enable automatic startup on boot
 
+**After deployment**, log into the container and configure API keys:
+```bash
+pct enter <CTID>        # Or SSH to holocene-rei.local
+su - holocene
+holo config setup       # Interactive API key setup
+```
+
 See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete instructions and customization options.
 
 ## Status: Plugin Architecture Complete ✅
@@ -118,6 +125,9 @@ holo init
 # Initialize Holocene (creates config and database)
 holo init
 
+# Configure API keys interactively (recommended)
+holo config setup
+
 # Log an activity manually
 holo log "working on GGR kriging validation" \
   --tags python,geostatistics \
@@ -135,7 +145,26 @@ holo show --week
 
 ## Configuration
 
-Edit `~/.config/holocene/config.yml` or set environment variables:
+### Interactive Setup (Recommended)
+
+Use the interactive setup wizard to configure API keys:
+
+```bash
+holo config setup              # Configure all missing API keys
+holo config setup --test       # Check status of existing keys
+holo config show               # Display current configuration
+```
+
+The wizard will prompt for:
+- **NanoGPT API Key** (required for LLM features) - Get at: https://nano-gpt.com
+- **GitHub Token** (optional for git integrations) - Get at: https://github.com/settings/tokens
+- **Internet Archive** (optional for archiving) - Get at: https://archive.org/account/s3.php
+- **Apify API Key** (optional for web scraping)
+- **MercadoLivre OAuth** (optional for ML integration)
+
+### Manual Configuration
+
+Alternatively, edit `~/.config/holocene/config.yml` or set environment variables:
 
 ```yaml
 privacy:
@@ -307,6 +336,12 @@ Core principles:
 ```bash
 # Initialization
 holo init                    # Create config and database
+
+# Configuration
+holo config setup            # Interactive API key setup wizard
+holo config setup --test     # Test existing keys without prompting
+holo config show             # Display current configuration
+holo config edit             # Open config file in editor
 
 # Logging
 holo log "description"       # Log activity
