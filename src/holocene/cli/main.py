@@ -2878,6 +2878,94 @@ def db_status():
     db.close()
 
 
+@cli.group()
+def plugins():
+    """Manage Holocene plugins."""
+    pass
+
+
+@plugins.command("list")
+def plugins_list():
+    """List all available plugins and their status."""
+    from ..core import HoloceneCore, PluginRegistry
+    from rich.table import Table
+
+    core = HoloceneCore()
+    registry = PluginRegistry(core, device="wmut")
+
+    console.print("\n[cyan]Discovering plugins...[/cyan]")
+    registry.discover_plugins()
+    registry.load_all()
+
+    plugins_list = registry.list_plugins()
+
+    if not plugins_list:
+        console.print("[yellow]No plugins found[/yellow]\n")
+        core.shutdown()
+        return
+
+    # Create table
+    table = Table(title="Holocene Plugins")
+    table.add_column("Name", style="cyan")
+    table.add_column("Version", style="dim")
+    table.add_column("Status", style="white")
+    table.add_column("Description")
+
+    for plugin in plugins_list:
+        status = "[green]Loaded[/green]" if plugin['name'] in registry._plugins else "[dim]Not Loaded[/dim]"
+        table.add_row(
+            plugin['name'],
+            plugin.get('version', 'unknown'),
+            status,
+            plugin.get('description', '')
+        )
+
+    console.print()
+    console.print(table)
+    console.print()
+
+    core.shutdown()
+
+
+@plugins.command("info")
+@click.argument("plugin_name")
+def plugins_info(plugin_name: str):
+    """Show detailed information about a plugin."""
+    from ..core import HoloceneCore, PluginRegistry
+    from rich.panel import Panel
+
+    core = HoloceneCore()
+    registry = PluginRegistry(core, device="wmut")
+
+    registry.discover_plugins()
+    registry.load_all()
+
+    plugin = registry.get_plugin(plugin_name)
+
+    if not plugin:
+        console.print(f"[red]Plugin '{plugin_name}' not found[/red]")
+        core.shutdown()
+        return
+
+    metadata = plugin.get_metadata()
+
+    info_text = f"""[bold]{metadata.get('name', 'Unknown')}[/bold]
+Version: {metadata.get('version', 'unknown')}
+Description: {metadata.get('description', 'No description')}
+
+Runs On: {', '.join(metadata.get('runs_on', []))}
+Requires: {', '.join(metadata.get('requires', [])) or 'None'}
+
+Status: {'[green]Enabled[/green]' if plugin.enabled else '[dim]Disabled[/dim]'}
+"""
+
+    console.print()
+    console.print(Panel(info_text, title=f"Plugin: {plugin_name}"))
+    console.print()
+
+    core.shutdown()
+
+
 # Register print commands
 from .print_commands import print_group
 cli.add_command(print_group, name="print")
