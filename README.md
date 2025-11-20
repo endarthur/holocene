@@ -4,21 +4,38 @@
 
 Holocene is a privacy-focused activity tracking and AI assistant system designed to help you understand your behavior patterns without judgment.
 
-## Status: MVP Complete ✅
+## Quick Deploy (Proxmox)
 
-**What's working:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/endarthur/holocene/main/scripts/setup-holocene-lxc.sh | bash
+```
+
+See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete instructions.
+
+## Status: Plugin Architecture Complete ✅
+
+**Core System:**
+- ✅ **holod daemon** - Background service for 24/7 plugin execution
+- ✅ **Plugin architecture** - Event-driven, channel-based messaging
+- ✅ **REST API** - Flask server on port 5555 for multi-device coordination
+- ✅ **Multi-device support** - rei (server), wmut (CLI), eunice (mobile)
+- ✅ **Database migrations** - Lightweight schema evolution system
+- ✅ **SQLite storage** - Metadata JSON pattern, no ALTER TABLE drift
+
+**Working Plugins:**
+- ✅ **book_enricher** - LLM-powered book metadata extraction (NanoGPT)
+- ✅ **book_classifier** - Dewey Decimal Classification with Cutter numbers
+- ✅ **link_status_checker** - Link health monitoring, rot detection
+- ✅ **telegram_bot** - Mobile notifications and commands (eunice device)
+
+**Legacy Features:**
 - ✅ Manual activity logging
 - ✅ Privacy sanitization layer
-- ✅ SQLite storage with full CRUD
 - ✅ Beautiful CLI with rich formatting
-- ✅ LLM analysis (DeepSeek V3.1 via NanoGPT)
-- ✅ Budget tracking (2000 calls/day)
 - ✅ Journel integration (reads 8 active projects)
 - ✅ Git activity tracking (scans local repos)
-- ✅ Internet Archive integration (prevent link rot)
-- ✅ Analysis saving to markdown files
-- ✅ Triple data source alignment (activities + journel + git)
-- ✅ Smart link management (extraction, deduplication, browser bookmarks)
+- ✅ Internet Archive integration
+- ✅ Smart link management
 - ✅ Trust tier security (time-based prompt injection risk assessment)
 
 **Next steps:**
