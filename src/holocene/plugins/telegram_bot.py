@@ -350,7 +350,7 @@ You'll receive updates when:
         # (Direct registry access is more reliable than HTTP)
         try:
             if hasattr(self.core, 'registry') and self.core.registry:
-                for name, plugin in self.core.registry.plugins.items():
+                for name, plugin in self.core.registry._plugins.items():
                     version = plugin.metadata.get('version', '1.0.0')
                     enabled = plugin.enabled
                     status = "✅" if enabled else "⏸️"
