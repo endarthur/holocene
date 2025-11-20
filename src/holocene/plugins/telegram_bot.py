@@ -336,7 +336,7 @@ You'll receive updates when:
         self.messages_sent += 1
 
     async def _cmd_plugins(self, update, context):
-        """Handle /plugins command."""
+        """Handle /plugins command - show actually running plugins."""
         self.commands_received += 1
 
         # Check authorization
@@ -346,12 +346,26 @@ You'll receive updates when:
 
         plugins_msg = "🔌 *Active Plugins*\n\n"
 
-        # This is a bit tricky - we need to access the registry
-        # For now, just show that we're a plugin
-        plugins_msg += f"• telegram_bot ✅\n"
-        plugins_msg += f"• book_enricher ✅\n"
-        plugins_msg += f"• book_classifier ✅\n"
-        plugins_msg += f"• link_status_checker ✅\n"
+        # Query REST API to get actual plugin status
+        try:
+            import requests
+            response = requests.get('http://localhost:5555/plugins', timeout=2)
+            if response.ok:
+                plugins = response.json()
+                for plugin in plugins:
+                    name = plugin['name']
+                    version = plugin['version']
+                    enabled = plugin['enabled']
+                    status = "✅" if enabled else "⏸️"
+                    plugins_msg += f"• {name} {status} v{version}\n"
+                    if plugin.get('description'):
+                        desc = plugin['description'][:60]
+                        plugins_msg += f"  _{desc}_\n"
+            else:
+                plugins_msg += "⚠️ Could not fetch plugin status"
+        except Exception as e:
+            self.logger.error(f"Failed to fetch plugins: {e}")
+            plugins_msg += "⚠️ REST API not available"
 
         await update.message.reply_text(plugins_msg, parse_mode='Markdown')
         self.messages_sent += 1
