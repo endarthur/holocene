@@ -482,8 +482,42 @@ def setup(test: bool):
             console.print("   [green]✓ Set[/green]")
     console.print()
 
+    # Telegram Bot
+    console.print("[bold]5. Telegram Bot (optional)[/bold]")
+    console.print("   Used for: Mobile notifications and commands")
+
+    if cfg.telegram.bot_token:
+        console.print(f"   [green]✓ Currently set[/green]")
+        if not test and click.confirm("   Update Telegram bot token?", default=False):
+            bot_token = click.prompt("   Enter bot token", hide_input=True)
+            cfg.telegram.bot_token = bot_token
+            cfg.telegram.enabled = True
+            changes_made = True
+            console.print("   [green]✓ Updated[/green]")
+
+            # Optionally set chat ID
+            if click.confirm("   Set chat ID now? (or skip - bot will auto-detect on /start)", default=False):
+                chat_id = click.prompt("   Enter chat ID", type=int)
+                cfg.telegram.chat_id = chat_id
+    else:
+        console.print(f"   [dim]✗ Not set[/dim]")
+        if not test and click.confirm("   Configure Telegram bot?", default=False):
+            console.print("   [dim]Get token from @BotFather on Telegram[/dim]")
+            bot_token = click.prompt("   Enter bot token", hide_input=True)
+            cfg.telegram.bot_token = bot_token
+            cfg.telegram.enabled = True
+            changes_made = True
+            console.print("   [green]✓ Set[/green]")
+
+            # Optionally set chat ID
+            if click.confirm("   Set chat ID now? (or skip - bot will auto-detect on /start)", default=False):
+                console.print("   [dim]Get your chat ID from @userinfobot on Telegram[/dim]")
+                chat_id = click.prompt("   Enter chat ID", type=int)
+                cfg.telegram.chat_id = chat_id
+    console.print()
+
     # MercadoLivre
-    console.print("[bold]5. MercadoLivre OAuth (optional)[/bold]")
+    console.print("[bold]6. MercadoLivre OAuth (optional)[/bold]")
     console.print("   Used for: Syncing MercadoLivre favorites")
 
     if cfg.mercadolivre.client_id and cfg.mercadolivre.client_secret:

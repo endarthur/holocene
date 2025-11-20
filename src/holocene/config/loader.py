@@ -48,6 +48,14 @@ class ClassificationConfig(BaseModel):
     cutter_length: int = 3  # Number of characters in Cutter number (typically 2-4)
 
 
+class TelegramConfig(BaseModel):
+    """Telegram bot configuration."""
+
+    enabled: bool = False
+    bot_token: Optional[str] = None
+    chat_id: Optional[int] = None  # Telegram chat ID for notifications
+
+
 class MercadoLivreConfig(BaseModel):
     """Mercado Livre integration configuration."""
 
@@ -133,6 +141,7 @@ class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     classification: ClassificationConfig = Field(default_factory=ClassificationConfig)
     integrations: IntegrationsConfig = Field(default_factory=IntegrationsConfig)
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     mercadolivre: MercadoLivreConfig = Field(default_factory=MercadoLivreConfig)
 
     def model_post_init(self, __context):
@@ -215,6 +224,11 @@ integrations:
 
   window_focus_enabled: false
   window_sampling_interval: 30
+
+telegram:
+  enabled: false
+  # bot_token: "YOUR_BOT_TOKEN"  # Get from @BotFather on Telegram
+  # chat_id: 123456789  # Your Telegram user ID (get from @userinfobot)
 
 mercadolivre:
   enabled: false
