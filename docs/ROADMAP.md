@@ -28,6 +28,8 @@ Before implementing features, review these foundational docs:
 - ✅ **Configurable classification system** - Dewey or UDC via config
 - ✅ **Classification repair tool** - Auto-fix missing Cutter numbers
 - ✅ **Library catalog view** - `--by-dewey` sorting for shelf order browsing
+- ✅ **arXiv integration** - Paper detection and metadata fetching (Nov 2025)
+- ✅ **Telegram bot** - Mobile research capture (DOI, URLs, PDFs, arXiv papers)
 
 ---
 
@@ -196,6 +198,100 @@ q=subject:mining AND mediatype:texts AND date:[1900 TO 1980]
 **Cost:** FREE
 
 **Storage:** User's choice - reference only, or download PDFs locally
+
+---
+
+#### 4.1d: Research Repository Integration 📚
+
+**Goal:** Support multiple research paper repositories beyond Crossref.
+
+**Implemented:**
+- ✅ **arXiv** (Nov 2025) - 2.4M+ preprints in physics, CS, math
+  - XML API integration
+  - Smart ID detection (URLs, plain IDs, versioned IDs)
+  - Metadata extraction (title, authors, abstract, categories)
+  - Automatic DOI linking when available
+  - Rate limiting (3 sec between requests per arXiv policy)
+  - Telegram bot integration for mobile capture
+
+**Planned Repositories:**
+
+**PubMed / PubMed Central (PMC)**
+- 36M+ biomedical citations, 9M+ full-text articles
+- NCBI E-utilities API (free, no API key for basic use)
+- Focus: Medical, biology, life sciences
+- Why: Pre-LLM biomedical research, patient education materials
+- Implementation: Similar to arXiv client, XML parsing
+
+**bioRxiv / medRxiv**
+- Biology and medicine preprints
+- REST API available
+- Why: Pre-LLM biology research, early pandemic papers
+- Similar API pattern to arXiv
+
+**SSRN (Social Science Research Network)**
+- 1M+ social science papers
+- API availability: TBD (may require scraping)
+- Focus: Economics, law, political science
+- Why: Social science research (if user expands interests)
+
+**CORE**
+- 200M+ open access papers aggregated from repositories worldwide
+- REST API available (free tier: 10k requests/day)
+- Why: Aggregator that fills gaps from other sources
+- Implementation: Unified search across repositories
+
+**SemanticScholar**
+- 200M+ papers with citation graph
+- Free API (rate limited but generous)
+- Focus: Computer science, neuroscience, biomedical
+- Why: Citation network analysis, paper recommendations
+- Unique feature: Influence metrics, citation context
+
+**Features to Build:**
+```bash
+# Unified paper search across repositories
+holo papers search "geostatistics kriging" --repo arxiv,crossref,core
+
+# Auto-detect paper source from URL/ID
+holo papers add "https://www.biorxiv.org/content/10.1101/2021.01.01.123456"
+holo papers add "PMC8675309"  # PubMed Central ID
+holo papers add "2103.12345"  # arXiv ID (already works)
+
+# Repository-specific commands
+holo papers search-arxiv "neural networks"
+holo papers search-pubmed "covid-19 treatment"
+
+# Import from references
+holo papers import-citations <paper_id>  # Add all cited papers
+```
+
+**Implementation Strategy:**
+1. Create base `PaperRepository` interface
+2. Implement repository-specific clients (like `ArxivClient`)
+3. Unified detection/routing based on URL/ID patterns
+4. Common metadata normalization (all repos → standardized paper dict)
+5. Repository source tracking in database
+6. Telegram bot auto-detection for all supported repos
+
+**Database Changes:**
+```sql
+-- Add source field to papers table
+ALTER TABLE papers ADD COLUMN source TEXT;  -- 'arxiv', 'crossref', 'pubmed', etc.
+ALTER TABLE papers ADD COLUMN source_id TEXT;  -- arXiv ID, PMID, etc.
+
+-- Index for efficient source queries
+CREATE INDEX idx_papers_source ON papers(source);
+```
+
+**Priority Order:**
+1. ✅ arXiv (implemented)
+2. PubMed (high value, free, easy API)
+3. SemanticScholar (citation network analysis)
+4. bioRxiv (if user expands to biology)
+5. CORE (aggregator, fills gaps)
+
+**Cost:** All FREE APIs
 
 ---
 
