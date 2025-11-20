@@ -239,6 +239,7 @@ msg_ok "Container IP: $CONTAINER_IP"
 
 # Download and run bootstrap script
 msg_info "Running bootstrap script"
+echo ""  # Newline before bootstrap output
 pct exec "$CTID" -- bash -c "wget -qO- https://raw.githubusercontent.com/endarthur/holocene/main/scripts/bootstrap-holocene.sh | bash"
 msg_ok "Bootstrap complete"
 
