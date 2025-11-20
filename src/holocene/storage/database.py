@@ -139,26 +139,60 @@ def generate_normalized_key(title: str, first_author: str, year: Optional[int]) 
 
 
 class Database:
-    """SQLite database manager for Holocene."""
+    """SQLite database manager for Holocene.
+
+    Thread-safe implementation:
+    - Each thread gets its own SQLite connection (via threading.local())
+    - Connections are created on-demand when first accessed from a thread
+    - WAL mode allows multiple readers + one writer concurrently
+    - Foreign keys enabled on every connection
+    """
 
     def __init__(self, db_path: Path):
         """Initialize database connection."""
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn: Optional[sqlite3.Connection] = None
-        self._lock = threading.RLock()  # Reentrant lock for thread-safe operations
+        self._local = threading.local()  # Thread-local storage for connections
+        self._lock = threading.RLock()  # Lock for schema initialization
+        self._schema_initialized = False
         self._init_db()
 
-    def _init_db(self):
-        """Initialize database schema."""
-        # check_same_thread=False allows Flask API threads to use the connection
-        # This is safe because we use WAL mode and mostly do read operations in API
-        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row  # Access columns by name
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """Get SQLite connection for current thread.
 
-        # CRITICAL: Enable foreign keys on EVERY connection
-        # (This setting is not persistent across connections)
-        self.conn.execute("PRAGMA foreign_keys = ON")
+        Each thread gets its own connection. Connections are created
+        on-demand and cached in thread-local storage.
+
+        Returns:
+            SQLite connection for current thread
+        """
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            # Create new connection for this thread
+            self._local.conn = sqlite3.connect(
+                str(self.db_path),
+                check_same_thread=True  # Each thread has its own connection
+            )
+            self._local.conn.row_factory = sqlite3.Row
+
+            # CRITICAL: Enable foreign keys on EVERY connection
+            # (This setting is not persistent across connections)
+            self._local.conn.execute("PRAGMA foreign_keys = ON")
+
+            logger.debug(f"Created SQLite connection for thread {threading.current_thread().name}")
+
+        return self._local.conn
+
+    def _init_db(self):
+        """Initialize database schema (called once, from main thread)."""
+        # Only initialize schema once
+        with self._lock:
+            if self._schema_initialized:
+                return
+
+            # Create initial connection for schema setup
+            # This will be accessed via the conn property
+            conn = self.conn
 
         cursor = self.conn.cursor()
 
@@ -766,6 +800,10 @@ class Database:
 
         self.conn.commit()
 
+        # Mark schema as initialized
+        self._schema_initialized = True
+        logger.debug("Database schema initialized")
+
     def cursor(self):
         """Get a thread-safe cursor.
 
@@ -1035,10 +1073,11 @@ class Database:
         return cursor.fetchone()[0]
 
     def close(self):
-        """Close database connection."""
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+        """Close database connection for current thread."""
+        if hasattr(self._local, 'conn') and self._local.conn:
+            self._local.conn.close()
+            self._local.conn = None
+            logger.debug(f"Closed SQLite connection for thread {threading.current_thread().name}")
 
     def __enter__(self):
         """Context manager entry."""
