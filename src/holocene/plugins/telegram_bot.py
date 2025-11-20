@@ -9,6 +9,7 @@ This plugin:
 """
 
 import asyncio
+import threading
 from typing import Optional
 from datetime import datetime
 
@@ -47,6 +48,7 @@ class TelegramBotPlugin(Plugin):
         self.commands_received = 0
         self.notifications_sent = 0
         self.bot_loop = None  # Event loop running the bot
+        self.bot_thread = None  # Dedicated thread for bot
         self.keep_running = None  # Future that keeps bot running (so we can cancel it)
 
         if not TELEGRAM_AVAILABLE:
@@ -103,19 +105,21 @@ class TelegramBotPlugin(Plugin):
         self.subscribe('classification.complete', self._on_classification_complete)
         self.subscribe('link.checked', self._on_link_checked)
 
-        # Start bot in background
-        self.run_in_background(
-            self._start_bot,
-            callback=lambda x: self.logger.info("Bot started successfully"),
-            error_handler=lambda e: self.logger.error(f"Bot startup failed: {e}")
+        # Start bot in dedicated thread (not ThreadPoolExecutor - bot is long-lived)
+        self.bot_thread = threading.Thread(
+            target=self._start_bot,
+            name="telegram-bot",
+            daemon=True  # Allow holod to exit even if bot thread is running
         )
+        self.bot_thread.start()
+        self.logger.info("Telegram bot thread started")
 
     def _start_bot(self):
-        """Start the bot (runs in background thread).
+        """Start the bot (runs in dedicated thread).
 
-        This runs in a ThreadPoolExecutor thread, so we need to create
-        a new event loop for the async telegram bot. We can't use run_polling()
-        because it tries to set signal handlers which only work in main thread.
+        This runs in its own thread, so we create a new event loop for
+        the async telegram bot. We can't use run_polling() because it
+        tries to set signal handlers which only work in main thread.
         """
         try:
             # Create new event loop for this thread
@@ -378,12 +382,19 @@ URL: {url[:50]}...
             f"{self.commands_received} commands received, {self.notifications_sent} notifications"
         )
 
-        if self.application and self.bot_loop and self.keep_running:
+        if self.bot_thread and self.bot_thread.is_alive():
             try:
                 self.logger.info("Telegram bot stopping...")
                 # Cancel the keep_running future to trigger shutdown
-                if not self.keep_running.cancelled():
+                if self.bot_loop and self.keep_running and not self.keep_running.cancelled():
                     self.bot_loop.call_soon_threadsafe(self.keep_running.cancel)
                     self.logger.info("Bot shutdown signal sent")
+
+                    # Wait for thread to finish (with timeout)
+                    self.bot_thread.join(timeout=5.0)
+                    if self.bot_thread.is_alive():
+                        self.logger.warning("Bot thread did not stop within timeout")
+                    else:
+                        self.logger.info("Bot thread stopped successfully")
             except Exception as e:
                 self.logger.error(f"Error stopping bot: {e}")
