@@ -195,13 +195,32 @@ msg_ok "Container created"
 
 # Start container
 msg_info "Starting container"
-pct start "$CTID"
+if ! pct start "$CTID"; then
+    msg_error "Failed to start container"
+    exit 1
+fi
+
+# Wait for container to be fully running
 sleep 5
+
+# Verify container is actually running
+if ! pct status "$CTID" | grep -q "running"; then
+    msg_error "Container is not running"
+    echo "Container status:"
+    pct status "$CTID"
+    echo ""
+    echo "Container config:"
+    pct config "$CTID"
+    exit 1
+fi
 msg_ok "Container started"
 
 # Set password
 msg_info "Setting root password"
-echo "root:holocene" | pct exec "$CTID" -- chpasswd
+if ! echo "root:holocene" | pct exec "$CTID" -- chpasswd; then
+    msg_error "Failed to set password"
+    exit 1
+fi
 msg_ok "Root password set to: holocene"
 
 # Wait for network
