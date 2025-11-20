@@ -111,14 +111,13 @@ class TelegramBotPlugin(Plugin):
     def _start_bot(self):
         """Start the bot (runs in background thread)."""
         try:
-            # Initialize and start polling
-            asyncio.run(self.application.initialize())
-            asyncio.run(self.application.start())
-
-            self.logger.info("Telegram bot polling started")
-
-            # Note: In production, this would run indefinitely
-            # For now, we just start it and return
+            # Run polling in this background thread
+            # This will block until the bot is stopped
+            self.application.run_polling(
+                allowed_updates=["message", "callback_query"],
+                drop_pending_updates=True
+            )
+            self.logger.info("Telegram bot polling stopped")
             return True
         except Exception as e:
             self.logger.error(f"Failed to start bot: {e}", exc_info=True)
@@ -334,8 +333,8 @@ URL: {url[:50]}...
 
         if self.application:
             try:
-                asyncio.run(self.application.stop())
-                asyncio.run(self.application.shutdown())
-                self.logger.info("Bot stopped")
+                # Stop the updater gracefully
+                # run_polling() handles cleanup internally
+                self.logger.info("Telegram bot stopping...")
             except Exception as e:
                 self.logger.error(f"Error stopping bot: {e}")
