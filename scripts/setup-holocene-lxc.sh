@@ -129,8 +129,21 @@ esac
 # Storage
 # Template storage (needs to support vztmpl content type)
 TEMPLATE_STORAGE=$(pvesm status -content vztmpl | awk 'NR>1 {print $1}' | head -n 1)
+if [ -z "$TEMPLATE_STORAGE" ]; then
+    msg_error "No storage with 'vztmpl' content type found"
+    echo -e "${YW}Available storage:${CL}"
+    pvesm status
+    echo -e "\n${YW}Enable 'Container Templates' on a storage in Proxmox UI:${CL}"
+    echo "  Datacenter → Storage → [select storage] → Edit → Content → ✓ Container Templates"
+    exit 1
+fi
+
 # Container storage (needs to support rootdir content type)
 CONTAINER_STORAGE=$(pvesm status -content rootdir | awk 'NR>1 {print $1}' | head -n 1)
+if [ -z "$CONTAINER_STORAGE" ]; then
+    msg_error "No storage with 'rootdir' content type found"
+    exit 1
+fi
 
 # Summary
 echo -e "\n${BL}[INFO]${CL} Configuration Summary:"
@@ -150,6 +163,11 @@ if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
     msg_error "Aborted by user"
     exit 1
 fi
+
+# Update template list
+msg_info "Updating template list"
+pveam update &>/dev/null
+msg_ok "Template list updated"
 
 # Check if template exists
 msg_info "Checking for template"
