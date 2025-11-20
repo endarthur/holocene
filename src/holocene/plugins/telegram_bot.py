@@ -104,6 +104,9 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("stats", self._cmd_stats))
         self.application.add_handler(CommandHandler("plugins", self._cmd_plugins))
         self.application.add_handler(CommandHandler("status", self._cmd_status))
+        self.application.add_handler(CommandHandler("recent", self._cmd_recent))
+        self.application.add_handler(CommandHandler("search", self._cmd_search))
+        self.application.add_handler(CommandHandler("classify", self._cmd_classify))
 
         # Register message handlers for content (text, PDFs, etc.)
         self.application.add_handler(MessageHandler(
@@ -146,6 +149,21 @@ class TelegramBotPlugin(Plugin):
                 """Start polling without signal handlers."""
                 await self.application.initialize()
                 await self.application.start()
+
+                # Set bot commands for autocomplete
+                from telegram import BotCommand
+                commands = [
+                    BotCommand("start", "Initialize and authorize bot"),
+                    BotCommand("help", "Show available commands"),
+                    BotCommand("stats", "View bot statistics"),
+                    BotCommand("status", "View system status"),
+                    BotCommand("plugins", "List active plugins"),
+                    BotCommand("recent", "Show recently added items"),
+                    BotCommand("search", "Search books and papers"),
+                    BotCommand("classify", "Get Dewey classification"),
+                ]
+                await self.application.bot.set_my_commands(commands)
+                self.logger.info("Bot commands registered for autocomplete")
 
                 # Start the updater (polling)
                 await self.application.updater.start_polling(
@@ -254,8 +272,17 @@ Available commands:
 /start - Initialize bot
 /help - Show this help
 /stats - View statistics
-/plugins - List active plugins
 /status - System status
+/plugins - List active plugins
+/recent - Show recently added items
+/search <query> - Search books and papers
+/classify <topic> - Get Dewey classification
+
+*Send me:*
+• DOIs - I'll fetch paper metadata
+• URLs - I'll save and archive links
+• arXiv papers - Auto-detected
+• PDFs - Saved to your library
 
 *Notifications:*
 You'll receive updates when:
@@ -350,6 +377,139 @@ You'll receive updates when:
 
         await update.message.reply_text(status_msg, parse_mode='Markdown')
         self.messages_sent += 1
+
+    async def _cmd_recent(self, update, context):
+        """Handle /recent command - show recently added items."""
+        self.commands_received += 1
+
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        db = self.core.db
+        recent_msg = "📚 *Recently Added*\n\n"
+
+        # Get recent books (last 5)
+        books = db.get_books(limit=5)
+        if books:
+            recent_msg += "*Books:*\n"
+            for book in books:
+                title = book['title'][:50] + "..." if len(book['title']) > 50 else book['title']
+                recent_msg += f"• {title}\n"
+            recent_msg += "\n"
+
+        # Get recent papers (last 5)
+        papers = db.get_papers(limit=5)
+        if papers:
+            recent_msg += "*Papers:*\n"
+            for paper in papers:
+                title = paper['title'][:50] + "..." if len(paper['title']) > 50 else paper['title']
+                recent_msg += f"• {title}\n"
+            recent_msg += "\n"
+
+        # Get recent links (last 5)
+        links = db.get_links(limit=5)
+        if links:
+            recent_msg += "*Links:*\n"
+            for link in links:
+                title = link.get('title', link['url'])[:50] + "..." if len(link.get('title', link['url'])) > 50 else link.get('title', link['url'])
+                recent_msg += f"• {title}\n"
+
+        if len(recent_msg) == len("📚 *Recently Added*\n\n"):
+            recent_msg += "_No items found_"
+
+        await update.message.reply_text(recent_msg, parse_mode='Markdown')
+        self.messages_sent += 1
+
+    async def _cmd_search(self, update, context):
+        """Handle /search command - search books and papers."""
+        self.commands_received += 1
+
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        # Get search query from command args
+        query = ' '.join(context.args) if context.args else None
+        if not query:
+            await update.message.reply_text("Usage: /search <query>")
+            return
+
+        db = self.core.db
+        results_msg = f"🔍 *Search Results for:* {query}\n\n"
+        found_any = False
+
+        # Search books
+        books = db.get_books(search=query, limit=5)
+        if books:
+            found_any = True
+            results_msg += "*Books:*\n"
+            for book in books:
+                title = book['title'][:50] + "..." if len(book['title']) > 50 else book['title']
+                author = book.get('author', 'Unknown')[:30]
+                results_msg += f"• {title} - {author}\n"
+            results_msg += "\n"
+
+        # Search papers
+        papers = db.get_papers(search=query, limit=5)
+        if papers:
+            found_any = True
+            results_msg += "*Papers:*\n"
+            for paper in papers:
+                title = paper['title'][:50] + "..." if len(paper['title']) > 50 else paper['title']
+                results_msg += f"• {title}\n"
+            results_msg += "\n"
+
+        if not found_any:
+            results_msg += "_No results found_"
+
+        await update.message.reply_text(results_msg, parse_mode='Markdown')
+        self.messages_sent += 1
+
+    async def _cmd_classify(self, update, context):
+        """Handle /classify command - get Dewey classification for a topic."""
+        self.commands_received += 1
+
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        # Get topic from command args
+        topic = ' '.join(context.args) if context.args else None
+        if not topic:
+            await update.message.reply_text("Usage: /classify <topic>")
+            return
+
+        await update.message.reply_text(f"🔍 Classifying: _{topic}_...", parse_mode='Markdown')
+
+        # Run classification in background
+        def classify():
+            from ..research import DeweyClassifier
+            classifier = DeweyClassifier(self.core.config)
+            result = classifier.classify(title=topic, description=topic)
+            return result
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(None, classify)
+
+            if result and result.get('dewey'):
+                msg = f"📊 *Classification Result*\n\n"
+                msg += f"*Topic:* {topic}\n"
+                msg += f"*Dewey:* {result['dewey']}\n"
+                msg += f"*Category:* {result.get('category', 'Unknown')}\n"
+                if result.get('confidence'):
+                    msg += f"*Confidence:* {result['confidence']:.0%}\n"
+            else:
+                msg = "❌ Could not classify topic"
+
+            await update.message.reply_text(msg, parse_mode='Markdown')
+            self.messages_sent += 1
+        except Exception as e:
+            self.logger.error(f"Classification error: {e}")
+            await update.message.reply_text("❌ Classification failed")
 
     # Message and document handlers
 
