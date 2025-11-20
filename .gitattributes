@@ -1,0 +1,21 @@
+# Force LF line endings for shell scripts
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Force LF for Python scripts
+*.py text eol=lf
+
+# Normal text files
+*.md text
+*.txt text
+*.yaml text
+*.yml text
+*.json text
+*.toml text
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.db binary
