@@ -47,7 +47,7 @@ class TelegramBotPlugin(Plugin):
         self.commands_received = 0
         self.notifications_sent = 0
         self.bot_loop = None  # Event loop running the bot
-        self.running_future = None  # Future that keeps bot running
+        self.keep_running = None  # Future that keeps bot running (so we can cancel it)
 
         if not TELEGRAM_AVAILABLE:
             self.logger.warning("python-telegram-bot not installed - bot will be disabled")
@@ -140,7 +140,9 @@ class TelegramBotPlugin(Plugin):
                 # The updater will keep polling in the background
                 # We just need to keep the loop alive
                 try:
-                    await asyncio.Future()  # Run forever
+                    # Create a future we can cancel later
+                    self.keep_running = asyncio.Future()
+                    await self.keep_running
                 except asyncio.CancelledError:
                     self.logger.info("Bot polling cancelled")
                 finally:
@@ -376,10 +378,12 @@ URL: {url[:50]}...
             f"{self.commands_received} commands received, {self.notifications_sent} notifications"
         )
 
-        if self.application:
+        if self.application and self.bot_loop and self.keep_running:
             try:
-                # Stop the updater gracefully
-                # run_polling() handles cleanup internally
                 self.logger.info("Telegram bot stopping...")
+                # Cancel the keep_running future to trigger shutdown
+                if not self.keep_running.cancelled():
+                    self.bot_loop.call_soon_threadsafe(self.keep_running.cancel)
+                    self.logger.info("Bot shutdown signal sent")
             except Exception as e:
                 self.logger.error(f"Error stopping bot: {e}")
