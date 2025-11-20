@@ -5,7 +5,16 @@ from .git_scanner import GitScanner, GitRepo
 from .internet_archive import InternetArchiveClient
 from .bookmarks import BookmarksReader, Bookmark
 from .calibre import CalibreIntegration
-from .mercadolivre import MercadoLivreClient, MercadoLivreOAuth, is_token_expired
+
+# Optional: MercadoLivre (requires beautifulsoup4)
+try:
+    from .mercadolivre import MercadoLivreClient, MercadoLivreOAuth, is_token_expired
+    MERCADOLIVRE_AVAILABLE = True
+except ImportError:
+    MercadoLivreClient = None
+    MercadoLivreOAuth = None
+    is_token_expired = None
+    MERCADOLIVRE_AVAILABLE = False
 
 __all__ = [
     "JournelReader",
@@ -18,4 +27,5 @@ __all__ = [
     "MercadoLivreClient",
     "MercadoLivreOAuth",
     "is_token_expired",
+    "MERCADOLIVRE_AVAILABLE",
 ]

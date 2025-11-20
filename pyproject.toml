@@ -22,24 +22,57 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 
+# Core dependencies (always installed)
 dependencies = [
-    "click>=8.1.0",
-    "pydantic>=2.0.0",
-    "aiohttp>=3.9.0",
-    "pyyaml>=6.0",
-    "python-dotenv>=1.0.0",
-    "rich>=13.0.0",
-    "requests>=2.31.0",
-    "pypdf>=3.17.0",
-    "pdfplumber>=0.10.0",
-    "pytesseract>=0.3.10",
-    "Pillow>=10.0.0",
-    "pyusb>=1.2.1",
-    "beautifulsoup4>=4.12.0",
-    "flask>=3.0.0",
+    "click>=8.1.0",           # CLI framework
+    "pydantic>=2.0.0",        # Data validation
+    "pyyaml>=6.0",            # Config files
+    "python-dotenv>=1.0.0",   # Environment variables
+    "rich>=13.0.0",           # Terminal formatting
+    "requests>=2.31.0",       # HTTP client (used by many integrations)
 ]
 
 [project.optional-dependencies]
+# Holod daemon with REST API
+daemon = [
+    "flask>=3.0.0",           # REST API server
+    "aiohttp>=3.9.0",         # Async HTTP for LLM calls
+]
+
+# PDF processing (books, papers)
+pdf = [
+    "pypdf>=3.17.0",          # PDF parsing
+    "pdfplumber>=0.10.0",     # PDF text extraction
+    "pytesseract>=0.3.10",    # OCR
+    "Pillow>=10.0.0",         # Image processing
+]
+
+# MercadoLivre integration (scraping, favorites)
+mercadolivre = [
+    "beautifulsoup4>=4.12.0", # HTML parsing
+]
+
+# Telegram bot (mobile notifications)
+telegram = [
+    "python-telegram-bot>=20.0",  # Telegram API
+]
+
+# Paperang thermal printer
+paperang = [
+    "pyusb>=1.2.1",           # USB communication
+    "Pillow>=10.0.0",         # Image processing (shared with pdf)
+]
+
+# All optional features (for full installation)
+all = [
+    "holocene[daemon]",
+    "holocene[pdf]",
+    "holocene[mercadolivre]",
+    "holocene[telegram]",
+    "holocene[paperang]",
+]
+
+# Development dependencies
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",

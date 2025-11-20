@@ -79,17 +79,36 @@ See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete instructions and customizat
 
 ## Installation
 
+Holocene uses optional dependency groups for flexible installation:
+
 ```bash
 # Clone the repository
 git clone https://github.com/endarthur/holocene
 cd holocene
 
-# Install in development mode
+# Option 1: Full installation (recommended for servers)
+pip install -e ".[all]"
+
+# Option 2: Core only (minimal CLI)
 pip install -e .
+
+# Option 3: Daemon + specific features
+pip install -e ".[daemon,pdf,telegram]"
 
 # Initialize
 holo init
 ```
+
+### Dependency Groups
+
+- **Core** (always installed): CLI, config, storage, basic integrations
+- **daemon**: holod background service + REST API (Flask)
+- **pdf**: PDF processing for books and papers
+- **mercadolivre**: MercadoLivre integration
+- **telegram**: Telegram bot for mobile notifications
+- **paperang**: Paperang thermal printer support
+- **all**: Everything above
+- **dev**: Development tools (pytest, black, ruff)
 
 ## Quick Start
 

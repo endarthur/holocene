@@ -81,9 +81,9 @@ msg_info "Creating Python virtual environment"
 su - holocene -c "cd /home/holocene/holocene && python3.11 -m venv venv" &>/dev/null
 msg_ok "Virtual environment created"
 
-# Install Holocene
+# Install Holocene with all optional dependencies
 msg_info "Installing Holocene"
-su - holocene -c "cd /home/holocene/holocene && source venv/bin/activate && pip install -q --upgrade pip && pip install -q -e ." &>/dev/null
+su - holocene -c "cd /home/holocene/holocene && source venv/bin/activate && pip install -q --upgrade pip && pip install -q -e '.[all]'" &>/dev/null
 msg_ok "Holocene installed"
 
 # Initialize Holocene

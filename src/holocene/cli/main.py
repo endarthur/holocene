@@ -16,10 +16,17 @@ from ..config import load_config, save_config, get_config_path, DEFAULT_CONFIG
 # Import command groups
 from .config_commands import config
 from .stats_commands import stats
-from .mercadolivre_commands import mercadolivre
 from .inventory_commands import inventory
 from .ml_inventory_commands import ml_inventory
 from .daemon_commands import daemon
+
+# Optional: MercadoLivre (requires beautifulsoup4)
+try:
+    from .mercadolivre_commands import mercadolivre
+    MERCADOLIVRE_CLI_AVAILABLE = True
+except ImportError:
+    mercadolivre = None
+    MERCADOLIVRE_CLI_AVAILABLE = False
 
 console = Console()
 
@@ -38,7 +45,8 @@ def cli():
 # Register command groups
 cli.add_command(config)
 cli.add_command(stats)
-cli.add_command(mercadolivre)
+if MERCADOLIVRE_CLI_AVAILABLE:
+    cli.add_command(mercadolivre)
 cli.add_command(inventory)
 cli.add_command(ml_inventory)
 cli.add_command(daemon)
