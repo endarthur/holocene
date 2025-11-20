@@ -10,19 +10,24 @@ This plugin:
 
 import asyncio
 import threading
+import re
+import os
 from typing import Optional
 from datetime import datetime
+from pathlib import Path
 
 from holocene.core import Plugin, Message
 
 try:
     from telegram import Update
-    from telegram.ext import Application, CommandHandler, ContextTypes
+    from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
     Update = None
     CommandHandler = None
+    MessageHandler = None
+    filters = None
     ContextTypes = None
     Application = None
 
@@ -99,6 +104,16 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("stats", self._cmd_stats))
         self.application.add_handler(CommandHandler("plugins", self._cmd_plugins))
         self.application.add_handler(CommandHandler("status", self._cmd_status))
+
+        # Register message handlers for content (text, PDFs, etc.)
+        self.application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            self._handle_message
+        ))
+        self.application.add_handler(MessageHandler(
+            filters.Document.PDF | filters.Document.ALL,
+            self._handle_document
+        ))
 
         # Subscribe to events for notifications
         self.subscribe('enrichment.complete', self._on_enrichment_complete)
@@ -336,6 +351,300 @@ You'll receive updates when:
         await update.message.reply_text(status_msg, parse_mode='Markdown')
         self.messages_sent += 1
 
+    # Message and document handlers
+
+    async def _handle_message(self, update, context):
+        """Handle text messages - detect DOIs and URLs."""
+        if not self._is_authorized(update.effective_chat.id):
+            return
+
+        text = update.message.text
+        self.logger.info(f"Received message: {text[:50]}...")
+
+        # Check for DOI
+        doi = self._detect_doi(text)
+        if doi:
+            await update.message.reply_text(f"📄 Detected DOI: `{doi}`\nProcessing...", parse_mode='Markdown')
+            self.run_in_background(
+                lambda: self._add_paper_from_doi(doi, update.effective_chat.id),
+                callback=lambda result: self.logger.info(f"Paper added: {result}"),
+                error_handler=lambda e: self.logger.error(f"Failed to add paper: {e}")
+            )
+            return
+
+        # Check for URL
+        url = self._detect_url(text)
+        if url:
+            await update.message.reply_text(f"🔗 Detected URL: `{url}`\nProcessing...", parse_mode='Markdown')
+            self.run_in_background(
+                lambda: self._add_link_from_url(url, update.effective_chat.id),
+                callback=lambda result: self.logger.info(f"Link added: {result}"),
+                error_handler=lambda e: self.logger.error(f"Failed to add link: {e}")
+            )
+            return
+
+        # No DOI or URL found
+        await update.message.reply_text(
+            "ℹ️ I can process:\n"
+            "• DOIs (e.g., 10.1234/example)\n"
+            "• URLs (http/https links)\n"
+            "• PDFs (send as document)\n\n"
+            "Use /help for available commands."
+        )
+
+    async def _handle_document(self, update, context):
+        """Handle document uploads (PDFs, etc.)."""
+        if not self._is_authorized(update.effective_chat.id):
+            return
+
+        document = update.message.document
+        file_name = document.file_name
+        file_size = document.file_size
+        mime_type = document.mime_type
+
+        self.logger.info(f"Received document: {file_name} ({file_size} bytes, {mime_type})")
+
+        # Check if it's a PDF
+        if mime_type != 'application/pdf' and not file_name.lower().endswith('.pdf'):
+            await update.message.reply_text("⚠️ Only PDF files are supported for now.")
+            return
+
+        # Check file size (limit to 20MB for now)
+        max_size = 20 * 1024 * 1024  # 20MB
+        if file_size > max_size:
+            await update.message.reply_text(f"⚠️ File too large. Maximum size: {max_size // (1024*1024)}MB")
+            return
+
+        await update.message.reply_text(f"📄 Downloading PDF: `{file_name}`...", parse_mode='Markdown')
+
+        # Download the file
+        try:
+            file = await document.get_file()
+
+            # Save to temp directory
+            temp_dir = Path(self.core.config.data_dir) / "temp"
+            temp_dir.mkdir(exist_ok=True)
+            file_path = temp_dir / file_name
+
+            await file.download_to_drive(str(file_path))
+
+            await update.message.reply_text(f"✅ Downloaded! Processing PDF...")
+
+            # Process in background
+            self.run_in_background(
+                lambda: self._process_pdf(str(file_path), file_name, update.effective_chat.id),
+                callback=lambda result: self.logger.info(f"PDF processed: {result}"),
+                error_handler=lambda e: self.logger.error(f"Failed to process PDF: {e}")
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to download PDF: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Failed to download PDF: {str(e)}")
+
+    # Helper methods
+
+    def _detect_doi(self, text: str) -> Optional[str]:
+        """Detect DOI in text.
+
+        Args:
+            text: Input text
+
+        Returns:
+            DOI if found, None otherwise
+        """
+        # DOI regex: 10.xxxx/yyyy
+        doi_pattern = r'10\.\d{4,}/[^\s]+'
+        match = re.search(doi_pattern, text)
+        return match.group(0) if match else None
+
+    def _detect_url(self, text: str) -> Optional[str]:
+        """Detect URL in text.
+
+        Args:
+            text: Input text
+
+        Returns:
+            URL if found, None otherwise
+        """
+        # Simple URL regex
+        url_pattern = r'https?://[^\s]+'
+        match = re.search(url_pattern, text)
+        return match.group(0) if match else None
+
+    def _add_paper_from_doi(self, doi: str, chat_id: int):
+        """Add paper from DOI (runs in background).
+
+        Args:
+            doi: DOI string
+            chat_id: Telegram chat ID for notifications
+        """
+        try:
+            from ..research import CrossrefClient, UnpaywallClient
+
+            db = self.core.db
+            crossref = CrossrefClient()
+            unpaywall = UnpaywallClient()
+
+            # Check if already exists
+            existing = db.get_paper_by_doi(doi)
+            if existing:
+                self._send_notification(
+                    f"ℹ️ Paper already in collection:\n*{existing.get('title')}*",
+                    chat_id
+                )
+                return "already_exists"
+
+            # Fetch metadata
+            self.logger.info(f"Fetching paper metadata for DOI: {doi}")
+            paper_data = crossref.get_by_doi(doi)
+
+            if not paper_data:
+                self._send_notification(f"❌ Paper not found with DOI: `{doi}`", chat_id)
+                return "not_found"
+
+            paper = crossref.parse_paper(paper_data)
+
+            # Check Open Access
+            oa_info = {}
+            try:
+                oa_data = unpaywall.get_by_doi(doi)
+                if oa_data:
+                    oa_info = {
+                        'is_oa': oa_data.get('is_oa', False),
+                        'oa_status': oa_data.get('oa_status'),
+                        'oa_color': oa_data.get('oa_color'),
+                        'pdf_url': oa_data.get('best_oa_location', {}).get('url_for_pdf')
+                    }
+            except Exception as e:
+                self.logger.warning(f"Failed to get OA info: {e}")
+
+            # Add to database
+            paper_id = db.add_paper(
+                title=paper['title'],
+                authors=paper.get('authors', []),
+                doi=doi,
+                year=paper.get('year'),
+                journal=paper.get('journal'),
+                url=paper.get('url'),
+                is_open_access=oa_info.get('is_oa', False),
+                pdf_url=oa_info.get('pdf_url'),
+                oa_status=oa_info.get('oa_status'),
+                oa_color=oa_info.get('oa_color')
+            )
+
+            # Send success notification
+            authors_str = ", ".join(paper.get('authors', [])[:3])
+            if len(paper.get('authors', [])) > 3:
+                authors_str += " et al."
+
+            oa_badge = "🟢 Open Access" if oa_info.get('is_oa') else "🔒 Closed Access"
+
+            self._send_notification(
+                f"✅ *Paper Added*\n\n"
+                f"*{paper['title']}*\n\n"
+                f"👥 {authors_str}\n"
+                f"📅 {paper.get('year', 'N/A')}\n"
+                f"📰 {paper.get('journal', 'N/A')}\n"
+                f"{oa_badge}\n\n"
+                f"Paper ID: {paper_id}",
+                chat_id
+            )
+
+            return paper_id
+
+        except Exception as e:
+            self.logger.error(f"Failed to add paper: {e}", exc_info=True)
+            self._send_notification(f"❌ Failed to add paper: {str(e)}", chat_id)
+            raise
+
+    def _add_link_from_url(self, url: str, chat_id: int):
+        """Add link from URL (runs in background).
+
+        Args:
+            url: URL string
+            chat_id: Telegram chat ID for notifications
+        """
+        try:
+            db = self.core.db
+
+            # Check if already exists
+            cursor = db.conn.cursor()
+            cursor.execute("SELECT id, title FROM links WHERE url = ?", (url,))
+            existing = cursor.fetchone()
+
+            if existing:
+                self._send_notification(
+                    f"ℹ️ Link already in collection:\n{url}",
+                    chat_id
+                )
+                return "already_exists"
+
+            # Add link
+            link_id = db.insert_link(
+                url=url,
+                source="telegram",
+                title=None,  # Will be fetched later
+                notes="Added via Telegram bot"
+            )
+
+            self._send_notification(
+                f"✅ *Link Added*\n\n"
+                f"{url}\n\n"
+                f"Link ID: {link_id}\n"
+                f"Source: Telegram",
+                chat_id
+            )
+
+            # Publish event for archiving
+            self.publish('link.added', {'url': url, 'link_id': link_id})
+
+            return link_id
+
+        except Exception as e:
+            self.logger.error(f"Failed to add link: {e}", exc_info=True)
+            self._send_notification(f"❌ Failed to add link: {str(e)}", chat_id)
+            raise
+
+    def _process_pdf(self, file_path: str, file_name: str, chat_id: int):
+        """Process uploaded PDF (runs in background).
+
+        Args:
+            file_path: Path to PDF file
+            file_name: Original filename
+            chat_id: Telegram chat ID for notifications
+        """
+        try:
+            # TODO: Implement PDF processing
+            # - Extract text
+            # - Extract metadata (title, authors, etc.)
+            # - Try to find DOI in PDF
+            # - Add to papers or books table
+            # - Optionally: LLM analysis
+
+            self._send_notification(
+                f"⚠️ PDF processing not yet implemented.\n\n"
+                f"File saved: `{file_name}`\n\n"
+                f"Coming soon:\n"
+                f"• Text extraction\n"
+                f"• Metadata detection\n"
+                f"• DOI lookup\n"
+                f"• LLM analysis",
+                chat_id
+            )
+
+            # Clean up temp file
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                self.logger.warning(f"Failed to remove temp file: {e}")
+
+            return "pdf_processing_pending"
+
+        except Exception as e:
+            self.logger.error(f"Failed to process PDF: {e}", exc_info=True)
+            self._send_notification(f"❌ Failed to process PDF: {str(e)}", chat_id)
+            raise
+
     # Event handlers for notifications
 
     def _on_enrichment_complete(self, msg: Message):
@@ -390,13 +699,17 @@ URL: {url[:50]}...
 
         self._send_notification(notification)
 
-    def _send_notification(self, message: str):
+    def _send_notification(self, message: str, chat_id: Optional[int] = None):
         """Send a notification to the user.
 
         Args:
             message: Message text
+            chat_id: Optional chat ID (defaults to self.chat_id)
         """
-        if not self.application or not self.chat_id:
+        # Use provided chat_id or fall back to self.chat_id
+        target_chat_id = chat_id or self.chat_id
+
+        if not self.application or not target_chat_id:
             self.logger.debug("Skipping notification - no chat ID or bot not configured")
             return
 
@@ -409,7 +722,7 @@ URL: {url[:50]}...
         async def send():
             try:
                 await self.application.bot.send_message(
-                    chat_id=self.chat_id,
+                    chat_id=target_chat_id,
                     text=message,
                     parse_mode='Markdown'
                 )
