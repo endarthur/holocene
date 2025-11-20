@@ -379,8 +379,18 @@ You'll receive updates when:
             self.logger.error(f"Failed to get plugins: {e}", exc_info=True)
             plugins_msg += f"⚠️ Error: {str(e)[:50]}"
 
-        await update.message.reply_text(plugins_msg, parse_mode='Markdown')
-        self.messages_sent += 1
+        # Send response
+        try:
+            self.logger.info(f"Sending plugins response ({len(plugins_msg)} chars)")
+            await update.message.reply_text(plugins_msg, parse_mode='Markdown')
+            self.messages_sent += 1
+        except Exception as e:
+            self.logger.error(f"Failed to send plugins message: {e}", exc_info=True)
+            # Try sending without markdown if markdown parsing failed
+            try:
+                await update.message.reply_text(f"⚠️ Plugin list available but formatting failed: {str(e)[:100]}")
+            except:
+                pass
 
     async def _cmd_status(self, update, context):
         """Handle /status command."""
