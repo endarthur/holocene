@@ -91,6 +91,14 @@ msg_info "Initializing Holocene"
 su - holocene -c "cd /home/holocene/holocene && source venv/bin/activate && holo init" &>/dev/null || true
 msg_ok "Holocene initialized"
 
+# Ensure directories exist for systemd mount namespacing
+msg_info "Creating holocene directories"
+mkdir -p /home/holocene/.holocene
+mkdir -p /home/holocene/.config/holocene
+chown -R holocene:holocene /home/holocene/.holocene
+chown -R holocene:holocene /home/holocene/.config/holocene
+msg_ok "Directories created"
+
 # Create systemd service
 msg_info "Creating systemd service"
 cat > /etc/systemd/system/holod.service <<'EOF'
