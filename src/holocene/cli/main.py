@@ -19,6 +19,7 @@ from .stats_commands import stats
 from .mercadolivre_commands import mercadolivre
 from .inventory_commands import inventory
 from .ml_inventory_commands import ml_inventory
+from .daemon_commands import daemon
 
 console = Console()
 
@@ -40,6 +41,7 @@ cli.add_command(stats)
 cli.add_command(mercadolivre)
 cli.add_command(inventory)
 cli.add_command(ml_inventory)
+cli.add_command(daemon)
 
 
 @cli.command()
