@@ -103,10 +103,12 @@ holo init
 
 - **Core** (always installed): CLI, config, storage, basic integrations
 - **daemon**: holod background service + REST API (Flask)
-- **pdf**: PDF processing for books and papers
+- **pdf**: PDF processing for books, papers, and BibTeX
 - **mercadolivre**: MercadoLivre integration
 - **telegram**: Telegram bot for mobile notifications
 - **paperang**: Paperang thermal printer support
+- **research**: Vector embeddings and advanced search (ChromaDB)
+- **integrations**: External services (Apify, etc.)
 - **all**: Everything above
 - **dev**: Development tools (pytest, black, ruff)
 

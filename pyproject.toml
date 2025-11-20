@@ -45,6 +45,7 @@ pdf = [
     "pdfplumber>=0.10.0",     # PDF text extraction
     "pytesseract>=0.3.10",    # OCR
     "Pillow>=10.0.0",         # Image processing
+    "bibtexparser>=2.0.0",    # BibTeX parsing
 ]
 
 # MercadoLivre integration (scraping, favorites)
@@ -71,6 +72,19 @@ all = [
     "holocene[mercadolivre]",
     "holocene[telegram]",
     "holocene[paperang]",
+    "holocene[research]",
+    "holocene[integrations]",
+]
+
+# Research features (embeddings, advanced search)
+research = [
+    "chromadb>=0.4.0",        # Vector database for embeddings
+]
+
+# External integrations
+integrations = [
+    "apify-client>=1.7.0",    # Apify web scraping
+    "urllib3>=2.0.0",         # HTTP client (explicit)
 ]
 
 # Development dependencies
