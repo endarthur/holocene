@@ -144,6 +144,9 @@ class HoloceneDaemon:
             logger.info(f"Initializing PluginRegistry (device: {self.device})...")
             self.registry = PluginRegistry(self.core, device=self.device)
 
+            # Make registry accessible to plugins via core
+            self.core.registry = self.registry
+
             # Discover and load plugins
             logger.info("Discovering plugins...")
             self.registry.discover_plugins()

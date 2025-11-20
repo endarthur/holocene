@@ -346,26 +346,22 @@ You'll receive updates when:
 
         plugins_msg = "🔌 *Active Plugins*\n\n"
 
-        # Query REST API to get actual plugin status
+        # Get plugin status from registry
         try:
-            import requests
-            response = requests.get('http://localhost:5555/plugins', timeout=2)
-            if response.ok:
-                plugins = response.json()
-                for plugin in plugins:
-                    name = plugin['name']
-                    version = plugin['version']
-                    enabled = plugin['enabled']
+            if hasattr(self.core, 'registry') and self.core.registry:
+                for name, plugin in self.core.registry.plugins.items():
+                    version = plugin.metadata.get('version', '1.0.0')
+                    enabled = plugin.enabled
                     status = "✅" if enabled else "⏸️"
                     plugins_msg += f"• {name} {status} v{version}\n"
-                    if plugin.get('description'):
-                        desc = plugin['description'][:60]
+                    if plugin.metadata.get('description'):
+                        desc = plugin.metadata['description'][:60]
                         plugins_msg += f"  _{desc}_\n"
             else:
-                plugins_msg += "⚠️ Could not fetch plugin status"
+                plugins_msg += "⚠️ Registry not available"
         except Exception as e:
-            self.logger.error(f"Failed to fetch plugins: {e}")
-            plugins_msg += "⚠️ REST API not available"
+            self.logger.error(f"Failed to get plugins: {e}")
+            plugins_msg += f"⚠️ Error: {str(e)[:50]}"
 
         await update.message.reply_text(plugins_msg, parse_mode='Markdown')
         self.messages_sent += 1
