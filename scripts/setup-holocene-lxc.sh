@@ -127,7 +127,10 @@ case $TEMPLATE_CHOICE in
 esac
 
 # Storage
-STORAGE=$(pvesm status -content rootdir | awk 'NR>1 {print $1}' | head -n 1)
+# Template storage (needs to support vztmpl content type)
+TEMPLATE_STORAGE=$(pvesm status -content vztmpl | awk 'NR>1 {print $1}' | head -n 1)
+# Container storage (needs to support rootdir content type)
+CONTAINER_STORAGE=$(pvesm status -content rootdir | awk 'NR>1 {print $1}' | head -n 1)
 
 # Summary
 echo -e "\n${BL}[INFO]${CL} Configuration Summary:"
@@ -138,7 +141,8 @@ echo "  Disk:     ${DISK_SIZE}GB"
 echo "  RAM:      ${RAM}MB"
 echo "  Cores:    $CORES"
 echo "  Network:  $BRIDGE ($NET_CONFIG)"
-echo "  Storage:  $STORAGE"
+echo "  Template Storage: $TEMPLATE_STORAGE"
+echo "  Container Storage: $CONTAINER_STORAGE"
 echo ""
 
 read -p "Proceed with creation? (Y/n): " CONFIRM
@@ -149,9 +153,9 @@ fi
 
 # Check if template exists
 msg_info "Checking for template"
-if ! pveam list $STORAGE | grep -q $TEMPLATE; then
+if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$TEMPLATE"; then
     msg_info "Downloading template: $TEMPLATE"
-    pveam download $STORAGE $TEMPLATE
+    pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
     msg_ok "Template downloaded"
 else
     msg_ok "Template found"
@@ -159,12 +163,12 @@ fi
 
 # Create container
 msg_info "Creating LXC container"
-pct create $CTID $OSTEMPLATE \
-    --hostname $HOSTNAME \
-    --cores $CORES \
-    --memory $RAM \
-    --rootfs $STORAGE:$DISK_SIZE \
-    --net0 name=eth0,bridge=$BRIDGE,$NET_CONFIG \
+pct create "$CTID" "$OSTEMPLATE" \
+    --hostname "$HOSTNAME" \
+    --cores "$CORES" \
+    --memory "$RAM" \
+    --rootfs "$CONTAINER_STORAGE:$DISK_SIZE" \
+    --net0 "name=eth0,bridge=$BRIDGE,$NET_CONFIG" \
     --features nesting=1 \
     --unprivileged 1 \
     --onboot 1 \
@@ -173,19 +177,19 @@ msg_ok "Container created"
 
 # Set password
 msg_info "Setting root password"
-echo "root:holocene" | pct exec $CTID -- chpasswd
+echo "root:holocene" | pct exec "$CTID" -- chpasswd
 msg_ok "Root password set to: holocene"
 
 # Start container
 msg_info "Starting container"
-pct start $CTID
+pct start "$CTID"
 sleep 5
 msg_ok "Container started"
 
 # Wait for network
 msg_info "Waiting for network"
-for i in {1..30}; do
-    if pct exec $CTID -- ping -c 1 8.8.8.8 &>/dev/null; then
+for _ in {1..30}; do
+    if pct exec "$CTID" -- ping -c 1 8.8.8.8 &>/dev/null; then
         break
     fi
     sleep 1
@@ -193,12 +197,12 @@ done
 msg_ok "Network ready"
 
 # Get container IP
-CONTAINER_IP=$(pct exec $CTID -- hostname -I | awk '{print $1}')
+CONTAINER_IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
 msg_ok "Container IP: $CONTAINER_IP"
 
 # Download and run bootstrap script
 msg_info "Running bootstrap script"
-pct exec $CTID -- bash -c "curl -fsSL https://raw.githubusercontent.com/endarthur/holocene/main/scripts/bootstrap-holocene.sh | bash"
+pct exec "$CTID" -- bash -c "wget -qO- https://raw.githubusercontent.com/endarthur/holocene/main/scripts/bootstrap-holocene.sh | bash"
 msg_ok "Bootstrap complete"
 
 # Summary
