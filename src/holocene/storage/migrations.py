@@ -77,6 +77,16 @@ MIGRATIONS: List[Dict] = [
         # because we need to check if columns exist first
         'requires_column_check': True,
     },
+    {
+        'version': 6,
+        'name': 'migrate_books_to_metadata_json',
+        'description': 'Migrate books enrichment and classification data to metadata JSON',
+        'up': """
+            -- This migration is handled specially in apply_migration_6()
+            -- because we need to construct JSON from existing columns
+        """,
+        'requires_column_check': True,
+    },
 ]
 
 
@@ -177,6 +187,139 @@ def apply_migration_5(conn: sqlite3.Connection):
     conn.commit()
 
 
+def apply_migration_6(conn: sqlite3.Connection):
+    """Special handler for migration 6 (migrate books data to metadata JSON).
+
+    Migrates enrichment, classification, access, and reading data from
+    individual columns to metadata JSON structure.
+
+    Structure:
+    {
+      "enrichment": {"summary": "...", "tags": [...], "enriched_at": "..."},
+      "classification": {"system": "dewey", "udc": "...", "confidence": "...", ...},
+      "access": {"status": "...", "url": "...", "has_local_pdf": true, ...},
+      "reading": {"started_at": "...", "finished_at": "..."},
+      "references": {"list": [...]}
+    }
+
+    Args:
+        conn: SQLite connection
+    """
+    import json
+
+    cursor = conn.cursor()
+
+    # Check if books table exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='books'
+    """)
+    if not cursor.fetchone():
+        logger.debug("Books table doesn't exist, skipping migration 6")
+        return
+
+    logger.info("Migrating books data to metadata JSON...")
+
+    # Get all books
+    cursor.execute("SELECT * FROM books")
+    books = cursor.fetchall()
+
+    # Get column names
+    column_names = [description[0] for description in cursor.description]
+
+    migrated_count = 0
+
+    for book_row in books:
+        book = dict(zip(column_names, book_row))
+        book_id = book['id']
+
+        # Parse existing metadata (might be empty or have data)
+        existing_metadata = json.loads(book.get('metadata') or '{}')
+
+        # Build metadata structure
+        metadata = existing_metadata.copy()
+
+        # Enrichment data
+        if book.get('enriched_summary') or book.get('enriched_tags') or book.get('enriched_at'):
+            enrichment = {}
+            if book.get('enriched_summary'):
+                enrichment['summary'] = book['enriched_summary']
+            if book.get('enriched_tags'):
+                try:
+                    enrichment['tags'] = json.loads(book['enriched_tags'])
+                except (json.JSONDecodeError, TypeError):
+                    enrichment['tags'] = []
+            if book.get('enriched_at'):
+                enrichment['enriched_at'] = book['enriched_at']
+
+            if enrichment:
+                metadata['enrichment'] = enrichment
+
+        # Classification data
+        classification = {}
+        if book.get('udc_classification'):
+            classification['udc'] = book['udc_classification']
+        if book.get('classification_system'):
+            classification['system'] = book['classification_system']
+        if book.get('classification_confidence'):
+            classification['confidence'] = book['classification_confidence']
+        if book.get('classified_at'):
+            classification['classified_at'] = book['classified_at']
+        if book.get('cutter_number'):
+            classification['cutter_number'] = book['cutter_number']
+        if book.get('call_number'):
+            classification['call_number'] = book['call_number']
+
+        if classification:
+            metadata['classification'] = classification
+
+        # Access data
+        access = {}
+        if book.get('access_status'):
+            access['status'] = book['access_status']
+        if book.get('access_url'):
+            access['url'] = book['access_url']
+        if book.get('has_local_pdf'):
+            access['has_local_pdf'] = bool(book['has_local_pdf'])
+        if book.get('local_pdf_path'):
+            access['local_pdf_path'] = book['local_pdf_path']
+        if book.get('downloaded_at'):
+            access['downloaded_at'] = book['downloaded_at']
+
+        if access:
+            metadata['access'] = access
+
+        # Reading tracking
+        reading = {}
+        if book.get('started_reading_at'):
+            reading['started_at'] = book['started_reading_at']
+        if book.get('finished_reading_at'):
+            reading['finished_at'] = book['finished_reading_at']
+
+        if reading:
+            metadata['reading'] = reading
+
+        # References
+        if book.get('ref_list'):
+            try:
+                ref_list = json.loads(book['ref_list'])
+                metadata['references'] = {'list': ref_list}
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Only update if we have metadata to add
+        if metadata and metadata != existing_metadata:
+            cursor.execute("""
+                UPDATE books
+                SET metadata = ?
+                WHERE id = ?
+            """, (json.dumps(metadata), book_id))
+            migrated_count += 1
+
+    conn.commit()
+    logger.info(f"Migrated {migrated_count} books to metadata JSON")
+
+
 def apply_migrations(conn: sqlite3.Connection, target_version: Optional[int] = None):
     """Apply pending migrations to database.
 
@@ -222,6 +365,8 @@ def apply_migrations(conn: sqlite3.Connection, target_version: Optional[int] = N
             if migration.get('requires_column_check'):
                 if version == 5:
                     apply_migration_5(conn)
+                elif version == 6:
+                    apply_migration_6(conn)
             else:
                 # Execute migration SQL
                 cursor = conn.cursor()

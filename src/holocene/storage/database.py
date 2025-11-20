@@ -1317,15 +1317,34 @@ class Database:
         now = datetime.now().isoformat()
 
         import json
+
+        # Get current metadata
+        cursor.execute("SELECT metadata FROM books WHERE id = ?", (book_id,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        metadata = json.loads(row[0] or '{}')
+
+        # Update enrichment section in metadata JSON
+        metadata['enrichment'] = {
+            'summary': summary,
+            'tags': tags,
+            'enriched_at': now
+        }
+
+        # Update metadata JSON (primary storage)
+        # Also update old columns for backwards compatibility
         tags_json = json.dumps(tags) if tags else None
 
         cursor.execute("""
             UPDATE books
-            SET enriched_summary = ?,
+            SET metadata = ?,
+                enriched_summary = ?,
                 enriched_tags = ?,
                 enriched_at = ?
             WHERE id = ?
-        """, (summary, tags_json, now, book_id))
+        """, (json.dumps(metadata), summary, tags_json, now, book_id))
 
         self.conn.commit()
         return cursor.rowcount > 0
@@ -1356,16 +1375,43 @@ class Database:
         cursor = self.conn.cursor()
         now = datetime.now().isoformat()
 
+        import json
+
+        # Get current metadata
+        cursor.execute("SELECT metadata FROM books WHERE id = ?", (book_id,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        metadata = json.loads(row[0] or '{}')
+
+        # Update classification section in metadata JSON
+        metadata['classification'] = {
+            'udc': udc_number,
+            'system': classification_system,
+            'confidence': confidence,
+            'classified_at': now
+        }
+
+        if cutter_number:
+            metadata['classification']['cutter_number'] = cutter_number
+        if call_number:
+            metadata['classification']['call_number'] = call_number
+
+        # Update metadata JSON (primary storage)
+        # Also update old columns for backwards compatibility
         cursor.execute("""
             UPDATE books
-            SET udc_classification = ?,
+            SET metadata = ?,
+                udc_classification = ?,
                 classification_system = ?,
                 classification_confidence = ?,
                 classified_at = ?,
                 cutter_number = ?,
                 call_number = ?
             WHERE id = ?
-        """, (udc_number, classification_system, confidence, now, cutter_number, call_number, book_id))
+        """, (json.dumps(metadata), udc_number, classification_system, confidence, now,
+              cutter_number, call_number, book_id))
 
         self.conn.commit()
         return cursor.rowcount > 0
