@@ -219,6 +219,23 @@ nanogpt_models.csv
 nanogpt_models.xlsx
 models_nanogpt_text_*.html
 
+# Personal files and temp directories
+personal/
+temp_*.py
+tmp_*.py
+
+# Test artifacts
 tests_temp/
 test_*.png
 *_output.png
+*.jpg
+*.jpeg
+*.gif
+
+# Windows artifacts
+nul
+Thumbs.db
+desktop.ini
+
+# Weird database files in wrong locations
+User*.db
