@@ -358,20 +358,22 @@ You'll receive updates when:
                     plugins_msg += f"• {name} {status} v{version}\n"
                     if metadata.get('description'):
                         desc = metadata['description'][:60]
+                        # Escape markdown special chars in description
+                        desc = desc.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
                         plugins_msg += f"  _{desc}_\n"
 
                 # Add debug info about API accessibility
-                plugins_msg += f"\n_Registry: Direct access_"
+                plugins_msg += f"\n`Registry: Direct access`"
 
                 # Test API accessibility for diagnostics
                 try:
                     import requests
                     test_response = requests.get('http://localhost:5555/health', timeout=1)
-                    plugins_msg += f"\n_API: ✅ {test_response.status_code}_"
+                    plugins_msg += f"\n`API: ✅ {test_response.status_code}`"
                 except ImportError:
-                    plugins_msg += f"\n_API: ⚠️ requests not installed_"
+                    plugins_msg += f"\n`API: ⚠️ requests not installed`"
                 except Exception as api_err:
-                    plugins_msg += f"\n_API: ❌ {type(api_err).__name__}_"
+                    plugins_msg += f"\n`API: ❌ {type(api_err).__name__}`"
                     self.logger.warning(f"REST API test failed: {api_err}")
             else:
                 plugins_msg += "⚠️ Registry not available"
