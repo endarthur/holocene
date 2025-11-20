@@ -46,6 +46,7 @@ class TelegramBotPlugin(Plugin):
         self.messages_sent = 0
         self.commands_received = 0
         self.notifications_sent = 0
+        self.bot_loop = None  # Event loop running the bot
 
         if not TELEGRAM_AVAILABLE:
             self.logger.warning("python-telegram-bot not installed - bot will be disabled")
@@ -109,10 +110,20 @@ class TelegramBotPlugin(Plugin):
         )
 
     def _start_bot(self):
-        """Start the bot (runs in background thread)."""
+        """Start the bot (runs in background thread).
+
+        This runs in a ThreadPoolExecutor thread, so we need to create
+        a new event loop for the async telegram bot.
+        """
         try:
-            # Run polling in this background thread
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self.bot_loop = loop  # Store for notifications
+
+            # Run polling in this event loop
             # This will block until the bot is stopped
+            self.logger.info("Starting Telegram bot polling...")
             self.application.run_polling(
                 allowed_updates=["message", "callback_query"],
                 drop_pending_updates=True
@@ -122,6 +133,13 @@ class TelegramBotPlugin(Plugin):
         except Exception as e:
             self.logger.error(f"Failed to start bot: {e}", exc_info=True)
             raise
+        finally:
+            # Clean up event loop
+            self.bot_loop = None
+            try:
+                loop.close()
+            except:
+                pass
 
     async def _cmd_start(self, update, context):
         """Handle /start command."""
@@ -305,6 +323,10 @@ URL: {url[:50]}...
             self.logger.debug("Skipping notification - no chat ID or bot not configured")
             return
 
+        if not self.bot_loop or not self.bot_loop.is_running():
+            self.logger.warning("Bot loop not running, skipping notification")
+            return
+
         self.notifications_sent += 1
 
         async def send():
@@ -318,11 +340,11 @@ URL: {url[:50]}...
             except Exception as e:
                 self.logger.error(f"Failed to send notification: {e}")
 
-        # Run async send in background
+        # Schedule the send on the bot's event loop (thread-safe)
         try:
-            asyncio.run(send())
+            asyncio.run_coroutine_threadsafe(send(), self.bot_loop)
         except Exception as e:
-            self.logger.error(f"Failed to send notification: {e}")
+            self.logger.error(f"Failed to schedule notification: {e}")
 
     def on_disable(self):
         """Disable the plugin and stop bot."""
