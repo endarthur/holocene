@@ -82,9 +82,14 @@ su - holocene -c "cd /home/holocene/holocene && python3.11 -m venv venv" &>/dev/
 msg_ok "Virtual environment created"
 
 # Install Holocene with all optional dependencies
-msg_info "Installing Holocene"
-su - holocene -c "cd /home/holocene/holocene && source venv/bin/activate && pip install -q --upgrade pip && pip install -q -e '.[all]'" &>/dev/null
-msg_ok "Holocene installed"
+msg_info "Installing Holocene (this may take a few minutes)"
+if su - holocene -c "cd /home/holocene/holocene && source venv/bin/activate && pip install -q --upgrade pip && pip install -q -e '.[all]'" 2>/tmp/holocene-install-error.log; then
+    msg_ok "Holocene installed"
+else
+    msg_error "Installation failed! Check /tmp/holocene-install-error.log"
+    cat /tmp/holocene-install-error.log
+    exit 1
+fi
 
 # Initialize Holocene
 msg_info "Initializing Holocene"
@@ -205,6 +210,7 @@ msg_info "Creating shell aliases"
 cat >> /home/holocene/.bashrc <<'EOF'
 
 # Holocene aliases
+alias holoenv='cd /home/holocene/holocene && source venv/bin/activate'
 alias holod-status='systemctl status holod'
 alias holod-logs='journalctl -u holod -f'
 alias holod-restart='sudo systemctl restart holod'
@@ -223,13 +229,44 @@ msg_ok "Shell aliases created"
 msg_info "Creating update script"
 cat > /usr/local/bin/update-holocene <<'EOF'
 #!/bin/bash
-echo "Updating Holocene..."
+set -e
+
+echo "🔄 Updating Holocene..."
+
+# Switch to holocene user for git operations
 cd /home/holocene/holocene
-git pull
-source venv/bin/activate
-pip install -e . --upgrade
+
+# Stash any local changes
+if ! su - holocene -c "cd /home/holocene/holocene && git diff --quiet"; then
+    echo "⚠️  Local changes detected, stashing..."
+    su - holocene -c "cd /home/holocene/holocene && git stash"
+fi
+
+# Pull latest changes
+echo "📥 Pulling latest changes..."
+su - holocene -c "cd /home/holocene/holocene && git pull"
+
+# Update dependencies
+echo "📦 Updating dependencies..."
+su - holocene -c "cd /home/holocene/holocene && source venv/bin/activate && pip install -q --upgrade pip && pip install -q -e '.[all]' --upgrade"
+
+# Restart daemon
+echo "🔄 Restarting holod daemon..."
 sudo systemctl restart holod
-echo "✓ Holocene updated!"
+
+# Wait for startup
+sleep 3
+
+# Check status
+if systemctl is-active --quiet holod; then
+    echo "✓ Holocene updated and restarted successfully!"
+    echo ""
+    echo "Changes:"
+    su - holocene -c "cd /home/holocene/holocene && git log --oneline -5"
+else
+    echo "❌ Failed to restart holod! Check logs: journalctl -u holod -n 50"
+    exit 1
+fi
 EOF
 
 chmod +x /usr/local/bin/update-holocene

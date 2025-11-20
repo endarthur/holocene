@@ -60,8 +60,8 @@ echo -e "${BL}[INFO]${CL} Configuring container settings..."
 
 # Container ID
 while true; do
-    read -p "Container ID (default: 100): " CTID
-    CTID=${CTID:-100}
+    read -p "Container ID (default: 400): " CTID
+    CTID=${CTID:-400}
     if pct status $CTID &>/dev/null; then
         echo -e "${RD}Container $CTID already exists${CL}"
     else
