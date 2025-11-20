@@ -10,6 +10,7 @@ from .crossref_client import CrossrefClient
 from .openalex_client import OpenAlexClient
 from .internet_archive_client import InternetArchiveClient
 from .unpaywall_client import UnpaywallClient
+from .arxiv_client import ArxivClient
 from .bibtex_importer import BibTeXImporter
 from .pdf_metadata_extractor import PDFMetadataExtractor
 from .udc_classifier import UDCClassifier
@@ -27,6 +28,7 @@ __all__ = [
     "OpenAlexClient",
     "InternetArchiveClient",
     "UnpaywallClient",
+    "ArxivClient",
     "BibTeXImporter",
     "PDFMetadataExtractor",
     "UDCClassifier",

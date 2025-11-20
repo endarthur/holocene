@@ -372,7 +372,18 @@ You'll receive updates when:
             )
             return
 
-        # Check for URL
+        # Check for arXiv ID/URL (before generic URL check)
+        arxiv_id = self._detect_arxiv(text)
+        if arxiv_id:
+            await update.message.reply_text(f"📄 Detected arXiv paper: `{arxiv_id}`\nProcessing...", parse_mode='Markdown')
+            self.run_in_background(
+                lambda: self._add_paper_from_arxiv(arxiv_id, update.effective_chat.id),
+                callback=lambda result: self.logger.info(f"arXiv paper added: {result}"),
+                error_handler=lambda e: self.logger.error(f"Failed to add arXiv paper: {e}")
+            )
+            return
+
+        # Check for URL (generic links)
         url = self._detect_url(text)
         if url:
             await update.message.reply_text(f"🔗 Detected URL: `{url}`\nProcessing...", parse_mode='Markdown')
@@ -383,10 +394,11 @@ You'll receive updates when:
             )
             return
 
-        # No DOI or URL found
+        # No DOI, arXiv, or URL found
         await update.message.reply_text(
             "ℹ️ I can process:\n"
             "• DOIs (e.g., 10.1234/example)\n"
+            "• arXiv papers (e.g., 2103.12345 or arxiv.org/abs/...)\n"
             "• URLs (http/https links)\n"
             "• PDFs (send as document)\n\n"
             "Use /help for available commands."
@@ -470,6 +482,20 @@ You'll receive updates when:
         url_pattern = r'https?://[^\s]+'
         match = re.search(url_pattern, text)
         return match.group(0) if match else None
+
+    def _detect_arxiv(self, text: str) -> Optional[str]:
+        """Detect arXiv ID in text.
+
+        Args:
+            text: Input text
+
+        Returns:
+            arXiv ID if found, None otherwise
+        """
+        from ..research import ArxivClient
+
+        arxiv = ArxivClient()
+        return arxiv.extract_arxiv_id(text)
 
     def _add_paper_from_doi(self, doi: str, chat_id: int):
         """Add paper from DOI (runs in background).
@@ -555,6 +581,79 @@ You'll receive updates when:
         except Exception as e:
             self.logger.error(f"Failed to add paper: {e}", exc_info=True)
             self._send_notification(f"❌ Failed to add paper: {str(e)}", chat_id)
+            raise
+
+    def _add_paper_from_arxiv(self, arxiv_id: str, chat_id: int):
+        """Add paper from arXiv (runs in background).
+
+        Args:
+            arxiv_id: arXiv ID
+            chat_id: Telegram chat ID for notifications
+        """
+        try:
+            from ..research import ArxivClient
+
+            db = self.core.db
+            arxiv = ArxivClient()
+
+            # Check if already exists by arXiv ID
+            cursor = db.conn.cursor()
+            cursor.execute("SELECT id, title FROM papers WHERE arxiv_id = ?", (arxiv_id,))
+            existing = cursor.fetchone()
+
+            if existing:
+                self._send_notification(
+                    f"ℹ️ Paper already in collection:\n*{existing['title']}*",
+                    chat_id
+                )
+                return "already_exists"
+
+            # Fetch metadata from arXiv
+            self.logger.info(f"Fetching arXiv paper metadata: {arxiv_id}")
+            paper = arxiv.get_paper(arxiv_id)
+
+            if not paper:
+                self._send_notification(f"❌ Paper not found with arXiv ID: `{arxiv_id}`", chat_id)
+                return "not_found"
+
+            # Add to database
+            paper_id = db.add_paper(
+                title=paper['title'],
+                authors=paper.get('authors', []),
+                arxiv_id=arxiv_id,
+                doi=paper.get('doi'),
+                abstract=paper.get('abstract'),
+                publication_date=paper.get('published_date'),
+                url=paper.get('url'),
+                pdf_url=paper.get('pdf_url'),
+                is_open_access=True,  # arXiv papers are always open access
+                oa_status='gold',
+                oa_color='gold'
+            )
+
+            # Send success notification
+            authors_str = ", ".join(paper.get('authors', [])[:3])
+            if len(paper.get('authors', [])) > 3:
+                authors_str += " et al."
+
+            categories_str = ", ".join(paper.get('categories', [])[:3])
+
+            self._send_notification(
+                f"✅ *arXiv Paper Added*\n\n"
+                f"*{paper['title']}*\n\n"
+                f"👥 {authors_str}\n"
+                f"📅 {paper.get('published_date', 'N/A')}\n"
+                f"🏷️ {categories_str}\n"
+                f"🟢 Open Access (arXiv)\n\n"
+                f"Paper ID: {paper_id}",
+                chat_id
+            )
+
+            return paper_id
+
+        except Exception as e:
+            self.logger.error(f"Failed to add arXiv paper: {e}", exc_info=True)
+            self._send_notification(f"❌ Failed to add arXiv paper: {str(e)}", chat_id)
             raise
 
     def _add_link_from_url(self, url: str, chat_id: int):
