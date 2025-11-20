@@ -2829,6 +2829,55 @@ def wikipedia(query: str, limit: int):
 
 
 
+@cli.command("db-status")
+def db_status():
+    """Show database schema version and migration history."""
+    from ..storage.database import Database
+    from ..storage import migrations
+    from ..config import load_config
+    from rich.table import Table
+
+    config = load_config()
+    db = Database(config.data_dir / "holocene.db")
+
+    # Get current version
+    current_version = migrations.get_current_version(db.conn)
+    max_version = max(m['version'] for m in migrations.MIGRATIONS)
+
+    console.print(f"\n[cyan]Database:[/cyan] {config.data_dir / 'holocene.db'}")
+    console.print(f"[cyan]Schema Version:[/cyan] {current_version} / {max_version}")
+
+    # Check if up to date
+    if current_version == max_version:
+        console.print("[green]✓ Database is up to date[/green]\n")
+    else:
+        console.print(f"[yellow]⚠ {max_version - current_version} pending migration(s)[/yellow]\n")
+
+    # Get migration history
+    history = migrations.get_migration_history(db.conn)
+
+    if history:
+        # Create table
+        table = Table(title="Migration History")
+        table.add_column("Version", style="cyan")
+        table.add_column("Name", style="white")
+        table.add_column("Applied", style="dim")
+
+        for record in history:
+            table.add_row(
+                f"v{record['version']}",
+                record['name'],
+                record['applied_at'][:19]  # Trim microseconds
+            )
+
+        console.print(table)
+        console.print()
+    else:
+        console.print("[yellow]No migrations applied yet[/yellow]\n")
+
+    db.close()
+
+
 # Register print commands
 from .print_commands import print_group
 cli.add_command(print_group, name="print")

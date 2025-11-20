@@ -209,6 +209,10 @@ __marimo__/
 # Holocene-specific
 holocene.db
 holocene.db-journal
+holocene.db-wal
+holocene.db-shm
+*.db-wal
+*.db-shm
 .holocene/
 nanogpt_models.json
 nanogpt_models.csv

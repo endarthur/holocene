@@ -3,10 +3,14 @@
 import sqlite3
 import re
 import unicodedata
+import logging
 from pathlib import Path
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 from ..core.models import Activity
+from . import migrations
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_trust_tier(archive_date: Optional[str]) -> str:
@@ -147,6 +151,10 @@ class Database:
         """Initialize database schema."""
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row  # Access columns by name
+
+        # CRITICAL: Enable foreign keys on EVERY connection
+        # (This setting is not persistent across connections)
+        self.conn.execute("PRAGMA foreign_keys = ON")
 
         cursor = self.conn.cursor()
 
@@ -747,6 +755,10 @@ class Database:
 
         # Migrate papers table to make DOI nullable (if needed)
         self._migrate_papers_doi_nullable(cursor)
+
+        # Apply pending migrations
+        # This runs AFTER base tables are created, adds indexes/columns/pragmas
+        migrations.apply_migrations(self.conn)
 
         self.conn.commit()
 
