@@ -545,8 +545,12 @@ You'll receive updates when:
             await update.message.reply_text(msg, parse_mode='Markdown')
             self.messages_sent += 1
         except Exception as e:
-            self.logger.error(f"Classification error: {e}")
-            await update.message.reply_text("❌ Classification failed")
+            self.logger.error(f"Classification error: {e}", exc_info=True)
+            # Send error details to user
+            try:
+                await update.message.reply_text(f"❌ Classification failed: {str(e)[:100]}")
+            except:
+                await update.message.reply_text("❌ Classification failed")
 
     # Message and document handlers
 
