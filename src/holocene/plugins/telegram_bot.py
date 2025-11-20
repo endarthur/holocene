@@ -47,6 +47,7 @@ class TelegramBotPlugin(Plugin):
         self.commands_received = 0
         self.notifications_sent = 0
         self.bot_loop = None  # Event loop running the bot
+        self.running_future = None  # Future that keeps bot running
 
         if not TELEGRAM_AVAILABLE:
             self.logger.warning("python-telegram-bot not installed - bot will be disabled")
@@ -113,7 +114,8 @@ class TelegramBotPlugin(Plugin):
         """Start the bot (runs in background thread).
 
         This runs in a ThreadPoolExecutor thread, so we need to create
-        a new event loop for the async telegram bot.
+        a new event loop for the async telegram bot. We can't use run_polling()
+        because it tries to set signal handlers which only work in main thread.
         """
         try:
             # Create new event loop for this thread
@@ -121,13 +123,34 @@ class TelegramBotPlugin(Plugin):
             asyncio.set_event_loop(loop)
             self.bot_loop = loop  # Store for notifications
 
-            # Run polling in this event loop
-            # This will block until the bot is stopped
-            self.logger.info("Starting Telegram bot polling...")
-            self.application.run_polling(
-                allowed_updates=["message", "callback_query"],
-                drop_pending_updates=True
-            )
+            async def run():
+                """Start polling without signal handlers."""
+                await self.application.initialize()
+                await self.application.start()
+
+                # Start the updater (polling)
+                await self.application.updater.start_polling(
+                    allowed_updates=["message", "callback_query"],
+                    drop_pending_updates=True
+                )
+
+                self.logger.info("Telegram bot polling started")
+
+                # Keep running until stopped
+                # The updater will keep polling in the background
+                # We just need to keep the loop alive
+                try:
+                    await asyncio.Future()  # Run forever
+                except asyncio.CancelledError:
+                    self.logger.info("Bot polling cancelled")
+                finally:
+                    # Clean shutdown
+                    await self.application.updater.stop()
+                    await self.application.stop()
+                    await self.application.shutdown()
+
+            # Run the polling loop
+            loop.run_until_complete(run())
             self.logger.info("Telegram bot polling stopped")
             return True
         except Exception as e:
