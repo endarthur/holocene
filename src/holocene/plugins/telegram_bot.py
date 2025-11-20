@@ -351,12 +351,13 @@ You'll receive updates when:
         try:
             if hasattr(self.core, 'registry') and self.core.registry:
                 for name, plugin in self.core.registry._plugins.items():
-                    version = plugin.metadata.get('version', '1.0.0')
+                    metadata = plugin.get_metadata()
+                    version = metadata.get('version', '1.0.0')
                     enabled = plugin.enabled
                     status = "✅" if enabled else "⏸️"
                     plugins_msg += f"• {name} {status} v{version}\n"
-                    if plugin.metadata.get('description'):
-                        desc = plugin.metadata['description'][:60]
+                    if metadata.get('description'):
+                        desc = metadata['description'][:60]
                         plugins_msg += f"  _{desc}_\n"
 
                 # Add debug info about API accessibility
