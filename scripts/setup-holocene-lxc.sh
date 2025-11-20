@@ -193,16 +193,16 @@ pct create "$CTID" "$OSTEMPLATE" \
     --start 0
 msg_ok "Container created"
 
-# Set password
-msg_info "Setting root password"
-echo "root:holocene" | pct exec "$CTID" -- chpasswd
-msg_ok "Root password set to: holocene"
-
 # Start container
 msg_info "Starting container"
 pct start "$CTID"
 sleep 5
 msg_ok "Container started"
+
+# Set password
+msg_info "Setting root password"
+echo "root:holocene" | pct exec "$CTID" -- chpasswd
+msg_ok "Root password set to: holocene"
 
 # Wait for network
 msg_info "Waiting for network"
