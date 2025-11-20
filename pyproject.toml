@@ -61,6 +61,7 @@ telegram = [
 paperang = [
     "pyusb>=1.2.1",           # USB communication
     "Pillow>=10.0.0",         # Image processing (shared with pdf)
+    "numpy>=1.24.0",          # Array operations for image rendering
 ]
 
 # All optional features (for full installation)

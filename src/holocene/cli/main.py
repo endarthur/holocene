@@ -2976,9 +2976,13 @@ Status: {'[green]Enabled[/green]' if plugin.enabled else '[dim]Disabled[/dim]'}
     core.shutdown()
 
 
-# Register print commands
-from .print_commands import print_group
-cli.add_command(print_group, name="print")
+# Register print commands (optional: requires paperang dependencies)
+try:
+    from .print_commands import print_group
+    cli.add_command(print_group, name="print")
+except ImportError:
+    # Paperang dependencies not installed
+    pass
 
 if __name__ == "__main__":
     cli()
