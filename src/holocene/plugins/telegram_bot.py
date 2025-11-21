@@ -424,40 +424,54 @@ You'll receive updates when:
             await update.message.reply_text("❌ Unauthorized")
             return
 
-        db = self.core.db
-        recent_msg = "📚 *Recently Added*\n\n"
+        try:
+            db = self.core.db
+            recent_msg = "📚 *Recently Added*\n\n"
 
-        # Get recent books (last 5)
-        books = db.get_books(limit=5)
-        if books:
-            recent_msg += "*Books:*\n"
-            for book in books:
-                title = book['title'][:50] + "..." if len(book['title']) > 50 else book['title']
-                recent_msg += f"• {title}\n"
-            recent_msg += "\n"
+            # Get recent books (last 5)
+            books = db.get_books(limit=5)
+            if books:
+                recent_msg += "*Books:*\n"
+                for book in books:
+                    title = book['title'][:50] + "..." if len(book['title']) > 50 else book['title']
+                    # Escape markdown characters
+                    title = title.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+                    recent_msg += f"• {title}\n"
+                recent_msg += "\n"
 
-        # Get recent papers (last 5)
-        papers = db.get_papers(limit=5)
-        if papers:
-            recent_msg += "*Papers:*\n"
-            for paper in papers:
-                title = paper['title'][:50] + "..." if len(paper['title']) > 50 else paper['title']
-                recent_msg += f"• {title}\n"
-            recent_msg += "\n"
+            # Get recent papers (last 5)
+            papers = db.get_papers(limit=5)
+            if papers:
+                recent_msg += "*Papers:*\n"
+                for paper in papers:
+                    title = paper['title'][:50] + "..." if len(paper['title']) > 50 else paper['title']
+                    # Escape markdown characters
+                    title = title.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+                    recent_msg += f"• {title}\n"
+                recent_msg += "\n"
 
-        # Get recent links (last 5)
-        links = db.get_links(limit=5)
-        if links:
-            recent_msg += "*Links:*\n"
-            for link in links:
-                title = link.get('title', link['url'])[:50] + "..." if len(link.get('title', link['url'])) > 50 else link.get('title', link['url'])
-                recent_msg += f"• {title}\n"
+            # Get recent links (last 5)
+            links = db.get_links(limit=5)
+            if links:
+                recent_msg += "*Links:*\n"
+                for link in links:
+                    title = link.get('title', link['url'])[:50] + "..." if len(link.get('title', link['url'])) > 50 else link.get('title', link['url'])
+                    # Escape markdown characters
+                    title = title.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+                    recent_msg += f"• {title}\n"
 
-        if len(recent_msg) == len("📚 *Recently Added*\n\n"):
-            recent_msg += "_No items found_"
+            if len(recent_msg) == len("📚 *Recently Added*\n\n"):
+                recent_msg += "_No items found_"
 
-        await update.message.reply_text(recent_msg, parse_mode='Markdown')
-        self.messages_sent += 1
+            self.logger.info(f"Sending recent items response ({len(recent_msg)} chars)")
+            await update.message.reply_text(recent_msg, parse_mode='Markdown')
+            self.messages_sent += 1
+        except Exception as e:
+            self.logger.error(f"Failed to get recent items: {e}", exc_info=True)
+            try:
+                await update.message.reply_text(f"❌ Failed to get recent items: {str(e)[:100]}")
+            except:
+                await update.message.reply_text("❌ Failed to get recent items")
 
     async def _cmd_search(self, update, context):
         """Handle /search command - search books and papers."""
