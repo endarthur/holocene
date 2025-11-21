@@ -908,7 +908,7 @@ You'll receive updates when:
                 )
                 return "already_exists"
 
-            # Add link
+            # Add link (unwrapping happens inside insert_link)
             link_id = db.insert_link(
                 url=url,
                 source="telegram",
@@ -916,13 +916,26 @@ You'll receive updates when:
                 notes="Added via Telegram bot"
             )
 
-            self._send_notification(
-                f"✅ *Link Added*\n\n"
-                f"{url}\n\n"
-                f"Link ID: {link_id}\n"
-                f"Source: Telegram",
-                chat_id
-            )
+            # Check if URL was unwrapped by querying what was actually saved
+            cursor.execute("SELECT url, title FROM links WHERE id = ?", (link_id,))
+            saved_link = cursor.fetchone()
+            actual_url = saved_link['url'] if saved_link else url
+
+            # Build notification message
+            msg = f"✅ *Link Added*\n\n"
+
+            if actual_url != url:
+                # URL was unwrapped
+                msg += f"🔗 Original: {url}\n"
+                msg += f"📍 Unwrapped: {actual_url}\n\n"
+            else:
+                # URL unchanged
+                msg += f"{url}\n\n"
+
+            msg += f"Link ID: {link_id}\n"
+            msg += f"Source: Telegram"
+
+            self._send_notification(msg, chat_id)
 
             # Publish event for archiving
             self.publish('link.added', {'url': url, 'link_id': link_id})
