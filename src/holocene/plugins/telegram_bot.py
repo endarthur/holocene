@@ -535,6 +535,9 @@ You'll receive updates when:
         try:
             result = await asyncio.get_event_loop().run_in_executor(None, classify)
 
+            # Log what we got back
+            self.logger.info(f"Classification result: {result}")
+
             if result and result.get('dewey'):
                 msg = f"📊 *Classification Result*\n\n"
                 msg += f"*Topic:* {topic}\n"
@@ -543,6 +546,7 @@ You'll receive updates when:
                 if result.get('confidence'):
                     msg += f"*Confidence:* {result['confidence']:.0%}\n"
             else:
+                self.logger.warning(f"Classification returned no dewey number. Result: {result}")
                 msg = "❌ Could not classify topic"
 
             await update.message.reply_text(msg, parse_mode='Markdown')
