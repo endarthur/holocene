@@ -528,7 +528,8 @@ You'll receive updates when:
             # DeweyClassifier expects config_path (Path), not config object
             # Passing None uses default config path
             classifier = DeweyClassifier(config_path=None)
-            result = classifier.classify(title=topic, description=topic)
+            # Use classify_book for generic topics (only method available)
+            result = classifier.classify_book(title=topic)
             return result
 
         try:
