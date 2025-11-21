@@ -525,7 +525,9 @@ You'll receive updates when:
         # Run classification in background
         def classify():
             from ..research import DeweyClassifier
-            classifier = DeweyClassifier(self.core.config)
+            # DeweyClassifier expects config_path (Path), not config object
+            # Passing None uses default config path
+            classifier = DeweyClassifier(config_path=None)
             result = classifier.classify(title=topic, description=topic)
             return result
 
