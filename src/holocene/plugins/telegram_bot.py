@@ -538,13 +538,15 @@ You'll receive updates when:
             # Log what we got back
             self.logger.info(f"Classification result: {result}")
 
-            if result and result.get('dewey'):
+            if result and result.get('dewey_number'):
                 msg = f"📊 *Classification Result*\n\n"
                 msg += f"*Topic:* {topic}\n"
-                msg += f"*Dewey:* {result['dewey']}\n"
-                msg += f"*Category:* {result.get('category', 'Unknown')}\n"
-                if result.get('confidence'):
-                    msg += f"*Confidence:* {result['confidence']:.0%}\n"
+                msg += f"*Dewey:* {result['dewey_number']}\n"
+                msg += f"*Category:* {result.get('dewey_label', 'Unknown')}\n"
+                msg += f"*Confidence:* {result.get('confidence', 'unknown').title()}\n"
+                if result.get('alternative_numbers'):
+                    alts = ', '.join(result['alternative_numbers'])
+                    msg += f"*Alternatives:* {alts}\n"
             else:
                 self.logger.warning(f"Classification returned no dewey number. Result: {result}")
                 msg = "❌ Could not classify topic"
