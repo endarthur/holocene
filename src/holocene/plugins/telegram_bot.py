@@ -433,7 +433,9 @@ You'll receive updates when:
             if books:
                 recent_msg += "*Books:*\n"
                 for book in books:
-                    title = book['title'][:50] + "..." if len(book['title']) > 50 else book['title']
+                    title = book.get('title') or '(Untitled)'
+                    if len(title) > 50:
+                        title = title[:50] + "..."
                     # Escape markdown characters
                     title = title.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
                     recent_msg += f"• {title}\n"
@@ -444,7 +446,9 @@ You'll receive updates when:
             if papers:
                 recent_msg += "*Papers:*\n"
                 for paper in papers:
-                    title = paper['title'][:50] + "..." if len(paper['title']) > 50 else paper['title']
+                    title = paper.get('title') or '(Untitled)'
+                    if len(title) > 50:
+                        title = title[:50] + "..."
                     # Escape markdown characters
                     title = title.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
                     recent_msg += f"• {title}\n"
@@ -455,7 +459,9 @@ You'll receive updates when:
             if links:
                 recent_msg += "*Links:*\n"
                 for link in links:
-                    title = link.get('title', link['url'])[:50] + "..." if len(link.get('title', link['url'])) > 50 else link.get('title', link['url'])
+                    title = link.get('title') or link.get('url') or '(No title)'
+                    if len(title) > 50:
+                        title = title[:50] + "..."
                     # Escape markdown characters
                     title = title.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
                     recent_msg += f"• {title}\n"
