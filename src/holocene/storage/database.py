@@ -1083,8 +1083,47 @@ class Database:
         """Context manager entry."""
         return self
 
+    def _unwrap_url(self, url: str) -> str:
+        """Follow URL redirects to get the actual destination URL.
+
+        Handles URL shorteners like Google links, bit.ly, etc.
+
+        Args:
+            url: Original URL (possibly shortened/wrapped)
+
+        Returns:
+            Unwrapped destination URL, or original URL if unwrapping fails
+        """
+        import requests
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+
+        try:
+            response = requests.get(
+                url,
+                allow_redirects=True,
+                headers=headers,
+                timeout=10
+            )
+            unwrapped_url = response.url
+
+            # Log if URL changed
+            if unwrapped_url != url:
+                logger.info(f"Unwrapped URL: {url} -> {unwrapped_url}")
+
+            return unwrapped_url
+        except requests.RequestException as e:
+            logger.warning(f"Failed to unwrap URL {url}: {e}")
+            # Return original URL if unwrapping fails
+            return url
+
     def insert_link(self, url: str, source: str, title: str = None, notes: str = None) -> int:
         """Insert or update a link. Returns link ID."""
+        # Unwrap URL redirects (Google shortened URLs, etc.)
+        url = self._unwrap_url(url)
+
         cursor = self.conn.cursor()
         now = datetime.now().isoformat()
 
