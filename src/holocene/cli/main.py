@@ -19,6 +19,7 @@ from .stats_commands import stats
 from .inventory_commands import inventory
 from .ml_inventory_commands import ml_inventory
 from .daemon_commands import daemon
+from .ask_commands import ask_shortcut
 
 # Optional: MercadoLivre (requires beautifulsoup4)
 try:
@@ -50,6 +51,7 @@ if MERCADOLIVRE_CLI_AVAILABLE:
 cli.add_command(inventory)
 cli.add_command(ml_inventory)
 cli.add_command(daemon)
+cli.add_command(ask_shortcut, name="ask")
 
 
 @cli.command()

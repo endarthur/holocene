@@ -12,7 +12,16 @@
       "Bash(wsl shellcheck scripts/setup-holocene-lxc.sh)",
       "Bash(wsl shellcheck:*)",
       "Bash(git push:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(ssh root@holocene-rei.local \"journalctl -u holod --since ''2 minutes ago'' | grep -i ''plugin\\|error\\|failed'' | tail -20\")",
+      "Bash(ssh:*)",
+      "WebFetch(domain:docs.nano-gpt.com)",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(scp:*)",
+      "Bash(powershell:*)",
+      "Bash(rsync:*)",
+      "Bash(sqlite3:*)"
     ],
     "deny": [],
     "ask": []
