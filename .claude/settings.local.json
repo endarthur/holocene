@@ -21,7 +21,10 @@
       "Bash(scp:*)",
       "Bash(powershell:*)",
       "Bash(rsync:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(holo papers:*)",
+      "Bash(holo wikipedia:*)",
+      "Bash(holo --help:*)"
     ],
     "deny": [],
     "ask": []

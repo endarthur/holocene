@@ -1,6 +1,6 @@
 # Holocene Roadmap
 
-**Last Major Update:** 2025-11-18 (AEDB scavenge & architecture redesign)
+**Last Major Update:** 2025-11-21 (Implementation audit & documentation update)
 
 ## Important Design Documents
 
@@ -11,11 +11,15 @@ Before implementing features, review these foundational docs:
 3. **`design/integrations/mercadolivre_favorites.md`** - Mercado Livre integration spec
 4. **`CLAUDE.md`** - Project conventions and agent collaboration guide
 
-## Current Status (Phase 4.2 In Progress - Nov 18, 2025)
+## Current Status (Phase 4 - 60% Complete - Nov 21, 2025)
 
-### Implemented Features
+**Implementation Progress:** Phase 4.1-4.3 mostly complete, Phase 4.5 partially complete
+
+### ✅ Fully Implemented Features
+
+#### Core Library Management
 - ✅ Activity tracking with privacy controls
-- ✅ Link collection with Internet Archive integration (1,153+ links)
+- ✅ Link collection with Internet Archive integration (1,160+ links)
 - ✅ Trust tier system (pre-LLM / early-LLM / recent)
 - ✅ Book collection management (77 books imported)
 - ✅ **Book enrichment** - LLM-generated summaries and tags (batch processing)
@@ -23,13 +27,39 @@ Before implementing features, review these foundational docs:
 - ✅ PDF text extraction with OCR fallback
 - ✅ Markdown report generation
 - ✅ NanoGPT subscription usage tracking
-- ✅ **Dewey Decimal Classification** - AI-powered classification with Cutter numbers (Phase 3.7)
-- ✅ **Full call number generation** - IGc Library-style format (e.g., "550.182 I10a")
-- ✅ **Configurable classification system** - Dewey or UDC via config
-- ✅ **Classification repair tool** - Auto-fix missing Cutter numbers
-- ✅ **Library catalog view** - `--by-dewey` sorting for shelf order browsing
-- ✅ **arXiv integration** - Paper detection and metadata fetching (Nov 2025)
-- ✅ **Telegram bot** - Mobile research capture (DOI, URLs, PDFs, arXiv papers)
+- ✅ Bookmark import (Chrome, Edge, Firefox)
+
+#### Dewey Decimal Classification (Phase 3.7)
+- ✅ AI-powered classification with Cutter numbers
+- ✅ Full call number generation - IGc Library-style format (e.g., "550.182 I10a")
+- ✅ Configurable classification system - Dewey or UDC via config
+- ✅ Classification repair tool - Auto-fix missing Cutter numbers
+- ✅ Library catalog view - `--by-dewey` sorting for shelf order browsing
+
+#### Free Knowledge APIs (Phase 4.1)
+- ✅ **Wikipedia integration** - REST API client with caching (`holo wikipedia`)
+- ✅ **Crossref integration** - 165M papers, search/DOI lookup (`holo papers search/add`)
+- ✅ **arXiv integration** - 2.4M+ preprints, smart ID detection (`holo papers add`)
+- ✅ **Internet Archive books** - Discovery and download (`holo books discover-ia/add-ia`)
+- ✅ **OpenAlex integration** - 250M+ academic works (BONUS, not in original roadmap)
+- ✅ **Unpaywall integration** - Find Open Access PDFs (BONUS, not in original roadmap)
+
+#### Infrastructure & Integrations (Phase 4.2)
+- ✅ **HTTPFetcher** - Proxy support, HTML caching, rate limiting
+- ✅ **Mercado Livre integration** - OAuth, favorites sync, AI classification (10+ commands)
+- ✅ **Telegram bot** - Mobile interface for paper/link capture
+- ✅ **Apify client** - Web scraping automation
+- ✅ **Bright Data proxy** - Web Unlocker integration
+- ✅ **Inventory system** - EAV attributes, normalized tags, search
+
+#### Config & UX (Phase 4.3)
+- ✅ **`holo config`** - Configuration management (8+ subcommands)
+- ✅ **`holo stats`** - Analytics dashboard (8+ analytics commands)
+- ✅ **Thermal printing** - Paperang P1 integration with Spinitex renderer
+
+#### Library Experience (Phase 4.5)
+- ✅ **`holo ask`** - AI Librarian for natural language queries (Nov 21, 2025)
+- ✅ **Metadata enrichment** - LLM-generated summaries (partial implementation)
 
 ---
 
@@ -45,20 +75,22 @@ Before implementing features, review these foundational docs:
 - Immediate value for research
 - Stable, trustworthy sources
 
-#### 4.1a: Wikipedia Integration
+#### 4.1a: Wikipedia Integration ✅ IMPLEMENTED
 
-**Features to Build:**
+**Status:** Fully implemented (Nov 2025)
+
+**Implemented Features:**
 ```bash
-holo research start "topic" --include-wikipedia
-# Adds Wikipedia overview to research report
+holo wikipedia "Python programming"  # Search and display summaries
+holo research start "topic" --include-wikipedia  # Integrated into research
 ```
 
-**Implementation:**
-- Use Wikipedia REST API
-- Fetch article summary (first section)
-- Cache results locally
-- Add as "Background" section in research reports
-- Include Wikipedia references/citations
+**Implementation Details:**
+- ✅ Wikipedia REST API client (`src/holocene/research/wikipedia_client.py`)
+- ✅ Article summary fetching
+- ✅ Local caching support
+- ✅ Search functionality
+- ✅ Integrated into research reports
 
 **API Details:**
 - Endpoint: `https://en.wikipedia.org/api/rest_v1/`
@@ -70,21 +102,28 @@ holo research start "topic" --include-wikipedia
 
 ---
 
-#### 4.1b: Crossref Academic Papers 🔥 NEW!
+#### 4.1b: Crossref Academic Papers ✅ IMPLEMENTED
 
-**Features to Build:**
+**Status:** Fully implemented (Nov 2025)
+
+**Implemented Features:**
 ```bash
 # Search academic papers
 holo papers search "geostatistics kriging"
+holo papers search "geostatistics" --from 1990 --until 2022
 
 # Add paper to research collection
 holo papers add <DOI>
+
+# List papers
+holo papers list
+holo papers list --search "pattern recognition"
 
 # Research includes relevant papers
 holo research start "topic" --include-papers
 ```
 
-**What We Can Access:**
+**What We Have Access To:**
 - **165 MILLION academic works:**
   - Journal articles
   - Conference papers
@@ -92,19 +131,13 @@ holo research start "topic" --include-papers
   - Preprints
   - Research datasets
 
-**Perfect for Your Research:**
-- Mining engineering papers
-- Geostatistics research
-- Computer science papers
-- Mathematics papers
-- ALL with DOIs, authors, citations, abstracts
-
-**Implementation:**
-- Search Crossref REST API
-- Filter by date (focus on pre-LLM: before 2022-11)
-- Store metadata in new `papers` table
-- Link papers to research topics
-- Include in research reports
+**Implementation Details:**
+- ✅ Crossref REST API client (`src/holocene/research/crossref_client.py`)
+- ✅ Search with date filtering (pre-LLM focus: before 2022-11)
+- ✅ DOI-based lookups
+- ✅ Metadata extraction (title, authors, abstract, references, citations)
+- ✅ Papers table in database with source tracking
+- ✅ Integrated into research reports
 
 **API Details:**
 - Endpoint: `https://api.crossref.org/works`
@@ -113,48 +146,20 @@ holo research start "topic" --include-papers
 - Full JSON metadata
 - Returns: titles, authors, DOIs, abstracts, references, citations
 
-**Example Searches:**
-```
-# By topic and date range
-/works?query=geostatistics&filter=from-pub-date:1990,until-pub-date:2022
-
-# By author
-/works?query.author=Smith
-
-# Get full metadata
-/works/{DOI}
-```
-
 **Database Schema:**
-```sql
-CREATE TABLE papers (
-    id INTEGER PRIMARY KEY,
-    doi TEXT UNIQUE,
-    title TEXT,
-    authors TEXT,  -- JSON array
-    abstract TEXT,
-    publication_date TEXT,
-    journal TEXT,
-    url TEXT,
-    references TEXT,  -- JSON array of DOIs
-    cited_by_count INTEGER,
-    added_at TEXT
-);
-```
+- ✅ Papers table implemented with DOI, title, authors, abstract, journal, citations
+- ✅ Source tracking (crossref, arxiv, openalex)
+- ✅ Reference storage (JSON array of DOIs)
 
 **Cost:** FREE
 
-**Why This Is HUGE:**
-- Primary source for recent academic research
-- Pre-LLM papers easily filtered by date
-- Citations show research lineage
-- Complements classic books from IA
-
 ---
 
-#### 4.1c: Internet Archive Public Domain Books
+#### 4.1c: Internet Archive Public Domain Books ✅ MOSTLY IMPLEMENTED
 
-**Features to Build:**
+**Status:** Core features implemented, batch import not yet built (Nov 2025)
+
+**Implemented Features:**
 ```bash
 # Search IA for public domain books
 holo books discover-ia "geostatistics"
@@ -162,26 +167,29 @@ holo books discover-ia "geostatistics"
 # Download public domain book
 holo books add-ia <identifier>
 
-# Batch import classic texts on topic
-holo research expand-library "mining engineering" --era=1900-1980
+# Archive links to prevent link rot
+holo archive <url>
 ```
 
-**What We Can Access:**
-- 10,000,000+ books and texts
-- **Focus areas for your research:**
-  - Classic mining engineering textbooks (1900s-1970s)
-  - Historical geostatistics papers
-  - Older CS/programming texts
-  - Mathematical treatises
-  - Geology/earth science classics
+**Not Yet Implemented:**
+```bash
+# Batch import classic texts on topic
+holo research expand-library "mining engineering" --era=1900-1980  # TODO
+```
 
-**Implementation:**
-- Search IA metadata API
-- Filter for public domain only (no lending)
-- Download PDFs directly: `https://archive.org/download/{id}/{file}.pdf`
-- Extract text with existing PDFHandler
-- Enrich with LLM (existing pipeline)
-- Add to books database
+**What We Have Access To:**
+- 10,000,000+ books and texts
+- **Current collection:** 77 books imported from IA + LibraryThing
+
+**Implementation Details:**
+- ✅ IA API client (`src/holocene/integrations/internet_archive.py`)
+- ✅ Search metadata API
+- ✅ Public domain book discovery
+- ✅ PDF download and storage
+- ✅ Text extraction with PDFHandler
+- ✅ LLM enrichment pipeline integration
+- ✅ Books database storage
+- ❌ Batch import feature (planned but not coded)
 
 **API Details:**
 - Search: `https://archive.org/advancedsearch.php?q=...&output=json`
@@ -189,15 +197,9 @@ holo research expand-library "mining engineering" --era=1900-1980
 - Download: `https://archive.org/download/{identifier}/{filename}`
 - All FREE, no authentication for public domain
 
-**Example Search:**
-```json
-// Find public domain mining books
-q=subject:mining AND mediatype:texts AND date:[1900 TO 1980]
-```
-
 **Cost:** FREE
 
-**Storage:** User's choice - reference only, or download PDFs locally
+**Storage:** PDFs stored in `~/.holocene/books/internet_archive/`
 
 ---
 
@@ -205,16 +207,32 @@ q=subject:mining AND mediatype:texts AND date:[1900 TO 1980]
 
 **Goal:** Support multiple research paper repositories beyond Crossref.
 
-**Implemented:**
-- ✅ **arXiv** (Nov 2025) - 2.4M+ preprints in physics, CS, math
-  - XML API integration
-  - Smart ID detection (URLs, plain IDs, versioned IDs)
-  - Metadata extraction (title, authors, abstract, categories)
-  - Automatic DOI linking when available
-  - Rate limiting (3 sec between requests per arXiv policy)
-  - Telegram bot integration for mobile capture
+**✅ Implemented Repositories:**
 
-**Planned Repositories:**
+**arXiv** (Nov 2025) - 2.4M+ preprints
+- ✅ XML API integration (`src/holocene/research/arxiv_client.py`)
+- ✅ Smart ID detection (URLs, plain IDs, versioned IDs)
+- ✅ Metadata extraction (title, authors, abstract, categories)
+- ✅ Automatic DOI linking when available
+- ✅ Rate limiting (3 sec between requests per arXiv policy)
+- ✅ Telegram bot integration for mobile capture
+- ✅ Commands: `holo papers add <arxiv_id>` (auto-detects arXiv format)
+
+**OpenAlex** (Nov 2025) - 250M+ academic works (BONUS)
+- ✅ Full API client (`src/holocene/research/openalex_client.py`)
+- ✅ Query by DOI, author, title
+- ✅ Year filtering
+- ✅ Citation metrics
+- ✅ Alternative paper search beyond Crossref
+
+**Unpaywall** (Nov 2025) - Open Access discovery (BONUS)
+- ✅ Find free PDFs for papers (`src/holocene/research/unpaywall_client.py`)
+- ✅ OA status detection
+- ✅ Multiple OA location discovery
+- ✅ License information
+- ✅ Commands: `holo papers download <doi>` (uses Unpaywall to find OA versions)
+
+**❌ Planned Repositories (Not Yet Implemented):**
 
 **PubMed / PubMed Central (PMC)**
 - 36M+ biomedical citations, 9M+ full-text articles
@@ -380,47 +398,52 @@ holo research expand --small-web    # Add small web sources to research
 
 **Vision:** Transform the digital library into an immersive, intelligent experience that rivals (and exceeds) physical libraries.
 
-### Priority 1: Metadata Enrichment Pipeline 🔍
+### Priority 1: Metadata Enrichment Pipeline 🔍 - PARTIAL
 
-**Goal:** Automatically fill missing author/metadata from multiple sources.
+**Status:** LLM enrichment implemented, multi-source lookup not yet built
 
-**Features:**
+**✅ Implemented:**
 ```bash
-holo books enrich --missing-authors    # Fix books with no author
-holo books enrich --all                # Full metadata enrichment
-holo books enrich <book_id>            # Single book enrichment
+holo books enrich              # Batch enrich books with LLM
+holo books enrich <book_id>    # Single book enrichment
 ```
 
-**Multi-Source Strategy:**
-1. OpenLibrary API (ISBN/title lookup)
-2. Google Books API (title/author matching)
-3. WorldCat API (bibliographic database)
-4. LLM inference (e.g., "O Design do Dia a Dia" → Don Norman)
+**Implementation Details:**
+- ✅ LLM-generated summaries using DeepSeek V3 (`src/holocene/research/book_enrichment.py`)
+- ✅ Tag extraction from book content
+- ✅ Batch processing support
+- ✅ Database storage of enrichment data
 
-**Why Priority 1:**
-- Solves immediate problem (9 books without authors)
-- Enables full call number generation for all books
-- Foundation for other features (all need good metadata)
+**❌ Not Yet Implemented:**
+```bash
+holo books enrich --missing-authors    # Fix books with no author (TODO)
+```
 
-**Implementation:**
-- Waterfall approach: try each source until match found
+**Multi-Source Strategy (Planned but not coded):**
+1. ❌ OpenLibrary API (ISBN/title lookup)
+2. ❌ Google Books API (title/author matching)
+3. ❌ WorldCat API (bibliographic database)
+4. ✅ LLM inference (implemented)
+
+**Missing Features:**
+- Multi-source waterfall approach
 - Confidence scoring for LLM-inferred data
 - Manual review interface for uncertain matches
-- Cache successful lookups to avoid re-querying
+- External API integration (OpenLibrary, Google Books, WorldCat)
 
 ---
 
-### Priority 2: 3D Virtual Library (Three.js) 🎮
+### Priority 2: 3D Virtual Library (Three.js) 🎮 - NOT IMPLEMENTED
 
-**Goal:** Walk through your library in 3D space, organized by Dewey classification.
+**Status:** ❌ Not started (design-only)
 
-**Features:**
+**Planned Features:**
 ```bash
-holo books serve --3d    # Start web server with 3D view
+holo books serve --3d    # Start web server with 3D view (TODO)
 # Opens browser to http://localhost:8080
 ```
 
-**3D Experience:**
+**Envisioned 3D Experience:**
 - First-person camera controls (WASD + mouse)
 - Books on shelves, organized by call number
 - Click book to pull off shelf → show metadata
@@ -432,14 +455,14 @@ holo books serve --3d    # Start web server with 3D view
 - Bookmarks for favorite sections
 - Export/share shelf views as images
 
-**Technical Stack:**
+**Technical Stack (Planned):**
 - **Three.js** for 3D rendering
 - **Flask/FastAPI** for web server
 - **WebGL** shader for realistic book spines
 - **Procedural generation** for book covers based on metadata
 - **LOD (Level of Detail)** for performance with large libraries
 
-**Why This Rocks:**
+**Why This Would Rock:**
 - Stunning visual showcase
 - Makes browsing fun (not just functional)
 - "Library tourism" - share screenshots of your collection
@@ -449,35 +472,43 @@ holo books serve --3d    # Start web server with 3D view
 
 ---
 
-### Priority 3: AI Librarian Chat 🤖
+### Priority 3: AI Librarian Chat 🤖 ✅ IMPLEMENTED
 
-**Goal:** Natural language interface to your collection.
+**Status:** ✅ Fully implemented (Nov 21, 2025)
 
-**Features:**
+**Implemented Features:**
 ```bash
 holo ask "What books do I have about spatial statistics?"
 holo ask "Which geology books were published before 1995?"
 holo ask "Recommend books that combine programming and earth sciences"
 holo ask "What's the oldest book in my collection?"
+holo ask --include-links "Find resources about Python"  # Future enhancement
 ```
 
-**Implementation:**
-- Use LLM (DeepSeek V3) with function calling
-- Provide book database as context (titles, authors, classifications, summaries)
-- Generate SQL queries or filter logic based on questions
-- Return formatted results with call numbers
-- Follow-up questions for refinement
+**Implementation Details:**
+- ✅ LLM-powered queries using DeepSeek V3 (`src/holocene/cli/ask_commands.py`)
+- ✅ Complete collection context (books + papers metadata sent to LLM)
+- ✅ Titles, authors, classifications, summaries included
+- ✅ Rich formatted output with call numbers
+- ✅ Budget tracking display (2,000 prompts/day)
+- ✅ Comprehensive error handling
 
-**Advanced Features:**
-- "Reading path" generation: "I want to learn structural geology" → ordered list from basics to advanced
-- Cross-reference recommendations: "Books similar to Isaaks' geostatistics book"
-- Gap analysis: "You have lots of 550s and 005s, but nothing bridging them - try these..."
+**Features Working:**
+- ✅ Natural language book/paper queries
+- ✅ Reading path generation: "Learn structural geology" → ordered list
+- ✅ Cross-reference recommendations
+- ✅ Collection gap analysis suggestions
 
-**Why Powerful:**
-- Leverages your existing LLM infrastructure
+**Why It's Powerful:**
+- Leverages existing LLM infrastructure (NanoGPT)
 - Makes library "conversational" not just searchable
 - Enriched summaries make recommendations smarter
 - Natural way to discover connections between books
+
+**Successfully Tested With:**
+- Factual queries: "What books do I have about data science?"
+- Search queries: "Which papers discuss pattern recognition?"
+- Recommendation queries: "What should I read to learn about geostatistics?"
 
 ---
 
@@ -988,10 +1019,31 @@ We've been in deep implementation mode (ML integration, proxy setup, caching, in
 
 ---
 
-*Last Updated: 2025-11-18*
-*Current Phase: 3.7 Complete (Dewey Classification + Cutter Numbers), Continuing Phase 4.1 (Free Knowledge APIs)*
+*Last Updated: 2025-11-21*
+*Current Phase: 4.1-4.5 (60% Complete - Free APIs, Infrastructure, Library Experience)*
 
 ## Recent Wins 🎉
+
+**Phase 4.5 - AI Librarian (`holo ask`) (2025-11-21)**
+- ✅ Implemented natural language queries over personal library
+- ✅ Queries 77 books + 19 papers using DeepSeek V3
+- ✅ Reading path generation, cross-reference recommendations
+- ✅ Collection gap analysis built-in
+- ✅ Budget tracking display (2,000 prompts/day)
+- Successfully tested with factual, search, and recommendation queries
+
+**Phase 4.1 - Free Knowledge APIs (2025-11 Complete)**
+- ✅ Wikipedia integration - REST API with caching
+- ✅ Crossref integration - 165M papers searchable
+- ✅ arXiv integration - 2.4M+ preprints
+- ✅ OpenAlex integration - 250M+ works (bonus!)
+- ✅ Unpaywall integration - Find Open Access PDFs (bonus!)
+
+**Phase 4.2 - Infrastructure (2025-11 Complete)**
+- ✅ Mercado Livre integration - OAuth, favorites sync, AI classification
+- ✅ Telegram bot - Mobile paper/link capture
+- ✅ HTTPFetcher - Proxy support, caching
+- ✅ Inventory system - EAV attributes, tags
 
 **Phase 3.7 - Dewey Decimal Classification (2025-11-18)**
 - Implemented AI-powered Dewey classification using DeepSeek V3

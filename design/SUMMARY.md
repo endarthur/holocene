@@ -119,28 +119,46 @@ Three task types:
 
 ## Current Implementation Status
 
-### ✅ Implemented (On-Demand Mode)
+### ✅ Implemented (On-Demand Mode) - Phase 4: 60% Complete
+
+#### Core Infrastructure
 - Manual activity logging with privacy sanitization
 - SQLite storage with full CRUD
 - **Database migrations** (6 migrations applied, auto-run on startup)
-- CLI interface (`holo` command via Click)
+- CLI interface (`holo` command via Click - 60+ commands across 12 groups)
 - **DeepSeek V3.1 integration** via NanoGPT API
 - Budget tracking (2000 calls/day monitored)
 - **journel integration** (reads 8 active projects)
 - **Git activity tracking** (scans local repos)
-- **Internet Archive integration** (1,153+ links with trust tiers)
+
+#### Knowledge Management (Phase 4.1 - Complete)
+- **Internet Archive integration** (1,160+ links with trust tiers, book discovery)
 - **Link management** (extraction, deduplication, bookmarks import, URL unwrapping)
 - **Book collection** (77 books from IA + LibraryThing)
 - **Book enrichment** (LLM-generated summaries/tags)
 - **Dewey Decimal Classification** (AI-powered with Cutter numbers, full call numbers)
 - **Deep research mode** (overnight compilation, markdown reports)
 - **PDF handling** (text extraction + OCR fallback)
+- **Wikipedia integration** (REST API with caching - `holo wikipedia`)
+- **Academic papers** (arXiv, Crossref, OpenAlex, Unpaywall - 19 papers in collection)
+  - arXiv: 2.4M+ preprints with smart ID detection
+  - Crossref: 165M papers with DOI lookup
+  - OpenAlex: 250M+ works (bonus integration)
+  - Unpaywall: Find Open Access PDFs (bonus integration)
+
+#### User Experience (Phase 4.3 & 4.5)
 - **Thermal printing** (Spinitex renderer + Paperang P1)
-- **Wikipedia search** (free API integration)
-- **Academic papers** (arXiv integration complete, Crossref planned)
+- **`holo config`** - Configuration management (8+ subcommands)
+- **`holo stats`** - Analytics dashboard (8+ analytics commands)
+- **`holo ask`** - AI Librarian for natural language collection queries (Nov 21, 2025)
+
+#### Advanced Integrations (Phase 4.2 - Complete)
 - **Inventory management** (items with EAV attributes, normalized tags)
-- **Mercado Livre integration** (OAuth, favorites sync, auto-classification via DeepSeek)
+- **Mercado Livre integration** (OAuth, favorites sync, auto-classification via DeepSeek, 10+ commands)
 - **Telegram bot** (mobile capture for papers, links, DOIs, classification queries)
+- **HTTPFetcher** (proxy support, HTML caching, rate limiting)
+- **Bright Data proxy** (Web Unlocker integration)
+- **Apify client** (web scraping automation)
 
 ### ⏳ Not Yet Implemented (Autonomous Mode)
 - Background daemon
@@ -360,7 +378,8 @@ User directories:
 
 ---
 
-**Version:** 1.1
-**Last Updated:** 2025-11-21
+**Version:** 1.2
+**Last Updated:** 2025-11-21 (Post-implementation audit)
 **Purpose:** Tier 0 overview for efficient AI assistant context loading
+**Implementation Status:** Phase 4: 60% Complete (Free APIs, Infrastructure, Library Experience)
 **Next Tier:** Read specific `design/architecture/` or `design/integrations/` files as needed

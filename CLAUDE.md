@@ -107,14 +107,19 @@ User directories:
 
 **Location:** `src/holocene/cli/main.py`
 
-Main command groups:
-- `holo books` - Book library management (search, add, list, enrich)
-- `holo papers` - Research paper management
+Main command groups (60+ commands total):
+- `holo ask` - AI Librarian for natural language queries (NEW - Nov 21, 2025)
+- `holo books` - Book library management (search, add, list, enrich, classify)
+- `holo papers` - Research paper management (arXiv, Crossref, OpenAlex)
 - `holo links` - Link and bookmark management
-- `holo wikipedia` - Wikipedia article management
+- `holo wikipedia` - Wikipedia article search
 - `holo research` - Research session management
 - `holo print` - Thermal printing commands
-- `holo usage` - Usage statistics and analytics
+- `holo config` - Configuration management (8+ subcommands)
+- `holo stats` - Analytics and collection statistics (8+ subcommands)
+- `holo inventory` - Inventory item management
+- `holo mercadolivre` - Mercado Livre favorites integration (10+ commands)
+- `holo daemon` - Background service management
 
 **CLI Framework:** Click (Python CLI framework)
 **Style:** Rich library for beautiful terminal output
@@ -498,31 +503,40 @@ Add to `[all]` group if it should be included in full server installs.
 
 ## Project Status
 
-**Current Phase:** Early development / MVP
+**Current Phase:** Phase 4 - 60% Complete (Nov 21, 2025)
 **Python Version:** 3.11+
 **License:** MIT
 
-**Implemented:**
-- ✅ Book library management (IA, Calibre)
-- ✅ Thermal printing (Paperang P1 + Spinitex)
-- ✅ Research paper management (basic)
-- ✅ Link/bookmark management
-- ✅ CLI interface
-- ✅ SQLite storage
+**Fully Implemented (Phase 3-4):**
+- ✅ Book library management (77 books from IA + LibraryThing)
+- ✅ Dewey Decimal Classification with Cutter numbers
+- ✅ Thermal printing (Paperang P1 + Spinitex renderer)
+- ✅ Academic papers (arXiv, Crossref, OpenAlex, Unpaywall - 19 papers)
+- ✅ Wikipedia integration (REST API with caching)
+- ✅ Link management (1,160+ links with trust tiers, bookmark import)
+- ✅ LLM integrations (DeepSeek V3, Qwen Coder via NanoGPT)
+- ✅ AI Librarian (`holo ask`) - Natural language collection queries
+- ✅ CLI interface (60+ commands across 12 groups)
+- ✅ Config & stats commands (8+ subcommands each)
+- ✅ SQLite storage with migrations
+- ✅ Mercado Livre integration (OAuth, favorites sync, AI classification)
+- ✅ Telegram bot (mobile paper/link capture)
+- ✅ Inventory system (EAV attributes, tags)
+- ✅ HTTPFetcher (proxy support, caching)
 
-**In Progress:**
-- 🔨 LLM integrations
-- 🔨 Activity tracking
-- 🔨 Privacy sanitization layer
+**Partially Implemented:**
+- 🔨 Metadata enrichment (LLM summaries working, multi-source lookup TODO)
+- 🔨 Daemon infrastructure (skeleton exists, not fully operational)
 
-**Planned:**
+**Planned (Phase 5-6):**
+- ⏳ PubMed integration (36M biomedical papers)
+- ⏳ 3D Virtual Library (Three.js visualization)
 - ⏳ Browser extension for activity tracking
+- ⏳ Task scheduler with long-running jobs
+- ⏳ Obsidian vault sync
 - ⏳ Home Assistant integration
-- ⏳ Calendar integration
-- ⏳ Task scheduler
-- ⏳ Weekly review system
 
-See `holocene_design.md` for comprehensive roadmap.
+See `docs/ROADMAP.md` for detailed roadmap and implementation status.
 
 ## Documentation
 
