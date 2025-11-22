@@ -20,6 +20,7 @@ from .inventory_commands import inventory
 from .ml_inventory_commands import ml_inventory
 from .daemon_commands import daemon
 from .ask_commands import ask_shortcut
+from .auth_commands import auth
 
 # Optional: MercadoLivre (requires beautifulsoup4)
 try:
@@ -46,6 +47,7 @@ def cli():
 # Register command groups
 cli.add_command(config)
 cli.add_command(stats)
+cli.add_command(auth)
 if MERCADOLIVRE_CLI_AVAILABLE:
     cli.add_command(mercadolivre)
 cli.add_command(inventory)

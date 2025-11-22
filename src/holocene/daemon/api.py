@@ -24,13 +24,15 @@ from typing import Optional
 from datetime import datetime
 
 try:
-    from flask import Flask, jsonify, request
+    from flask import Flask, jsonify, request, session, redirect
     from werkzeug.serving import make_server
     FLASK_AVAILABLE = True
 except ImportError:
     Flask = None
     jsonify = None
     request = None
+    session = None
+    redirect = None
     make_server = None
     FLASK_AVAILABLE = False
 
@@ -38,6 +40,27 @@ from ..core import HoloceneCore
 from ..core.plugin_registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def require_auth(f):
+    """Decorator to require authentication for endpoints.
+
+    Checks if user is authenticated via session.
+    Returns 401 Unauthorized if not authenticated.
+    """
+    from functools import wraps
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check if user is authenticated
+        if 'user_id' not in session:
+            logger.warning(f"Unauthorized access attempt to {request.path} from {request.remote_addr}")
+            return jsonify({"error": "Authentication required"}), 401
+
+        # User is authenticated, proceed
+        return f(*args, **kwargs)
+
+    return decorated_function
 
 
 class APIServer:
@@ -64,6 +87,16 @@ class APIServer:
 
         # Flask app
         self.app = Flask("holod-api")
+
+        # Configure secret key for sessions
+        # TODO: Load from config or generate persistent key
+        import secrets
+        self.app.secret_key = secrets.token_hex(32)  # Generate 256-bit key
+
+        # Configure session lifetime (7 days)
+        from datetime import timedelta
+        self.app.permanent_session_lifetime = timedelta(days=7)
+
         self._setup_routes()
 
         # Server state
@@ -76,6 +109,11 @@ class APIServer:
 
     def _setup_routes(self):
         """Setup Flask routes."""
+
+        # Auth endpoints
+        self.app.route("/auth/login", methods=["GET"])(self._auth_login)
+        self.app.route("/auth/logout", methods=["POST"])(self._auth_logout)
+        self.app.route("/auth/status", methods=["GET"])(self._auth_status)
 
         # Status endpoints
         self.app.route("/status", methods=["GET"])(self._status)
@@ -103,6 +141,242 @@ class APIServer:
         # Error handlers
         self.app.errorhandler(404)(self._not_found)
         self.app.errorhandler(500)(self._internal_error)
+
+    # Auth endpoints
+
+    def _auth_login(self):
+        """GET /auth/login?token=<token> - Magic link login endpoint.
+
+        Validates token and creates session.
+        """
+        try:
+            # Get token from query params
+            token = request.args.get('token')
+            if not token:
+                return jsonify({"error": "Missing token parameter"}), 400
+
+            cursor = self.core.db.conn.cursor()
+
+            # Find token in database
+            cursor.execute("""
+                SELECT
+                    auth_tokens.id,
+                    auth_tokens.user_id,
+                    auth_tokens.expires_at,
+                    auth_tokens.used_at,
+                    users.telegram_username,
+                    users.telegram_user_id
+                FROM auth_tokens
+                JOIN users ON auth_tokens.user_id = users.id
+                WHERE auth_tokens.token = ?
+            """, (token,))
+
+            token_row = cursor.fetchone()
+
+            if not token_row:
+                logger.warning(f"Invalid login attempt with unknown token: {token[:10]}...")
+                return jsonify({"error": "Invalid or expired token"}), 401
+
+            token_id, user_id, expires_at, used_at, username, tg_id = token_row
+
+            # Check if already used
+            if used_at:
+                logger.warning(f"Login attempt with already-used token {token_id} by user {user_id}")
+                return jsonify({"error": "Token already used"}), 401
+
+            # Check if expired
+            from datetime import datetime
+            expires_dt = datetime.fromisoformat(expires_at)
+            if datetime.now() > expires_dt:
+                logger.warning(f"Login attempt with expired token {token_id} by user {user_id}")
+                return jsonify({"error": "Token expired"}), 401
+
+            # Mark token as used
+            cursor.execute("""
+                UPDATE auth_tokens
+                SET used_at = ?, ip_address = ?, user_agent = ?
+                WHERE id = ?
+            """, (
+                datetime.now().isoformat(),
+                request.remote_addr,
+                request.headers.get('User-Agent', ''),
+                token_id
+            ))
+            self.core.db.conn.commit()
+
+            # Create session
+            session.permanent = True  # Use configured lifetime (7 days)
+            session['user_id'] = user_id
+            session['telegram_user_id'] = tg_id
+            session['telegram_username'] = username
+            session['logged_in_at'] = datetime.now().isoformat()
+
+            # Update last_login_at
+            cursor.execute("""
+                UPDATE users
+                SET last_login_at = ?
+                WHERE id = ?
+            """, (datetime.now().isoformat(), user_id))
+            self.core.db.conn.commit()
+
+            logger.info(f"User {user_id} (telegram: {tg_id}) logged in successfully")
+
+            # Redirect to dashboard (or return JSON for API clients)
+            if request.headers.get('Accept') == 'application/json':
+                return jsonify({
+                    "status": "logged_in",
+                    "user_id": user_id,
+                    "username": username
+                })
+            else:
+                # Show success page
+                return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Logged In - Holocene</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }}
+        .card {{
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        h1 {{
+            color: #2c3e50;
+            margin-top: 0;
+        }}
+        .success {{
+            color: #27ae60;
+            font-size: 48px;
+            margin-bottom: 10px;
+        }}
+        .info {{
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }}
+        .info dt {{
+            font-weight: bold;
+            color: #7f8c8d;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }}
+        .info dd {{
+            margin: 0 0 15px 0;
+            color: #2c3e50;
+        }}
+        .links {{
+            list-style: none;
+            padding: 0;
+        }}
+        .links li {{
+            margin: 10px 0;
+        }}
+        .links a {{
+            color: #3498db;
+            text-decoration: none;
+            padding: 8px 12px;
+            background: #ecf0f1;
+            border-radius: 4px;
+            display: inline-block;
+        }}
+        .links a:hover {{
+            background: #3498db;
+            color: white;
+        }}
+        .note {{
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #ecf0f1;
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="success">✅</div>
+        <h1>Successfully Logged In</h1>
+        <p>Welcome to the Holocene API. Your session is now active.</p>
+
+        <div class="info">
+            <dl>
+                <dt>User</dt>
+                <dd>{username or '(no username)'}</dd>
+
+                <dt>Telegram ID</dt>
+                <dd>{tg_id}</dd>
+
+                <dt>Session Expires</dt>
+                <dd>7 days from now</dd>
+            </dl>
+        </div>
+
+        <h3>Test API Endpoints:</h3>
+        <ul class="links">
+            <li><a href="/auth/status">🔐 Check Auth Status</a></li>
+            <li><a href="/status">📊 API Status</a></li>
+            <li><a href="/plugins">🔌 List Plugins</a></li>
+            <li><a href="/books?limit=10">📚 List Books</a></li>
+            <li><a href="/links?limit=10">🔗 List Links</a></li>
+            <li><a href="/channels">📡 List Channels</a></li>
+        </ul>
+
+        <div class="note">
+            <strong>Note:</strong> holod is currently API-only. All endpoints return JSON.
+            A web dashboard is planned for future development.
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        except Exception as e:
+            logger.error(f"Error in /auth/login: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _auth_logout(self):
+        """POST /auth/logout - Logout endpoint."""
+        try:
+            # Clear session
+            session.clear()
+
+            return jsonify({"status": "logged_out"})
+
+        except Exception as e:
+            logger.error(f"Error in /auth/logout: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _auth_status(self):
+        """GET /auth/status - Check authentication status."""
+        try:
+            if 'user_id' in session:
+                return jsonify({
+                    "authenticated": True,
+                    "user_id": session['user_id'],
+                    "username": session.get('telegram_username'),
+                    "logged_in_at": session.get('logged_in_at')
+                })
+            else:
+                return jsonify({
+                    "authenticated": False
+                })
+
+        except Exception as e:
+            logger.error(f"Error in /auth/status: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
 
     # Status endpoints
 
@@ -135,6 +409,7 @@ class APIServer:
 
     # Plugin endpoints
 
+    @require_auth
     def _list_plugins(self):
         """GET /plugins - List all plugins."""
         try:
@@ -144,6 +419,7 @@ class APIServer:
             logger.error(f"Error in /plugins: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
+    @require_auth
     def _get_plugin(self, name: str):
         """GET /plugins/<name> - Get plugin details."""
         try:
@@ -165,6 +441,7 @@ class APIServer:
             logger.error(f"Error in /plugins/{name}: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
+    @require_auth
     def _enable_plugin(self, name: str):
         """POST /plugins/<name>/enable - Enable plugin."""
         try:
@@ -180,6 +457,7 @@ class APIServer:
             logger.error(f"Error enabling plugin {name}: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
+    @require_auth
     def _disable_plugin(self, name: str):
         """POST /plugins/<name>/disable - Disable plugin."""
         try:
@@ -197,6 +475,7 @@ class APIServer:
 
     # Channel endpoints
 
+    @require_auth
     def _publish_to_channel(self, channel: str):
         """POST /channels/<channel>/publish - Publish to channel."""
         try:
@@ -218,6 +497,7 @@ class APIServer:
             logger.error(f"Error publishing to channel {channel}: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
+    @require_auth
     def _channel_history(self, channel: str):
         """GET /channels/<channel>/history - Get channel history."""
         try:
@@ -245,6 +525,7 @@ class APIServer:
             logger.error(f"Error getting channel history {channel}: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
+    @require_auth
     def _list_channels(self):
         """GET /channels - List all channels."""
         try:
@@ -269,6 +550,7 @@ class APIServer:
 
     # Book endpoints
 
+    @require_auth
     def _books(self):
         """GET /books - List books, POST /books - Add book."""
         try:
@@ -327,6 +609,7 @@ class APIServer:
             logger.error(f"Error in /books: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
+    @require_auth
     def _get_book(self, book_id: int):
         """GET /books/<id> - Get book details."""
         try:
@@ -346,6 +629,7 @@ class APIServer:
 
     # Link endpoints
 
+    @require_auth
     def _links(self):
         """GET /links - List links, POST /links - Add link."""
         try:
@@ -402,6 +686,7 @@ class APIServer:
             logger.error(f"Error in /links: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
+    @require_auth
     def _get_link(self, link_id: int):
         """GET /links/<id> - Get link details."""
         try:

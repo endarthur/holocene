@@ -12,8 +12,9 @@ import asyncio
 import threading
 import re
 import os
+import secrets
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from holocene.core import Plugin, Message
@@ -101,6 +102,7 @@ class TelegramBotPlugin(Plugin):
         # Register command handlers
         self.application.add_handler(CommandHandler("start", self._cmd_start))
         self.application.add_handler(CommandHandler("help", self._cmd_help))
+        self.application.add_handler(CommandHandler("login", self._cmd_login))
         self.application.add_handler(CommandHandler("stats", self._cmd_stats))
         self.application.add_handler(CommandHandler("plugins", self._cmd_plugins))
         self.application.add_handler(CommandHandler("status", self._cmd_status))
@@ -155,6 +157,7 @@ class TelegramBotPlugin(Plugin):
                 commands = [
                     BotCommand("start", "Initialize and authorize bot"),
                     BotCommand("help", "Show available commands"),
+                    BotCommand("login", "Generate web login magic link"),
                     BotCommand("stats", "View bot statistics"),
                     BotCommand("status", "View system status"),
                     BotCommand("plugins", "List active plugins"),
@@ -271,6 +274,7 @@ Available commands:
 
 /start - Initialize bot
 /help - Show this help
+/login - Get magic link for web access
 /stats - View statistics
 /status - System status
 /plugins - List active plugins
@@ -292,6 +296,84 @@ You'll receive updates when:
 """
         await update.message.reply_text(help_msg, parse_mode='Markdown')
         self.messages_sent += 1
+
+    async def _cmd_login(self, update, context):
+        """Handle /login command - generate magic link for web access."""
+        self.commands_received += 1
+
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        telegram_user_id = update.effective_user.id
+        telegram_username = update.effective_user.username
+
+        try:
+            # Get or create user
+            db = self.core.db
+            cursor = db.conn.cursor()
+
+            # Check if user exists
+            cursor.execute(
+                "SELECT id FROM users WHERE telegram_user_id = ?",
+                (telegram_user_id,)
+            )
+            user_row = cursor.fetchone()
+
+            if user_row:
+                user_id = user_row[0]
+            else:
+                # Create new user
+                cursor.execute("""
+                    INSERT INTO users (telegram_user_id, telegram_username, created_at, is_admin)
+                    VALUES (?, ?, ?, 1)
+                """, (telegram_user_id, telegram_username, datetime.now().isoformat()))
+                user_id = cursor.lastrowid
+                db.conn.commit()
+                self.logger.info(f"Created new user: {user_id} (telegram: {telegram_user_id})")
+
+            # Generate secure random token (256 bits = 32 bytes = 64 hex chars)
+            token = secrets.token_urlsafe(32)  # URL-safe base64, ~43 chars
+
+            # Calculate expiry (5 minutes from now)
+            expires_at = datetime.now() + timedelta(minutes=5)
+
+            # Store token in database
+            cursor.execute("""
+                INSERT INTO auth_tokens (user_id, token, created_at, expires_at)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, token, datetime.now().isoformat(), expires_at.isoformat()))
+            db.conn.commit()
+
+            # Build magic link URL
+            # TODO: Get base URL from config (for now hardcode)
+            base_url = "https://holo.stdgeo.com"
+            magic_link = f"{base_url}/auth/login?token={token}"
+
+            # Send magic link to user
+            msg = f"""🔐 *Web Login Link*
+
+Your magic link is ready! Click below to log in to the Holocene web interface.
+
+{magic_link}
+
+⏱️ *Expires in 5 minutes*
+🔒 *Single-use only*
+
+This link will grant you access to:
+• Web dashboard
+• Collection browser
+• Research tools
+"""
+
+            await update.message.reply_text(msg, parse_mode='Markdown')
+            self.messages_sent += 1
+            self.logger.info(f"Magic link generated for user {user_id} (telegram: {telegram_user_id})")
+
+        except Exception as e:
+            self.logger.error(f"Failed to generate login link: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Failed to generate login link: {str(e)[:100]}")
 
     async def _cmd_stats(self, update, context):
         """Handle /stats command."""

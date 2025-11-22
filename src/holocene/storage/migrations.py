@@ -87,6 +87,53 @@ MIGRATIONS: List[Dict] = [
         """,
         'requires_column_check': True,
     },
+    {
+        'version': 7,
+        'name': 'add_passwordless_auth_tables',
+        'description': 'Add authentication tables for passwordless auth (magic links + API tokens)',
+        'up': """
+            -- Users table (no passwords!)
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_user_id INTEGER UNIQUE NOT NULL,
+                telegram_username TEXT,
+                created_at TEXT NOT NULL,
+                last_login_at TEXT,
+                is_admin INTEGER DEFAULT 1
+            );
+
+            -- Magic link tokens (short-lived, single-use)
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT,
+                ip_address TEXT,
+                user_agent TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            -- Long-lived API tokens (for CLI/scripts)
+            CREATE TABLE IF NOT EXISTS api_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                name TEXT,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                revoked_at TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            -- Indexes for auth performance
+            CREATE INDEX IF NOT EXISTS idx_auth_tokens_token ON auth_tokens(token);
+            CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_api_tokens_token ON api_tokens(token);
+            CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_user_id);
+        """,
+    },
 ]
 
 
