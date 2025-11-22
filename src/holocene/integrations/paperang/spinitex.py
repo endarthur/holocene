@@ -24,6 +24,9 @@ from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 import os
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Import hitherdither for advanced dithering
 try:
@@ -639,9 +642,7 @@ class MarkdownRenderer:
                         )
                         img = img_dithered.convert('1')
                 except Exception as e:
-                    print(f"DEBUG: Dithering '{dithering}' failed: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    logger.debug(f"Dithering '{dithering}' failed: {e}", exc_info=True)
                     # Fallback to Floyd-Steinberg (PIL default)
                     img = img_gray.convert('1')
             else:
@@ -666,10 +667,7 @@ class MarkdownRenderer:
             
         except Exception as e:
             # On error, render error message as text
-            import traceback
-            print(f"DEBUG: Image rendering failed for {image_path}")
-            print(f"DEBUG: Error: {type(e).__name__}: {str(e)}")
-            traceback.print_exc()
+            logger.debug(f"Image rendering failed for {image_path}: {type(e).__name__}: {str(e)}", exc_info=True)
             error_text = f"[Image error: {image_path}] - {type(e).__name__}"
             return self._render_paragraph(error_text, 'left')
 

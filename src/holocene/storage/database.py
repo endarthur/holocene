@@ -236,6 +236,14 @@ class Database:
         """)
 
         # Create books table
+        # NOTE: Several columns are DEPRECATED as of Migration 6 (2025-11-21):
+        # - enriched_summary, enriched_tags, enriched_at → Use metadata.enrichment
+        # - udc_classification, classification_system, classification_confidence, classified_at → Use metadata.classification
+        # - access_status, access_url, has_local_pdf, local_pdf_path, downloaded_at → Use metadata.access
+        # - started_reading_at, finished_reading_at → Use metadata.reading
+        # - ref_list → Use metadata.references
+        # These legacy columns are kept for backwards compatibility but new code should use metadata JSON.
+        # See Migration 6 in storage/migrations.py for the migration to metadata JSON pattern.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS books (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -249,18 +257,18 @@ class Database:
                 subjects TEXT,
                 lc_classification TEXT,
                 dewey_decimal TEXT,
-                udc_classification TEXT,
-                classification_system TEXT,
-                classification_confidence TEXT,
-                classified_at TEXT,
+                udc_classification TEXT,  -- DEPRECATED: Use metadata.classification.udc
+                classification_system TEXT,  -- DEPRECATED: Use metadata.classification.system
+                classification_confidence TEXT,  -- DEPRECATED: Use metadata.classification.confidence
+                classified_at TEXT,  -- DEPRECATED: Use metadata.classification.classified_at
                 owned BOOLEAN DEFAULT 1,
                 source TEXT DEFAULT 'librarycat',
                 date_added TEXT,
                 notes TEXT,
                 created_at TEXT NOT NULL,
-                enriched_summary TEXT,
-                enriched_tags TEXT,
-                enriched_at TEXT
+                enriched_summary TEXT,  -- DEPRECATED: Use metadata.enrichment.summary
+                enriched_tags TEXT,  -- DEPRECATED: Use metadata.enrichment.tags
+                enriched_at TEXT  -- DEPRECATED: Use metadata.enrichment.enriched_at
             )
         """)
 

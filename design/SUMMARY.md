@@ -122,20 +122,25 @@ Three task types:
 ### ✅ Implemented (On-Demand Mode)
 - Manual activity logging with privacy sanitization
 - SQLite storage with full CRUD
+- **Database migrations** (6 migrations applied, auto-run on startup)
 - CLI interface (`holo` command via Click)
 - **DeepSeek V3.1 integration** via NanoGPT API
 - Budget tracking (2000 calls/day monitored)
 - **journel integration** (reads 8 active projects)
 - **Git activity tracking** (scans local repos)
 - **Internet Archive integration** (1,153+ links with trust tiers)
-- **Link management** (extraction, deduplication, bookmarks import)
-- **Book collection** (70 books from IA + LibraryThing)
+- **Link management** (extraction, deduplication, bookmarks import, URL unwrapping)
+- **Book collection** (77 books from IA + LibraryThing)
 - **Book enrichment** (LLM-generated summaries/tags)
+- **Dewey Decimal Classification** (AI-powered with Cutter numbers, full call numbers)
 - **Deep research mode** (overnight compilation, markdown reports)
 - **PDF handling** (text extraction + OCR fallback)
 - **Thermal printing** (Spinitex renderer + Paperang P1)
 - **Wikipedia search** (free API integration)
-- **Academic papers** (Crossref API planned)
+- **Academic papers** (arXiv integration complete, Crossref planned)
+- **Inventory management** (items with EAV attributes, normalized tags)
+- **Mercado Livre integration** (OAuth, favorites sync, auto-classification via DeepSeek)
+- **Telegram bot** (mobile capture for papers, links, DOIs, classification queries)
 
 ### ⏳ Not Yet Implemented (Autonomous Mode)
 - Background daemon
@@ -272,10 +277,16 @@ holocene/
 │   ├── llm/                  # LLM integrations (NanoGPT)
 │   ├── research/             # Research compilation system
 │   ├── config/               # Configuration management
+│   ├── plugins/              # Daemon mode plugins
 │   └── integrations/         # External services
 │       ├── paperang/        # Thermal printer (Spinitex + client)
 │       ├── calibre.py       # Calibre e-book library
-│       ├── internet_archive.py
+│       ├── internet_archive.py  # IA archiving & book downloads
+│       ├── mercadolivre.py  # ML favorites sync & enrichment
+│       ├── arxiv.py         # arXiv paper metadata
+│       ├── crossref_client.py  # Crossref academic papers
+│       ├── apify.py         # Apify web scraping client
+│       ├── telegram_bot.py  # Telegram bot for mobile capture
 │       ├── journel.py       # journel integration
 │       └── git_scanner.py   # Git activity tracking
 ├── design/                    # Design documentation (THIS)
@@ -349,7 +360,7 @@ User directories:
 
 ---
 
-**Version:** 1.0
-**Last Updated:** 2025-11-17
+**Version:** 1.1
+**Last Updated:** 2025-11-21
 **Purpose:** Tier 0 overview for efficient AI assistant context loading
 **Next Tier:** Read specific `design/architecture/` or `design/integrations/` files as needed
