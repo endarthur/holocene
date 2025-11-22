@@ -812,140 +812,41 @@ holo books search "machine learning" --include-calibre
    - 🔄 Inventory/taxonomy system integration
    - See: `design/integrations/aedb_scavenge.md`
 
-### CRITICAL: Architecture Review Session 🏗️
-**Status:** SCHEDULED - Before Phase 4.3
-**Priority:** ⚠️ HIGH - Must complete before continuing major implementation
+### ✅ Architecture Review Session - COMPLETED (Nov 21, 2025)
 
-**Why Now:**
-We've been in deep implementation mode (ML integration, proxy setup, caching, inventory) without stepping back to review overall architecture. Need to ensure system coherence before building more features.
+**Status:** ✅ **COMPLETED** - Audit report available at `ARCHITECTURE_AUDIT_2025-11-21.md`
 
-**Scope - Review & Document:**
+**Verdict:** **PROCEED WITH CONFIDENCE** - No blocking issues found
 
-1. **Data Flow Architecture**
-   - Input sources (APIs, web scraping, files, user commands)
-   - Processing pipeline (fetch → cache → parse → enrich → store)
-   - Output formats (CLI, reports, exports, visualizations)
-   - Where does each integration fit?
-   - How do integrations interact? (e.g., ML → Inventory → Classification)
+**Key Findings:**
+- ✅ Database schema in good health (6 migrations applied)
+- ✅ Migration system working well (metadata JSON pattern adopted)
+- ✅ Integration patterns mostly consistent
+- ✅ Foreign keys enabled, WAL mode enabled, proper indexes
+- ⚠️ Minor technical debt noted (legacy columns, tag storage inconsistency)
+- 🔴 **Blockers:** None
 
-2. **Storage Strategy**
-   - Database schema evolution (when to add columns vs new tables)
-   - Caching policy (HTML, API responses, LLM results)
-   - File storage organization (PDFs, cached HTML, exports)
-   - Cleanup/rotation policies for cached data
-   - Backup and migration strategy
+**Completed Cleanup Tasks:**
+- ✅ Added deprecation comments to legacy book columns in `database.py`
+- ✅ Updated `design/SUMMARY.md` with recent integrations
+- ✅ Removed debug prints from spinitex.py
+- ✅ Created `design/architecture/integration_guidelines.md`
 
-2a. **Database Architecture** (Expanded Database Review)
-   - Current schema analysis (books, papers, links, ML favorites, inventory)
-   - SQLite vs PostgreSQL decision (when to migrate? stay on SQLite?)
-   - Table relationships and foreign keys (currently minimal)
-   - Indexing strategy (performance optimization)
-   - Schema migration strategy (Alembic? Custom? Ad-hoc ALTER TABLE?)
-   - Normalization vs denormalization trade-offs
-   - Column naming conventions (e.g., enriched_at vs enrichment_date)
-   - Data integrity constraints (NOT NULL, UNIQUE, CHECK constraints)
-   - Full-text search strategy (FTS5 for SQLite? PostgreSQL tsquery?)
-   - JSON storage patterns (specifications column as text vs proper JSON)
-   - Timestamps: CURRENT_TIMESTAMP vs ISO strings vs Unix epochs
-   - Soft deletes vs hard deletes
-   - Audit trail / change history (do we need it?)
-   - Query performance monitoring
+**Database Schema Decisions Made:**
+- **Stay on SQLite** - Good for years (up to 1GB+), WAL mode handles concurrency
+- **Use metadata JSON** - New pattern for flexible attributes (Migration 6)
+- **Keep legacy columns** - Deprecated but kept for backwards compatibility until Phase 6+
+- **Tag storage** - Defer standardization to Phase 6+ (not blocking)
+- **Foreign keys** - Already enabled via Migration 1
+- **Migration strategy** - Custom system working well, no need for Alembic yet
 
-3. **Operating Modes Reconciliation**
-   - On-demand mode (current: `holo <command>`)
-   - Autonomous daemon mode (planned: background processing)
-   - How do these coexist?
-   - Shared infrastructure needs
-   - Command queue vs direct execution
-   - When to use which mode?
+**Questions Answered:**
+- ✅ Database schema sustainable? **Yes, proceed with confidence**
+- ✅ Need background daemon now? **Defer to Phase 6**
+- ✅ SQLite vs PostgreSQL? **Stay on SQLite for now**
+- ✅ Schema evolution strategy? **Metadata JSON + migrations working well**
 
-4. **Processing & Enrichment**
-   - LLM usage patterns (when to batch, when to real-time)
-   - API call optimization (rate limiting, retries, cost tracking)
-   - Proxy routing decisions (when to proxy, when not to)
-   - Enrichment pipelines (metadata → classification → summaries)
-   - Dependency chains (e.g., need description before categorizing)
-
-5. **Task & Queue Management**
-   - Background job architecture (if needed)
-   - Priority handling (urgent vs batch)
-   - Failure recovery (retries, dead letter queue)
-   - Progress tracking and resumability
-   - User notification of long-running tasks
-
-6. **Integration Abstraction Patterns**
-   - BaseAPIClient needs (common to all APIs)
-   - HTTPFetcher usage guidelines
-   - When to create new integrations/ vs extending existing
-   - Configuration organization (per-integration vs global)
-   - Testing strategy for integrations
-   - Global rate limiter vs per-integration?
-   - OAuth token refresh management for multiple services
-   - API call cost tracking (especially for paid APIs)
-   - Unified retry/error handling across integrations
-
-7. **Configuration Management**
-   - Config file organization as features grow
-   - Secrets management (API keys, tokens)
-   - Per-integration settings vs global settings
-   - Migration strategy for config changes
-   - Validation and error reporting
-
-8. **LLM Personality & Voice Design**
-   - System prompt strategy (default tone/personality)
-   - Context-specific voices (research vs thermal receipts vs enrichment)
-   - Tone guidelines (direct/grounded vs creative vs formal)
-   - Consistency across commands
-   - User preference configuration
-   - OS-tan for Holocene? (character design if going full weeb)
-
-**Deliverables:**
-- 📄 **`design/architecture/SYSTEM_OVERVIEW.md`** - High-level architecture diagram + explanations
-- 📄 **`design/architecture/data_flows.md`** - Data flow diagrams for major operations
-- 📄 **`design/architecture/operating_modes.md`** - Daemon vs CLI mode reconciliation
-- 📄 **`design/architecture/integration_guidelines.md`** - How to add new integrations
-- 📄 **`design/architecture/storage_strategy.md`** - Database, cache, files organization
-- 📄 **`design/architecture/database_schema.md`** - Current schema, migration strategy, SQLite vs PostgreSQL decision
-- 📄 **`design/architecture/task_queue.md`** - Background job design (if needed)
-- 📄 **`design/architecture/llm_personality.md`** - LLM voice/tone guidelines
-- 🔄 **Updated ROADMAP.md** - Reprioritized based on architectural decisions
-
-**Input Documents (Already Created):**
-- 📄 **`docs/public_apis_evaluation.md`** - 50+ APIs evaluated for integration potential
-- 📄 **`docs/integration_strategy_framework.md`** - Paid vs Self-Built vs Self-Hosted decision framework
-- 📄 **`docs/self_hosted_read_later_evaluation.md`** - Read-it-later case study (Wallabag, etc.)
-
-**Questions to Answer:**
-- Do we need a background daemon now, or can we defer?
-- Should we implement a task queue system before more integrations?
-- Is our database schema sustainable as features grow?
-- Do we need a proper ETL pipeline abstraction?
-- How do we handle long-running enrichment operations?
-- Should proxy routing be configurable per-command?
-- What's the right balance between LLM creativity and directness?
-- Should we have different LLM personalities for different command contexts?
-
-**Database Schema Pattern Questions (The Real Issue):**
-- **Tags storage:** Separate `tags` table (normalized)? JSON arrays? CSV TEXT? Pick ONE pattern
-- **Flexible attributes:** When to use EAV tables? When to use JSON columns? When fixed columns?
-- **Relationships:** Normalize (books ↔ papers FK)? Or keep denormalized TEXT references?
-- **Variable metadata:** ML specifications - JSON column? EAV table? Fixed columns + JSON extras?
-- **Schema evolution:** Stop ad-hoc ALTER TABLE? Use migrations? JSON for new integration fields?
-- **Type safety:** Proper SQL types vs TEXT for everything? How to handle timestamps consistently?
-- **Foreign keys:** Enable enforcement (PRAGMA foreign_keys = ON)? Add FK constraints?
-- **Indexing:** What queries are slow? Add missing indexes (trust_tier, enriched_at, source)?
-- **Column naming:** Standardize conventions (enriched_at vs date_added vs first_synced)?
-- **Full-text search:** Implement FTS5 for papers/books/links?
-
-**Current Problems:**
-- Tags stored 3 different ways (CSV, separate table, JSON-ish)
-- EAV for `item_attributes` but fixed columns everywhere else
-- `specifications` stored as Python dict repr TEXT instead of proper JSON
-- No foreign keys enforced (books reference papers via TEXT field)
-- 14 columns added ad-hoc to `books` table (extreme schema drift)
-
-**Estimated Time:** 1-2 full sessions (4-6 hours)
-**Outcome:** Clear architectural vision before Phase 4.3+
+**Full Report:** See `ARCHITECTURE_AUDIT_2025-11-21.md` for comprehensive analysis
 
 ---
 
