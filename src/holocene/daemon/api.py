@@ -626,12 +626,12 @@ class APIServer:
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <script type="module">
-        // Import xterm-kit utilities from koma repo
-        import { parse as parseArgs, hasHelp, showHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/argparse.js';
-        import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/output.js';
-        import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/table.js';
-        import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/progress.js';
-        import { Autocomplete, createTabHandler } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/autocomplete.js';
+        // Import xterm-kit utilities from koma repo (v1.1.1)
+        import { parse as parseArgs, hasHelp, showHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/argparse.js';
+        import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/output.js';
+        import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/table.js';
+        import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/progress.js';
+        import { Autocomplete, createTabHandler } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/autocomplete.js';
 
         // Terminal setup
         const term = new Terminal({
