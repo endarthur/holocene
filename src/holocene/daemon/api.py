@@ -627,7 +627,7 @@ class APIServer:
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <script type="module">
         // Import xterm-kit utilities from koma repo (v1.1.2)
-        import { parse as parseArgs, hasHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/argparse.js';
+        import { parse as parseArgs, hasHelp, showHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/argparse.js';
         import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/output.js';
         import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/table.js';
         import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/progress.js';
@@ -672,7 +672,7 @@ class APIServer:
 
         // Register all commands
         registry.register('help', {
-            description: 'Show available commands',
+            description: 'Show all available commands',
             category: 'general'
         });
 
@@ -822,7 +822,7 @@ class APIServer:
             try {
                 switch (command) {
                     case 'help':
-                        showHelp();
+                        showAllCommands();
                         break;
 
                     case 'auth':
@@ -834,7 +834,11 @@ class APIServer:
                         break;
 
                     case 'books':
-                        if (args[0] === 'list' || !args[0]) {
+                        // Check for --help flag
+                        if (hasHelp(args)) {
+                            const schema = registry.getSchema('books');
+                            showHelp('books', args, schema, term);
+                        } else if (args[0] === 'list' || !args[0]) {
                             await listBooks(args.slice(1));  // Pass args after 'list'
                         } else {
                             writeln('Usage: books list [limit|all]', colors.red);
@@ -850,7 +854,11 @@ class APIServer:
                         break;
 
                     case 'ask':
-                        if (args.length === 0) {
+                        // Check for --help flag
+                        if (hasHelp(args)) {
+                            const schema = registry.getSchema('ask');
+                            showHelp('ask', args, schema, term);
+                        } else if (args.length === 0) {
                             writeln('Usage: ask <your question>', colors.red);
                         } else {
                             await ask(args.join(' '));
@@ -899,7 +907,7 @@ class APIServer:
         }
 
         // Command implementations
-        function showHelp() {
+        function showAllCommands() {
             // Build help content
             let content = 'Available Commands:\n\n';
 
