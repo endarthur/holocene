@@ -137,7 +137,8 @@ class APIServer:
         self.port = port
 
         # Flask app
-        self.app = Flask("holod-api")
+        # Use __name__ so Flask can find templates/ directory relative to this module
+        self.app = Flask(__name__)
 
         # Configure secret key for sessions
         # TODO: Load from config or generate persistent key
