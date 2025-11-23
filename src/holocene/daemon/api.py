@@ -168,6 +168,9 @@ class APIServer:
         self.app.route("/auth/logout", methods=["POST"])(self._auth_logout)
         self.app.route("/auth/status", methods=["GET"])(self._auth_status)
 
+        # Web terminal
+        self.app.route("/term", methods=["GET"])(self._term)
+
         # Status endpoints
         self.app.route("/status", methods=["GET"])(self._status)
         self.app.route("/health", methods=["GET"])(self._health)
@@ -268,6 +271,7 @@ class APIServer:
 
         <h3>Quick Links:</h3>
         <ul class="links">
+            <li><a href="/term">💻 Web Terminal</a></li>
             <li><a href="/health">🏥 Health Check</a></li>
             <li><a href="/status">📊 API Status</a></li>
             <li><a href="/auth/status">🔐 Auth Status</a></li>
@@ -536,6 +540,477 @@ class APIServer:
         except Exception as e:
             logger.error(f"Error in /auth/status: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
+
+    def _term(self):
+        """GET /term - Web-based terminal interface."""
+        return """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Holocene Terminal</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1e1e1e;
+            font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+            overflow: hidden;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        #header {
+            background: #2d2d2d;
+            color: #cccccc;
+            padding: 8px 16px;
+            font-size: 14px;
+            border-bottom: 1px solid #3e3e3e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #header .title {
+            font-weight: bold;
+        }
+        #header .status {
+            font-size: 12px;
+            color: #4ec9b0;
+        }
+        #terminal {
+            flex: 1;
+            padding: 10px;
+        }
+        .xterm {
+            height: 100%;
+        }
+        .xterm-viewport {
+            background-color: #1e1e1e !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="header">
+            <span class="title">🌍 Holocene Terminal</span>
+            <span class="status" id="status">Connecting...</span>
+        </div>
+        <div id="terminal"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script>
+        // Terminal setup
+        const term = new Terminal({
+            cursorBlink: true,
+            fontSize: 14,
+            fontFamily: 'Fira Code, JetBrains Mono, Consolas, monospace',
+            theme: {
+                background: '#1e1e1e',
+                foreground: '#cccccc',
+                cursor: '#4ec9b0',
+                black: '#1e1e1e',
+                red: '#f48771',
+                green: '#4ec9b0',
+                yellow: '#dcdcaa',
+                blue: '#569cd6',
+                magenta: '#c586c0',
+                cyan: '#4ec9b0',
+                white: '#d4d4d4',
+                brightBlack: '#6a6a6a',
+                brightRed: '#f48771',
+                brightGreen: '#4ec9b0',
+                brightYellow: '#dcdcaa',
+                brightBlue: '#569cd6',
+                brightMagenta: '#c586c0',
+                brightCyan: '#4ec9b0',
+                brightWhite: '#ffffff'
+            }
+        });
+
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById('terminal'));
+        fitAddon.fit();
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            fitAddon.fit();
+        });
+
+        // Terminal state
+        let currentLine = '';
+        let commandHistory = [];
+        let historyIndex = -1;
+        let apiToken = sessionStorage.getItem('holocene_api_token');
+
+        // ANSI color codes
+        const colors = {
+            reset: '\\x1b[0m',
+            bright: '\\x1b[1m',
+            dim: '\\x1b[2m',
+            red: '\\x1b[31m',
+            green: '\\x1b[32m',
+            yellow: '\\x1b[33m',
+            blue: '\\x1b[34m',
+            magenta: '\\x1b[35m',
+            cyan: '\\x1b[36m',
+            white: '\\x1b[37m'
+        };
+
+        // Write with color support
+        function write(text, color = '') {
+            if (color) {
+                term.write(color + text + colors.reset);
+            } else {
+                term.write(text);
+            }
+        }
+
+        function writeln(text, color = '') {
+            write(text + '\\r\\n', color);
+        }
+
+        // ASCII art banner
+        function showBanner() {
+            writeln('');
+            writeln('  ╔═══════════════════════════════════════════════════════╗', colors.cyan);
+            writeln('  ║                                                       ║', colors.cyan);
+            writeln('  ║   ' + colors.bright + colors.green + '🌍  H O L O C E N E   T E R M I N A L' + colors.reset + colors.cyan + '           ║', '');
+            writeln('  ║                                                       ║', colors.cyan);
+            writeln('  ║   Your personal geological record of the present     ║', colors.cyan);
+            writeln('  ║                                                       ║', colors.cyan);
+            writeln('  ╚═══════════════════════════════════════════════════════╝', colors.cyan);
+            writeln('');
+            writeln('  Type ' + colors.bright + colors.yellow + 'help' + colors.reset + ' for available commands', colors.dim);
+            writeln('');
+        }
+
+        // API call helper
+        async function apiCall(endpoint, options = {}) {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            };
+
+            if (apiToken) {
+                headers['Authorization'] = `Bearer ${apiToken}`;
+            }
+
+            try {
+                const response = await fetch(endpoint, {
+                    ...options,
+                    headers
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+
+                return data;
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        // Command parser
+        async function executeCommand(cmd) {
+            const parts = cmd.trim().split(/\\s+/);
+            const command = parts[0].toLowerCase();
+            const args = parts.slice(1);
+
+            try {
+                switch (command) {
+                    case 'help':
+                        showHelp();
+                        break;
+
+                    case 'auth':
+                        if (args[0] === 'login') {
+                            await authLogin();
+                        } else if (args[0] === 'status') {
+                            await authStatus();
+                        } else {
+                            writeln('Usage: auth [login|status]', colors.red);
+                        }
+                        break;
+
+                    case 'books':
+                        if (args[0] === 'list' || !args[0]) {
+                            await listBooks();
+                        } else {
+                            writeln('Usage: books [list]', colors.red);
+                        }
+                        break;
+
+                    case 'links':
+                        if (args[0] === 'list' || !args[0]) {
+                            await listLinks();
+                        } else {
+                            writeln('Usage: links [list]', colors.red);
+                        }
+                        break;
+
+                    case 'ask':
+                        if (args.length === 0) {
+                            writeln('Usage: ask <your question>', colors.red);
+                        } else {
+                            await ask(args.join(' '));
+                        }
+                        break;
+
+                    case 'status':
+                        await getStatus();
+                        break;
+
+                    case 'clear':
+                        term.clear();
+                        break;
+
+                    case 'token':
+                        if (args[0]) {
+                            setToken(args[0]);
+                        } else {
+                            writeln('Usage: token <your-api-token>', colors.red);
+                        }
+                        break;
+
+                    case '':
+                        // Empty command, just show new prompt
+                        break;
+
+                    default:
+                        writeln(`Unknown command: ${command}`, colors.red);
+                        writeln('Type ' + colors.bright + 'help' + colors.reset + ' for available commands', colors.dim);
+                }
+            } catch (error) {
+                writeln(`Error: ${error.message}`, colors.red);
+            }
+
+            showPrompt();
+        }
+
+        // Command implementations
+        function showHelp() {
+            writeln('');
+            writeln(colors.bright + 'Available Commands:' + colors.reset, '');
+            writeln('');
+            writeln('  ' + colors.cyan + 'auth login' + colors.reset + '          Authenticate with API token', '');
+            writeln('  ' + colors.cyan + 'auth status' + colors.reset + '         Check authentication status', '');
+            writeln('  ' + colors.cyan + 'token <token>' + colors.reset + '      Set API token directly', '');
+            writeln('  ' + colors.cyan + 'books list' + colors.reset + '          List your book collection', '');
+            writeln('  ' + colors.cyan + 'links list' + colors.reset + '          List your saved links', '');
+            writeln('  ' + colors.cyan + 'ask <query>' + colors.reset + '         Ask the AI Librarian', '');
+            writeln('  ' + colors.cyan + 'status' + colors.reset + '              Get daemon status', '');
+            writeln('  ' + colors.cyan + 'clear' + colors.reset + '               Clear terminal', '');
+            writeln('  ' + colors.cyan + 'help' + colors.reset + '                Show this help', '');
+            writeln('');
+            writeln(colors.dim + 'Tip: Generate an API token with: holo auth token create --name "Web Terminal"' + colors.reset, '');
+            writeln('');
+        }
+
+        async function authLogin() {
+            writeln('');
+            writeln('Enter your API token (starts with hlc_):', colors.yellow);
+            // In a real implementation, we'd capture input securely
+            // For now, direct users to use the 'token' command
+            writeln('Use: ' + colors.cyan + 'token <your-token>' + colors.reset, colors.dim);
+            writeln('');
+        }
+
+        async function authStatus() {
+            if (!apiToken) {
+                writeln('Not authenticated. Use: token <your-token>', colors.red);
+                return;
+            }
+
+            const data = await apiCall('/auth/status');
+            writeln('');
+            writeln(colors.green + '✓ Authenticated' + colors.reset, '');
+            if (data.username) {
+                writeln(`  User: ${data.username}`, colors.dim);
+            }
+            writeln('');
+        }
+
+        async function listBooks() {
+            writeln('');
+            writeln('Fetching books...', colors.dim);
+            const data = await apiCall('/books');
+
+            if (data.books && data.books.length > 0) {
+                writeln('');
+                writeln(colors.bright + `Books (${data.books.length} total):` + colors.reset, '');
+                writeln('');
+
+                data.books.slice(0, 10).forEach((book, idx) => {
+                    writeln(`  ${colors.cyan}${idx + 1}.${colors.reset} ${book.title}`, '');
+                    if (book.author) {
+                        writeln(`     ${colors.dim}by ${book.author}${colors.reset}`, '');
+                    }
+                });
+
+                if (data.books.length > 10) {
+                    writeln('');
+                    writeln(`  ${colors.dim}... and ${data.books.length - 10} more${colors.reset}`, '');
+                }
+                writeln('');
+            } else {
+                writeln('No books found.', colors.yellow);
+            }
+        }
+
+        async function listLinks() {
+            writeln('');
+            writeln('Fetching links...', colors.dim);
+            const data = await apiCall('/links');
+
+            if (data.links && data.links.length > 0) {
+                writeln('');
+                writeln(colors.bright + `Links (${data.links.length} total):` + colors.reset, '');
+                writeln('');
+
+                data.links.slice(0, 10).forEach((link, idx) => {
+                    writeln(`  ${colors.cyan}${idx + 1}.${colors.reset} ${link.title || link.url}`, '');
+                    if (link.url) {
+                        writeln(`     ${colors.dim}${link.url}${colors.reset}`, '');
+                    }
+                });
+
+                if (data.links.length > 10) {
+                    writeln('');
+                    writeln(`  ${colors.dim}... and ${data.links.length - 10} more${colors.reset}`, '');
+                }
+                writeln('');
+            } else {
+                writeln('No links found.', colors.yellow);
+            }
+        }
+
+        async function ask(query) {
+            writeln('');
+            writeln(`Asking AI Librarian: "${query}"...`, colors.dim);
+            writeln('');
+            writeln('[This feature will be implemented when /ask API endpoint is available]', colors.yellow);
+            writeln('');
+        }
+
+        async function getStatus() {
+            writeln('');
+            writeln('Fetching status...', colors.dim);
+            const data = await apiCall('/status');
+
+            writeln('');
+            writeln(colors.bright + 'Holod Status:' + colors.reset, '');
+            writeln('');
+            writeln(`  Daemon: ${colors.green}Running${colors.reset}`, '');
+            writeln(`  Plugins: ${data.plugins?.length || 0} loaded`, colors.dim);
+            writeln('');
+        }
+
+        function setToken(token) {
+            apiToken = token;
+            sessionStorage.setItem('holocene_api_token', token);
+            document.getElementById('status').textContent = 'Authenticated ✓';
+            document.getElementById('status').style.color = '#4ec9b0';
+            writeln('');
+            writeln(colors.green + '✓ API token saved' + colors.reset, '');
+            writeln('');
+        }
+
+        // Prompt
+        function showPrompt() {
+            write('\\r\\n' + colors.green + 'holo' + colors.reset + colors.dim + '@' + colors.reset + colors.cyan + 'web' + colors.reset + ' $ ');
+        }
+
+        // Input handling
+        term.onData(data => {
+            const code = data.charCodeAt(0);
+
+            // Handle special keys
+            if (code === 13) { // Enter
+                term.write('\\r\\n');
+                if (currentLine.trim()) {
+                    commandHistory.push(currentLine);
+                    historyIndex = commandHistory.length;
+                    executeCommand(currentLine);
+                } else {
+                    showPrompt();
+                }
+                currentLine = '';
+            } else if (code === 127) { // Backspace
+                if (currentLine.length > 0) {
+                    currentLine = currentLine.slice(0, -1);
+                    term.write('\\b \\b');
+                }
+            } else if (code === 27) { // Escape sequences (arrows)
+                // Handle arrow keys for history
+                if (data === '\\x1b[A') { // Up arrow
+                    if (historyIndex > 0) {
+                        // Clear current line
+                        for (let i = 0; i < currentLine.length; i++) {
+                            term.write('\\b \\b');
+                        }
+                        historyIndex--;
+                        currentLine = commandHistory[historyIndex];
+                        term.write(currentLine);
+                    }
+                } else if (data === '\\x1b[B') { // Down arrow
+                    if (historyIndex < commandHistory.length - 1) {
+                        // Clear current line
+                        for (let i = 0; i < currentLine.length; i++) {
+                            term.write('\\b \\b');
+                        }
+                        historyIndex++;
+                        currentLine = commandHistory[historyIndex];
+                        term.write(currentLine);
+                    } else if (historyIndex === commandHistory.length - 1) {
+                        // Clear current line
+                        for (let i = 0; i < currentLine.length; i++) {
+                            term.write('\\b \\b');
+                        }
+                        historyIndex = commandHistory.length;
+                        currentLine = '';
+                    }
+                }
+            } else if (code < 32) { // Control characters
+                // Ignore other control characters
+            } else { // Regular character
+                currentLine += data;
+                term.write(data);
+            }
+        });
+
+        // Initialize
+        showBanner();
+
+        if (apiToken) {
+            document.getElementById('status').textContent = 'Authenticated ✓';
+            document.getElementById('status').style.color = '#4ec9b0';
+            writeln(colors.green + '✓ API token loaded from session' + colors.reset, '');
+            writeln('');
+        } else {
+            document.getElementById('status').textContent = 'Not authenticated';
+            document.getElementById('status').style.color = '#f48771';
+            writeln(colors.yellow + '⚠ Not authenticated' + colors.reset, '');
+            writeln('  Generate a token: ' + colors.cyan + 'holo auth token create --name "Web Terminal"' + colors.reset, colors.dim);
+            writeln('  Then use: ' + colors.cyan + 'token <your-token>' + colors.reset, colors.dim);
+            writeln('');
+        }
+
+        showPrompt();
+    </script>
+</body>
+</html>
+"""
 
     # Status endpoints
 
