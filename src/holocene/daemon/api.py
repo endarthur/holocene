@@ -626,45 +626,32 @@ class APIServer:
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <script type="module">
-        // Import xterm-kit utilities from koma repo (v1.1.1)
-        import { parse as parseArgs, hasHelp, showHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/argparse.js';
-        import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/output.js';
-        import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/table.js';
-        import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/progress.js';
-        import { Autocomplete, createTabHandler } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/autocomplete.js';
-        import { CommandRegistry } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/command-registry.js';
+        // Import xterm-kit utilities from koma repo (v1.1.2)
+        import { parse as parseArgs, hasHelp, showHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/argparse.js';
+        import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/output.js';
+        import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/table.js';
+        import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/progress.js';
+        import { Autocomplete, createTabHandler } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/autocomplete.js';
+        import { CommandRegistry } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/command-registry.js';
+        import { Pager } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/pager.js';
+        import { Box, renderBox } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/box.js';
+        import { setTheme, olivineTheme } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/themes.js';
 
-        // Terminal setup
+        // Terminal setup with xterm-kit theme
         const term = new Terminal({
             cursorBlink: true,
             fontSize: 14,
-            fontFamily: 'Fira Code, JetBrains Mono, Consolas, monospace',
-            theme: {
-                background: '#1e1e1e',
-                foreground: '#cccccc',
-                cursor: '#4ec9b0',
-                black: '#1e1e1e',
-                red: '#f48771',
-                green: '#4ec9b0',
-                yellow: '#dcdcaa',
-                blue: '#569cd6',
-                magenta: '#c586c0',
-                cyan: '#4ec9b0',
-                white: '#d4d4d4',
-                brightBlack: '#6a6a6a',
-                brightRed: '#f48771',
-                brightGreen: '#4ec9b0',
-                brightYellow: '#dcdcaa',
-                brightBlue: '#569cd6',
-                brightMagenta: '#c586c0',
-                brightCyan: '#4ec9b0',
-                brightWhite: '#ffffff'
-            }
+            fontFamily: 'Fira Code, JetBrains Mono, Consolas, monospace'
         });
 
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
         term.open(document.getElementById('terminal'));
+
+        // Apply xterm-kit olivine theme (phosphor green terminal aesthetic)
+        setTheme(olivineTheme);
+        term.options.theme = olivineTheme;
+
         fitAddon.fit();
         term.focus(); // Auto-focus terminal on load
 
@@ -712,6 +699,12 @@ class APIServer:
             category: 'library',
             subcommands: {
                 'list': 'List books'
+            },
+            schema: {
+                description: 'Manage your book library',
+                flags: {
+                    help: { short: 'h', description: 'Show help' }
+                }
             }
         });
 
@@ -725,7 +718,14 @@ class APIServer:
 
         registry.register('ask', {
             description: 'Ask the AI Librarian',
-            category: 'ai'
+            category: 'ai',
+            schema: {
+                description: 'Query your library using natural language',
+                positional: { description: '<query>' },
+                flags: {
+                    verbose: { short: 'v', description: 'Verbose output' }
+                }
+            }
         });
 
         registry.register('status', {
@@ -738,17 +738,8 @@ class APIServer:
             category: 'general'
         });
 
-        // Tab completion using registry
-        // Note: Subcommands must be passed explicitly until autocomplete
-        // automatically extracts them from registry metadata
-        const completer = new Autocomplete({
-            registry,
-            subcommands: {
-                'auth': ['status'],
-                'books': ['list'],
-                'links': ['list']
-            }
-        });
+        // Tab completion using registry (v1.1.2+ auto-extracts subcommands!)
+        const completer = new Autocomplete({ registry });
 
         // ANSI color codes
         const colors = {
@@ -909,9 +900,8 @@ class APIServer:
 
         // Command implementations
         function showHelp() {
-            writeln('');
-            writeln(colors.bright + 'Available Commands:' + colors.reset, '');
-            writeln('');
+            // Build help content
+            let content = 'Available Commands:\n\n';
 
             // Get commands grouped by category from registry
             const byCategory = registry.getByCategory();
@@ -923,32 +913,40 @@ class APIServer:
 
                 // Category header
                 const categoryName = category.charAt(0).toUpperCase() + category.slice(1);
-                writeln('  ' + colors.dim + categoryName + ':' + colors.reset, '');
+                content += `${categoryName}:\n`;
 
                 commands.forEach(cmd => {
                     const subcommands = registry.getSubcommands(cmd.name);
-                    let cmdLine = '    ' + colors.cyan + cmd.name + colors.reset;
+                    let cmdLine = `  ${cmd.name}`;
 
                     // Add subcommand hints
                     if (subcommands) {
                         const subNames = Object.keys(subcommands);
-                        cmdLine += ' ' + colors.dim + '<' + subNames.join('|') + '>' + colors.reset;
+                        cmdLine += ` <${subNames.join('|')}>`;
                     }
 
                     // Pad and add description
-                    const padding = ' '.repeat(Math.max(1, 30 - cmdLine.replace(/\\x1b\[[0-9;]*m/g, '').length));
-                    writeln(cmdLine + padding + cmd.description, '');
+                    const padding = ' '.repeat(Math.max(1, 28 - cmdLine.length));
+                    content += `${cmdLine}${padding}${cmd.description}\n`;
                 });
 
-                writeln('');
+                content += '\n';
             });
 
-            writeln(colors.dim + 'Examples:', '');
-            writeln(colors.dim + '  books list         ' + colors.reset + '  # Show first 20 books', '');
-            writeln(colors.dim + '  books list 50      ' + colors.reset + '  # Show first 50 books', '');
-            writeln(colors.dim + '  books list all     ' + colors.reset + '  # Show all books', '');
+            content += 'Examples:\n';
+            content += '  books list         # Show first 20 books\n';
+            content += '  books list 50      # Show first 50 books\n';
+            content += '  books list all     # Show all books\n\n';
+            content += 'Generate a token: holo auth token create --name "Web Terminal"';
+
+            // Render in a box for prettier output
             writeln('');
-            writeln(colors.dim + 'Generate a token: ' + colors.cyan + 'holo auth token create --name "Web Terminal"' + colors.reset, '');
+            renderBox(term, {
+                title: 'Holocene Terminal Help',
+                content: content,
+                style: 'rounded',
+                padding: 1
+            });
             writeln('');
         }
 
@@ -1014,30 +1012,49 @@ class APIServer:
                 if (data.books && data.books.length > 0) {
                     const booksToShow = limit === Infinity ? data.books : data.books.slice(0, limit);
 
-                    writeln('');
-                    writeln(colors.bright + `Books (showing ${booksToShow.length} of ${data.books.length}):` + colors.reset, '');
-                    writeln('');
+                    // Use Pager for large lists (>30 books)
+                    if (booksToShow.length > 30) {
+                        // Build content for pager
+                        let content = `Books (${booksToShow.length} of ${data.books.length}):\n\n`;
 
-                    const table = new Table({
-                        columns: ['#', 'Title', 'Author'],
-                        align: ['right', 'left', 'left']
-                    });
+                        booksToShow.forEach((book, idx) => {
+                            const num = String(idx + 1).padStart(4, ' ');
+                            const title = (book.title || 'Untitled').padEnd(50, ' ').slice(0, 50);
+                            const author = (book.author || '(no author)').slice(0, 30);
+                            content += `${num}  ${title}  ${author}\n`;
+                        });
 
-                    booksToShow.forEach((book, idx) => {
-                        table.addRow([
-                            String(idx + 1),
-                            book.title || 'Untitled',
-                            book.author || '(no author)'
-                        ]);
-                    });
+                        content += `\nUse arrow keys to navigate, q to quit`;
 
-                    table.render(term);
-
-                    if (limit !== Infinity && data.books.length > limit) {
+                        const pager = new Pager(term);
+                        await pager.show(content);
+                    } else {
+                        // Normal table output for small lists
                         writeln('');
-                        writeln(`  ${colors.dim}... and ${data.books.length - limit} more. Use 'books list all' to see all.${colors.reset}`, '');
+                        writeln(colors.bright + `Books (showing ${booksToShow.length} of ${data.books.length}):` + colors.reset, '');
+                        writeln('');
+
+                        const table = new Table({
+                            columns: ['#', 'Title', 'Author'],
+                            align: ['right', 'left', 'left']
+                        });
+
+                        booksToShow.forEach((book, idx) => {
+                            table.addRow([
+                                String(idx + 1),
+                                book.title || 'Untitled',
+                                book.author || '(no author)'
+                            ]);
+                        });
+
+                        table.render(term);
+
+                        if (limit !== Infinity && data.books.length > limit) {
+                            writeln('');
+                            writeln(`  ${colors.dim}... and ${data.books.length - limit} more. Use 'books list all' to see all.${colors.reset}`, '');
+                        }
+                        writeln('');
                     }
-                    writeln('');
                 } else {
                     writeln('');
                     showInfo(term, 'No books found.');
