@@ -110,6 +110,9 @@ class APIServer:
     def _setup_routes(self):
         """Setup Flask routes."""
 
+        # Root endpoint
+        self.app.route("/", methods=["GET"])(self._root)
+
         # Auth endpoints
         self.app.route("/auth/login", methods=["GET"])(self._auth_login)
         self.app.route("/auth/logout", methods=["POST"])(self._auth_logout)
@@ -141,6 +144,93 @@ class APIServer:
         # Error handlers
         self.app.errorhandler(404)(self._not_found)
         self.app.errorhandler(500)(self._internal_error)
+
+    # Root endpoint
+
+    def _root(self):
+        """GET / - Root endpoint with API info."""
+        return """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Holocene API</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            margin-top: 0;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #27ae60;
+            color: white;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .links {
+            list-style: none;
+            padding: 0;
+        }
+        .links li {
+            margin: 10px 0;
+        }
+        .links a {
+            color: #3498db;
+            text-decoration: none;
+            padding: 8px 12px;
+            background: #ecf0f1;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        .links a:hover {
+            background: #3498db;
+            color: white;
+        }
+        .note {
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #ecf0f1;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🌍 Holocene API <span class="badge">ONLINE</span></h1>
+        <p>Personal knowledge management and productivity tracking system.</p>
+
+        <h3>Quick Links:</h3>
+        <ul class="links">
+            <li><a href="/health">🏥 Health Check</a></li>
+            <li><a href="/status">📊 API Status</a></li>
+            <li><a href="/auth/status">🔐 Auth Status</a></li>
+        </ul>
+
+        <div class="note">
+            <strong>Authentication Required:</strong> Most endpoints require authentication.
+            Use <code>/login</code> command in Telegram to get a magic link.
+        </div>
+    </div>
+</body>
+</html>
+"""
 
     # Auth endpoints
 
