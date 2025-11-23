@@ -972,7 +972,10 @@ class APIServer:
         function handleTab() {
             const completions = getCompletions(currentLine);
 
-            if (completions.length === 1) {
+            if (completions.length === 0) {
+                // No completions - do nothing (like a real terminal)
+                return;
+            } else if (completions.length === 1) {
                 // Single completion - auto-complete
                 const parts = currentLine.split(/\\s+/);
                 if (parts.length === 1) {
