@@ -80,16 +80,16 @@
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <script type="module">
-        // Import xterm-kit utilities from koma repo (v1.1.2)
-        import { parse as parseArgs, hasHelp, showHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/argparse.js';
-        import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/output.js';
-        import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/table.js';
-        import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/progress.js';
-        import { Autocomplete, createTabHandler } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/autocomplete.js';
-        import { CommandRegistry } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/command-registry.js';
-        import { Pager } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/pager.js';
-        import { Box, renderBox } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/box.js';
-        import { setTheme, olivineTheme } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/themes.js';
+        // Import xterm-kit utilities from koma repo (v1.1.3)
+        import { parse as parseArgs, hasHelp, showHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.3/src/lib/xterm-kit/argparse.js';
+        import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.3/src/lib/xterm-kit/output.js';
+        import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.3/src/lib/xterm-kit/table.js';
+        import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.3/src/lib/xterm-kit/progress.js';
+        import { Autocomplete, createTabHandler } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.3/src/lib/xterm-kit/autocomplete.js';
+        import { CommandRegistry } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.3/src/lib/xterm-kit/command-registry.js';
+        import { Pager } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.3/src/lib/xterm-kit/pager.js';
+        import { Box, renderBox } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.3/src/lib/xterm-kit/box.js';
+        import { setTheme, olivineTheme } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.3/src/lib/xterm-kit/themes.js';
 
         // Terminal setup with xterm-kit theme
         const term = new Terminal({
@@ -489,16 +489,12 @@
 
                         content += `\nUse arrow keys to navigate, q to quit`;
 
-                        // Disable main input handler while pager is active
-                        if (inputHandlerDisposable) {
-                            inputHandlerDisposable.dispose();
-                        }
-
-                        const pager = new Pager(term);
+                        // Use Pager with auto-pause/resume of input handlers
+                        const pager = new Pager(term, {
+                            pauseHandlers: [inputHandlerDisposable],
+                            onQuit: () => setupInputHandler()
+                        });
                         await pager.show(content);
-
-                        // Re-enable main input handler after pager quits
-                        setupInputHandler();
                     } else {
                         // Normal table output for small lists
                         writeln('');
