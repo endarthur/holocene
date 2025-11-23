@@ -45,20 +45,70 @@ logger = logging.getLogger(__name__)
 def require_auth(f):
     """Decorator to require authentication for endpoints.
 
-    Checks if user is authenticated via session.
+    Checks if user is authenticated via:
+    1. Session cookie (from magic link login)
+    2. API token (Authorization: Bearer hlc_...)
+
     Returns 401 Unauthorized if not authenticated.
     """
     from functools import wraps
 
     @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Check if user is authenticated
-        if 'user_id' not in session:
-            logger.warning(f"Unauthorized access attempt to {request.path} from {request.remote_addr}")
-            return jsonify({"error": "Authentication required"}), 401
+    def decorated_function(self, *args, **kwargs):
+        # Method 1: Check session authentication (from magic link login)
+        if 'user_id' in session:
+            # User authenticated via session, proceed
+            return f(self, *args, **kwargs)
 
-        # User is authenticated, proceed
-        return f(*args, **kwargs)
+        # Method 2: Check API token authentication
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]  # Remove 'Bearer ' prefix
+
+            # Validate token
+            cursor = self.core.db.conn.cursor()
+            cursor.execute("""
+                SELECT
+                    api_tokens.id,
+                    api_tokens.user_id,
+                    api_tokens.revoked_at,
+                    users.telegram_username
+                FROM api_tokens
+                JOIN users ON api_tokens.user_id = users.id
+                WHERE api_tokens.token = ?
+            """, (token,))
+
+            token_row = cursor.fetchone()
+
+            if token_row:
+                token_id, user_id, revoked_at, username = token_row
+
+                # Check if token is revoked
+                if revoked_at:
+                    logger.warning(f"Revoked API token used: {token_id} by user {user_id}")
+                    return jsonify({"error": "Token has been revoked"}), 401
+
+                # Token is valid! Update last_used_at
+                from datetime import datetime
+                cursor.execute("""
+                    UPDATE api_tokens
+                    SET last_used_at = ?
+                    WHERE id = ?
+                """, (datetime.now().isoformat(), token_id))
+                self.core.db.conn.commit()
+
+                logger.debug(f"API token authenticated: user {user_id} ({username})")
+
+                # Store user info in request context for endpoint to access if needed
+                request.user_id = user_id
+                request.username = username
+
+                # Proceed with the request
+                return f(self, *args, **kwargs)
+
+        # No valid authentication found
+        logger.warning(f"Unauthorized access attempt to {request.path} from {request.remote_addr}")
+        return jsonify({"error": "Authentication required"}), 401
 
     return decorated_function
 

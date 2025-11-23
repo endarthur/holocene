@@ -196,3 +196,179 @@ def revoke_token(token_id: int):
 
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
+
+
+@auth.group("token")
+def token():
+    """Manage API tokens for programmatic access."""
+    pass
+
+
+@token.command("create")
+@click.option(
+    "--name",
+    required=True,
+    help="Descriptive name for this token (e.g., 'My Laptop', 'CI Server')",
+)
+@click.option(
+    "--telegram-user-id",
+    type=int,
+    help="Telegram user ID (defaults to first user if only one exists)",
+)
+def create_token(name: str, telegram_user_id: int = None):
+    """
+    Create a new API token for programmatic access.
+
+    Examples:
+        holo auth token create --name "My Laptop"
+        holo auth token create --name "CI Server" --telegram-user-id 123456
+    """
+    try:
+        config = load_config()
+        db = Database(config.db_path)
+        cursor = db.conn.cursor()
+
+        # If no telegram_user_id provided, try to get from first/only user
+        if not telegram_user_id:
+            cursor.execute("SELECT telegram_user_id FROM users LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                telegram_user_id = row[0]
+            else:
+                console.print(
+                    "[red]Error:[/red] No users found in database.\n"
+                    "Use /login in Telegram bot first to create a user."
+                )
+                db.close()
+                return
+
+        # Get user
+        cursor.execute(
+            "SELECT id, telegram_username FROM users WHERE telegram_user_id = ?",
+            (telegram_user_id,)
+        )
+        user_row = cursor.fetchone()
+
+        if not user_row:
+            console.print(f"[red]Error:[/red] User with Telegram ID {telegram_user_id} not found.")
+            db.close()
+            return
+
+        user_id = user_row[0]
+        username = user_row[1] or "(no username)"
+
+        # Generate API token with hlc_ prefix
+        import secrets
+        random_part = secrets.token_urlsafe(32)  # ~43 chars
+        token = f"hlc_{random_part}"
+
+        # Store token
+        cursor.execute("""
+            INSERT INTO api_tokens (user_id, token, name, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (user_id, token, name, datetime.now().isoformat()))
+        token_id = cursor.lastrowid
+        db.conn.commit()
+
+        # Display success with the token
+        console.print(Panel.fit(
+            f"[green]🔑 API Token Created[/green]\n\n"
+            f"[cyan]Token ID:[/cyan] {token_id}\n"
+            f"[cyan]Name:[/cyan] {name}\n"
+            f"[cyan]User:[/cyan] {username} (tg:{telegram_user_id})\n\n"
+            f"[bold yellow]Token (keep this secret!):[/bold yellow]\n"
+            f"[bold]{token}[/bold]\n\n"
+            f"[dim]This token will not be shown again. Store it securely![/dim]\n\n"
+            f"[cyan]Usage:[/cyan]\n"
+            f"curl -H \"Authorization: Bearer {token}\" \\\n"
+            f"     https://holo.stdgeo.com/books",
+            title="API Token",
+            border_style="green"
+        ))
+
+        db.close()
+
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+
+
+@token.command("list")
+def list_api_tokens():
+    """List all active API tokens."""
+    try:
+        config = load_config()
+        db = Database(config.db_path)
+        cursor = db.conn.cursor()
+
+        # Get all non-revoked tokens
+        cursor.execute("""
+            SELECT
+                api_tokens.id,
+                api_tokens.name,
+                api_tokens.created_at,
+                api_tokens.last_used_at,
+                users.telegram_username,
+                users.telegram_user_id
+            FROM api_tokens
+            JOIN users ON api_tokens.user_id = users.id
+            WHERE api_tokens.revoked_at IS NULL
+            ORDER BY api_tokens.created_at DESC
+        """)
+
+        tokens = cursor.fetchall()
+
+        if not tokens:
+            console.print("[yellow]No active API tokens found.[/yellow]")
+            db.close()
+            return
+
+        console.print(f"\n[cyan]Active API Tokens:[/cyan] {len(tokens)}\n")
+
+        for token_row in tokens:
+            token_id, name, created_at, last_used_at, username, tg_id = token_row
+
+            last_used = last_used_at if last_used_at else "[dim]Never used[/dim]"
+
+            console.print(
+                f"[bold]Token #{token_id}[/bold] - {name}\n"
+                f"  User: {username or '(no username)'} (tg:{tg_id})\n"
+                f"  Created: {created_at}\n"
+                f"  Last used: {last_used}\n"
+            )
+
+        db.close()
+
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+
+
+@token.command("revoke")
+@click.argument("token_id", type=int)
+def revoke_api_token(token_id: int):
+    """Revoke an API token by ID."""
+    try:
+        config = load_config()
+        db = Database(config.db_path)
+        cursor = db.conn.cursor()
+
+        # Mark token as revoked
+        cursor.execute("""
+            UPDATE api_tokens
+            SET revoked_at = ?
+            WHERE id = ? AND revoked_at IS NULL
+        """, (datetime.now().isoformat(), token_id))
+
+        if cursor.rowcount > 0:
+            db.conn.commit()
+            console.print(f"[green]✓[/green] Revoked API token #{token_id}")
+        else:
+            console.print(f"[yellow]Token #{token_id} not found or already revoked.[/yellow]")
+
+        db.close()
+
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
