@@ -592,6 +592,26 @@ class APIServer:
         .xterm-viewport {
             background-color: #1e1e1e !important;
         }
+        /* Scrollbar theming */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3e3e3e;
+            border-radius: 5px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4e4e4e;
+        }
+        /* Firefox scrollbar */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #3e3e3e #1e1e1e;
+        }
     </style>
 </head>
 <body>
@@ -646,9 +666,18 @@ class APIServer:
 
         // Terminal state
         let currentLine = '';
+        let cursorPos = 0; // Cursor position in current line
         let commandHistory = [];
         let historyIndex = -1;
         let apiToken = sessionStorage.getItem('holocene_api_token');
+
+        // Tab completion data
+        const commands = ['help', 'auth', 'books', 'links', 'ask', 'status', 'clear', 'token'];
+        const subcommands = {
+            'auth': ['status'],
+            'books': ['list'],
+            'links': ['list']
+        };
 
         // ANSI color codes
         const colors = {
@@ -920,6 +949,52 @@ class APIServer:
             write('\\r\\n' + colors.green + 'holo' + colors.reset + colors.dim + '@' + colors.reset + colors.cyan + 'web' + colors.reset + ' $ ');
         }
 
+        // Tab completion
+        function getCompletions(line) {
+            const parts = line.split(/\\s+/);
+
+            if (parts.length === 1) {
+                // Complete command
+                const partial = parts[0].toLowerCase();
+                return commands.filter(cmd => cmd.startsWith(partial));
+            } else if (parts.length === 2) {
+                // Complete subcommand
+                const cmd = parts[0].toLowerCase();
+                const partial = parts[1].toLowerCase();
+                if (subcommands[cmd]) {
+                    return subcommands[cmd].filter(sub => sub.startsWith(partial));
+                }
+            }
+            return [];
+        }
+
+        function handleTab() {
+            const completions = getCompletions(currentLine);
+
+            if (completions.length === 1) {
+                // Single completion - auto-complete
+                const parts = currentLine.split(/\\s+/);
+                if (parts.length === 1) {
+                    currentLine = completions[0];
+                } else {
+                    parts[parts.length - 1] = completions[0];
+                    currentLine = parts.join(' ');
+                }
+                cursorPos = currentLine.length;
+
+                // Redraw line
+                term.write('\\r\\x1b[K'); // Clear line
+                showPrompt();
+                term.write(currentLine);
+            } else if (completions.length > 1) {
+                // Multiple completions - show options
+                writeln('');
+                writeln(completions.join('  '), colors.dim);
+                showPrompt();
+                term.write(currentLine);
+            }
+        }
+
         // Input handling
         term.onData(data => {
             const code = data.charCodeAt(0);
@@ -935,46 +1010,90 @@ class APIServer:
                     showPrompt();
                 }
                 currentLine = '';
+                cursorPos = 0;
             } else if (code === 127) { // Backspace
-                if (currentLine.length > 0) {
-                    currentLine = currentLine.slice(0, -1);
-                    term.write('\\b \\b');
+                if (cursorPos > 0) {
+                    // Delete character before cursor
+                    currentLine = currentLine.slice(0, cursorPos - 1) + currentLine.slice(cursorPos);
+                    cursorPos--;
+
+                    // Redraw line from cursor position
+                    term.write('\\b' + currentLine.slice(cursorPos) + ' ');
+                    // Move cursor back to position
+                    for (let i = 0; i < currentLine.length - cursorPos + 1; i++) {
+                        term.write('\\b');
+                    }
                 }
+            } else if (code === 9) { // Tab
+                handleTab();
             } else if (code === 27) { // Escape sequences (arrows)
-                // Handle arrow keys for history
-                if (data === '\\x1b[A') { // Up arrow
+                if (data === '\\x1b[A') { // Up arrow - history
                     if (historyIndex > 0) {
                         // Clear current line
-                        for (let i = 0; i < currentLine.length; i++) {
-                            term.write('\\b \\b');
-                        }
+                        term.write('\\r\\x1b[K');
+                        showPrompt();
                         historyIndex--;
                         currentLine = commandHistory[historyIndex];
+                        cursorPos = currentLine.length;
                         term.write(currentLine);
                     }
-                } else if (data === '\\x1b[B') { // Down arrow
+                } else if (data === '\\x1b[B') { // Down arrow - history
                     if (historyIndex < commandHistory.length - 1) {
                         // Clear current line
-                        for (let i = 0; i < currentLine.length; i++) {
-                            term.write('\\b \\b');
-                        }
+                        term.write('\\r\\x1b[K');
+                        showPrompt();
                         historyIndex++;
                         currentLine = commandHistory[historyIndex];
+                        cursorPos = currentLine.length;
                         term.write(currentLine);
                     } else if (historyIndex === commandHistory.length - 1) {
                         // Clear current line
-                        for (let i = 0; i < currentLine.length; i++) {
-                            term.write('\\b \\b');
-                        }
+                        term.write('\\r\\x1b[K');
+                        showPrompt();
                         historyIndex = commandHistory.length;
                         currentLine = '';
+                        cursorPos = 0;
+                    }
+                } else if (data === '\\x1b[C') { // Right arrow - move cursor right
+                    if (cursorPos < currentLine.length) {
+                        cursorPos++;
+                        term.write('\\x1b[C'); // Move cursor right
+                    }
+                } else if (data === '\\x1b[D') { // Left arrow - move cursor left
+                    if (cursorPos > 0) {
+                        cursorPos--;
+                        term.write('\\x1b[D'); // Move cursor left
+                    }
+                } else if (data === '\\x1b[H') { // Home - move to start
+                    while (cursorPos > 0) {
+                        cursorPos--;
+                        term.write('\\x1b[D');
+                    }
+                } else if (data === '\\x1b[F') { // End - move to end
+                    while (cursorPos < currentLine.length) {
+                        cursorPos++;
+                        term.write('\\x1b[C');
                     }
                 }
-            } else if (code < 32) { // Control characters
-                // Ignore other control characters
+            } else if (code === 3) { // Ctrl+C
+                // Cancel current line
+                term.write('^C\\r\\n');
+                currentLine = '';
+                cursorPos = 0;
+                showPrompt();
+            } else if (code < 32) { // Other control characters
+                // Ignore
             } else { // Regular character
-                currentLine += data;
-                term.write(data);
+                // Insert character at cursor position
+                currentLine = currentLine.slice(0, cursorPos) + data + currentLine.slice(cursorPos);
+                cursorPos++;
+
+                // Redraw from cursor position
+                term.write(currentLine.slice(cursorPos - 1));
+                // Move cursor back to correct position
+                for (let i = 0; i < currentLine.length - cursorPos; i++) {
+                    term.write('\\b');
+                }
             }
         });
 
