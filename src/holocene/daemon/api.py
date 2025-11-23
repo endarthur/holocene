@@ -266,15 +266,15 @@ class APIServer:
 </head>
 <body>
     <div class="card">
-        <h1>🌍 Holocene API <span class="badge">ONLINE</span></h1>
+        <h1>Holocene API <span class="badge">ONLINE</span></h1>
         <p>Personal knowledge management and productivity tracking system.</p>
 
         <h3>Quick Links:</h3>
         <ul class="links">
-            <li><a href="/term">💻 Web Terminal</a></li>
-            <li><a href="/health">🏥 Health Check</a></li>
-            <li><a href="/status">📊 API Status</a></li>
-            <li><a href="/auth/status">🔐 Auth Status</a></li>
+            <li><a href="/term">Web Terminal</a></li>
+            <li><a href="/health">Health Check</a></li>
+            <li><a href="/status">API Status</a></li>
+            <li><a href="/auth/status">Auth Status</a></li>
         </ul>
 
         <div class="note">
@@ -597,7 +597,7 @@ class APIServer:
 <body>
     <div id="container">
         <div id="header">
-            <span class="title">🌍 Holocene Terminal</span>
+            <span class="title">Holocene Terminal</span>
             <span class="status" id="status">Connecting...</span>
         </div>
         <div id="terminal"></div>
@@ -680,15 +680,16 @@ class APIServer:
         // ASCII art banner
         function showBanner() {
             writeln('');
-            writeln('  ╔═══════════════════════════════════════════════════════╗', colors.cyan);
-            writeln('  ║                                                       ║', colors.cyan);
-            writeln('  ║   ' + colors.bright + colors.green + '🌍  H O L O C E N E   T E R M I N A L' + colors.reset + colors.cyan + '           ║', '');
-            writeln('  ║                                                       ║', colors.cyan);
-            writeln('  ║   Your personal geological record of the present     ║', colors.cyan);
-            writeln('  ║                                                       ║', colors.cyan);
-            writeln('  ╚═══════════════════════════════════════════════════════╝', colors.cyan);
+            writeln(' ██╗  ██╗ ██████╗ ██╗      ██████╗  ██████╗███████╗███╗   ██╗███████╗', colors.cyan);
+            writeln(' ██║  ██║██╔═══██╗██║     ██╔═══██╗██╔════╝██╔════╝████╗  ██║██╔════╝', colors.cyan);
+            writeln(' ███████║██║   ██║██║     ██║   ██║██║     █████╗  ██╔██╗ ██║█████╗  ', colors.cyan);
+            writeln(' ██╔══██║██║   ██║██║     ██║   ██║██║     ██╔══╝  ██║╚██╗██║██╔══╝  ', colors.cyan);
+            writeln(' ██║  ██║╚██████╔╝███████╗╚██████╔╝╚██████╗███████╗██║ ╚████║███████╗', colors.cyan);
+            writeln(' ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝  ╚═════╝╚══════╝╚═╝  ╚═══╝╚══════╝', colors.cyan);
             writeln('');
-            writeln('  Type ' + colors.bright + colors.yellow + 'help' + colors.reset + ' for available commands', colors.dim);
+            writeln(' Your personal geological record of the present', colors.dim);
+            writeln('');
+            writeln(' Type ' + colors.yellow + 'help' + colors.reset + ' for available commands', colors.dim);
             writeln('');
         }
 
@@ -734,12 +735,10 @@ class APIServer:
                         break;
 
                     case 'auth':
-                        if (args[0] === 'login') {
-                            await authLogin();
-                        } else if (args[0] === 'status') {
+                        if (args[0] === 'status') {
                             await authStatus();
                         } else {
-                            writeln('Usage: auth [login|status]', colors.red);
+                            writeln('Usage: auth status', colors.red);
                         }
                         break;
 
@@ -803,9 +802,8 @@ class APIServer:
             writeln('');
             writeln(colors.bright + 'Available Commands:' + colors.reset, '');
             writeln('');
-            writeln('  ' + colors.cyan + 'auth login' + colors.reset + '          Authenticate with API token', '');
+            writeln('  ' + colors.cyan + 'token <token>' + colors.reset + '      Set API token (starts with hlc_)', '');
             writeln('  ' + colors.cyan + 'auth status' + colors.reset + '         Check authentication status', '');
-            writeln('  ' + colors.cyan + 'token <token>' + colors.reset + '      Set API token directly', '');
             writeln('  ' + colors.cyan + 'books list' + colors.reset + '          List your book collection', '');
             writeln('  ' + colors.cyan + 'links list' + colors.reset + '          List your saved links', '');
             writeln('  ' + colors.cyan + 'ask <query>' + colors.reset + '         Ask the AI Librarian', '');
@@ -813,16 +811,7 @@ class APIServer:
             writeln('  ' + colors.cyan + 'clear' + colors.reset + '               Clear terminal', '');
             writeln('  ' + colors.cyan + 'help' + colors.reset + '                Show this help', '');
             writeln('');
-            writeln(colors.dim + 'Tip: Generate an API token with: holo auth token create --name "Web Terminal"' + colors.reset, '');
-            writeln('');
-        }
-
-        async function authLogin() {
-            writeln('');
-            writeln('Enter your API token (starts with hlc_):', colors.yellow);
-            // In a real implementation, we'd capture input securely
-            // For now, direct users to use the 'token' command
-            writeln('Use: ' + colors.cyan + 'token <your-token>' + colors.reset, colors.dim);
+            writeln(colors.dim + 'Generate a token: ' + colors.cyan + 'holo auth token create --name "Web Terminal"' + colors.reset, '');
             writeln('');
         }
 
@@ -834,7 +823,7 @@ class APIServer:
 
             const data = await apiCall('/auth/status');
             writeln('');
-            writeln(colors.green + '✓ Authenticated' + colors.reset, '');
+            writeln(colors.green + '[OK] Authenticated' + colors.reset, '');
             if (data.username) {
                 writeln(`  User: ${data.username}`, colors.dim);
             }
@@ -919,10 +908,10 @@ class APIServer:
         function setToken(token) {
             apiToken = token;
             sessionStorage.setItem('holocene_api_token', token);
-            document.getElementById('status').textContent = 'Authenticated ✓';
+            document.getElementById('status').textContent = 'Authenticated';
             document.getElementById('status').style.color = '#4ec9b0';
             writeln('');
-            writeln(colors.green + '✓ API token saved' + colors.reset, '');
+            writeln(colors.green + '[OK] API token saved' + colors.reset, '');
             writeln('');
         }
 
@@ -993,14 +982,14 @@ class APIServer:
         showBanner();
 
         if (apiToken) {
-            document.getElementById('status').textContent = 'Authenticated ✓';
+            document.getElementById('status').textContent = 'Authenticated';
             document.getElementById('status').style.color = '#4ec9b0';
-            writeln(colors.green + '✓ API token loaded from session' + colors.reset, '');
+            writeln(colors.green + '[OK] API token loaded from session' + colors.reset, '');
             writeln('');
         } else {
             document.getElementById('status').textContent = 'Not authenticated';
             document.getElementById('status').style.color = '#f48771';
-            writeln(colors.yellow + '⚠ Not authenticated' + colors.reset, '');
+            writeln(colors.yellow + '[!] Not authenticated' + colors.reset, '');
             writeln('  Generate a token: ' + colors.cyan + 'holo auth token create --name "Web Terminal"' + colors.reset, colors.dim);
             writeln('  Then use: ' + colors.cyan + 'token <your-token>' + colors.reset, colors.dim);
             writeln('');
