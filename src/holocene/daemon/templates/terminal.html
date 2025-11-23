@@ -489,8 +489,16 @@
 
                         content += `\nUse arrow keys to navigate, q to quit`;
 
+                        // Disable main input handler while pager is active
+                        if (inputHandlerDisposable) {
+                            inputHandlerDisposable.dispose();
+                        }
+
                         const pager = new Pager(term);
                         await pager.show(content);
+
+                        // Re-enable main input handler after pager quits
+                        setupInputHandler();
                     } else {
                         // Normal table output for small lists
                         writeln('');
@@ -643,9 +651,16 @@
             term.write('\r\x1b[K\x1b[32mholo\x1b[0m\x1b[2m@\x1b[0m\x1b[36mweb\x1b[0m $ ' + line);
         });
 
-        // Input handling
-        term.onData(data => {
-            const code = data.charCodeAt(0);
+        // Input handling function (can be enabled/disabled for pager)
+        let inputHandlerDisposable = null;
+
+        function setupInputHandler() {
+            if (inputHandlerDisposable) {
+                inputHandlerDisposable.dispose();
+            }
+
+            inputHandlerDisposable = term.onData(data => {
+                const code = data.charCodeAt(0);
 
             // Handle special keys
             if (code === 13) { // Enter
@@ -749,9 +764,12 @@
                     term.write('\b');
                 }
             }
-        });
+            });
+        }
 
         // Initialize
+        setupInputHandler();  // Setup input handler initially
+
         showBanner();
 
         if (apiToken) {
