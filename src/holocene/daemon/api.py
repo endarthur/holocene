@@ -930,7 +930,7 @@ class APIServer:
                     // Add subcommand hints
                     if (subcommands) {
                         const subNames = Object.keys(subcommands);
-                        cmdLine += ` <${subNames.join('|')}>`;
+                        cmdLine += ' <' + subNames.join('|') + '>';
                     }
 
                     // Pad and add description
