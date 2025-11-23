@@ -245,6 +245,25 @@ class APIServer:
             if not token:
                 return jsonify({"error": "Missing token parameter"}), 400
 
+            # Ignore link preview bots (Telegram, Discord, Slack, etc.)
+            # These prefetch links to generate previews, consuming single-use tokens
+            user_agent = request.headers.get('User-Agent', '').lower()
+            bot_indicators = ['telegrambot', 'discordbot', 'slackbot', 'facebookexternalhit',
+                            'twitterbot', 'whatsapp', 'bot', 'preview', 'crawler']
+            if any(indicator in user_agent for indicator in bot_indicators):
+                logger.debug(f"Ignoring preview bot request: {user_agent}")
+                # Return a simple page that doesn't consume the token
+                return """
+<!DOCTYPE html>
+<html>
+<head><title>Login - Holocene</title></head>
+<body>
+    <h1>🔐 Holocene Login</h1>
+    <p>Click the link to log in.</p>
+</body>
+</html>
+"""
+
             cursor = self.core.db.conn.cursor()
 
             # Find token in database
