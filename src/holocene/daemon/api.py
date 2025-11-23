@@ -986,10 +986,8 @@ class APIServer:
                 }
                 cursorPos = currentLine.length;
 
-                // Redraw line
-                term.write('\\r\\x1b[K'); // Clear line
-                showPrompt();
-                term.write(currentLine);
+                // Redraw line in place (no newline)
+                term.write('\\r\\x1b[K\\x1b[32mholo\\x1b[0m\\x1b[2m@\\x1b[0m\\x1b[36mweb\\x1b[0m $ ' + currentLine);
             } else if (completions.length > 1) {
                 // Multiple completions - show options
                 term.write('\\r\\n\\x1b[2m' + completions.join('  ') + '\\x1b[0m\\r\\n\\x1b[32mholo\\x1b[0m\\x1b[2m@\\x1b[0m\\x1b[36mweb\\x1b[0m $ ' + currentLine);
