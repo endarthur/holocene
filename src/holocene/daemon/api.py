@@ -631,6 +631,7 @@ class APIServer:
         import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/output.js';
         import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/table.js';
         import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/progress.js';
+        import { Autocomplete, createTabHandler } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/autocomplete.js';
 
         // Terminal setup
         const term = new Terminal({
@@ -678,13 +679,15 @@ class APIServer:
         let historyIndex = -1;
         let apiToken = sessionStorage.getItem('holocene_api_token');
 
-        // Tab completion data
-        const commands = ['help', 'auth', 'books', 'links', 'ask', 'status', 'clear', 'token', 'whoami'];
-        const subcommands = {
-            'auth': ['status'],
-            'books': ['list'],
-            'links': ['list']
-        };
+        // Tab completion using xterm-kit
+        const completer = new Autocomplete({
+            commands: ['help', 'auth', 'books', 'links', 'ask', 'status', 'clear', 'token', 'whoami'],
+            subcommands: {
+                'auth': ['status'],
+                'books': ['list'],
+                'links': ['list']
+            }
+        });
 
         // ANSI color codes
         const colors = {
@@ -1071,48 +1074,12 @@ class APIServer:
         }
 
         // Tab completion
-        function getCompletions(line) {
-            const parts = line.split(/\\s+/);
-
-            if (parts.length === 1) {
-                // Complete command
-                const partial = parts[0].toLowerCase();
-                return commands.filter(cmd => cmd.startsWith(partial));
-            } else if (parts.length === 2) {
-                // Complete subcommand
-                const cmd = parts[0].toLowerCase();
-                const partial = parts[1].toLowerCase();
-                if (subcommands[cmd]) {
-                    return subcommands[cmd].filter(sub => sub.startsWith(partial));
-                }
-            }
-            return [];
-        }
-
-        function handleTab() {
-            const completions = getCompletions(currentLine);
-
-            if (completions.length === 0) {
-                // No completions - do nothing (like a real terminal)
-                return;
-            } else if (completions.length === 1) {
-                // Single completion - auto-complete
-                const parts = currentLine.split(/\\s+/);
-                if (parts.length === 1) {
-                    currentLine = completions[0];
-                } else {
-                    parts[parts.length - 1] = completions[0];
-                    currentLine = parts.join(' ');
-                }
-                cursorPos = currentLine.length;
-
-                // Redraw line in place (no newline)
-                term.write('\\r\\x1b[K\\x1b[32mholo\\x1b[0m\\x1b[2m@\\x1b[0m\\x1b[36mweb\\x1b[0m $ ' + currentLine);
-            } else if (completions.length > 1) {
-                // Multiple completions - show options
-                term.write('\\r\\n\\x1b[2m' + completions.join('  ') + '\\x1b[0m\\r\\n\\x1b[32mholo\\x1b[0m\\x1b[2m@\\x1b[0m\\x1b[36mweb\\x1b[0m $ ' + currentLine);
-            }
-        }
+        // Tab completion handler using xterm-kit
+        const state = { currentLine: '', cursorPos: 0 };
+        const handleTab = createTabHandler(term, completer, state, (line) => {
+            // Redraw prompt + line
+            term.write('\\r\\x1b[K\\x1b[32mholo\\x1b[0m\\x1b[2m@\\x1b[0m\\x1b[36mweb\\x1b[0m $ ' + line);
+        });
 
         // Input handling
         term.onData(data => {
@@ -1144,7 +1111,13 @@ class APIServer:
                     }
                 }
             } else if (code === 9) { // Tab
+                // Sync state before calling handleTab
+                state.currentLine = currentLine;
+                state.cursorPos = cursorPos;
                 handleTab();
+                // Sync state back after handleTab
+                currentLine = state.currentLine;
+                cursorPos = state.cursorPos;
             } else if (code === 27) { // Escape sequences (arrows)
                 if (data === '\\x1b[A') { // Up arrow - history
                     if (historyIndex > 0) {
