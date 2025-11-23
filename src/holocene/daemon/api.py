@@ -632,6 +632,7 @@ class APIServer:
         import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/table.js';
         import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/progress.js';
         import { Autocomplete, createTabHandler } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/autocomplete.js';
+        import { CommandRegistry } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.1/src/lib/xterm-kit/command-registry.js';
 
         // Terminal setup
         const term = new Terminal({
@@ -679,9 +680,69 @@ class APIServer:
         let historyIndex = -1;
         let apiToken = sessionStorage.getItem('holocene_api_token');
 
-        // Tab completion using xterm-kit
+        // Command registry with full metadata
+        const registry = new CommandRegistry();
+
+        // Register all commands
+        registry.register('help', {
+            description: 'Show available commands',
+            category: 'general'
+        });
+
+        registry.register('whoami', {
+            description: 'Show current user',
+            category: 'auth'
+        });
+
+        registry.register('token', {
+            description: 'Set API token',
+            category: 'auth'
+        });
+
+        registry.register('auth', {
+            description: 'Authentication management',
+            category: 'auth',
+            subcommands: {
+                'status': 'Check authentication status'
+            }
+        });
+
+        registry.register('books', {
+            description: 'Book library management',
+            category: 'library',
+            subcommands: {
+                'list': 'List books'
+            }
+        });
+
+        registry.register('links', {
+            description: 'Link management',
+            category: 'library',
+            subcommands: {
+                'list': 'List links'
+            }
+        });
+
+        registry.register('ask', {
+            description: 'Ask the AI Librarian',
+            category: 'ai'
+        });
+
+        registry.register('status', {
+            description: 'Get daemon status',
+            category: 'system'
+        });
+
+        registry.register('clear', {
+            description: 'Clear terminal',
+            category: 'general'
+        });
+
+        // Tab completion using registry
+        // Note: Subcommands must be passed explicitly until autocomplete
+        // automatically extracts them from registry metadata
         const completer = new Autocomplete({
-            commands: ['help', 'auth', 'books', 'links', 'ask', 'status', 'clear', 'token', 'whoami'],
+            registry,
             subcommands: {
                 'auth': ['status'],
                 'books': ['list'],
@@ -851,16 +912,37 @@ class APIServer:
             writeln('');
             writeln(colors.bright + 'Available Commands:' + colors.reset, '');
             writeln('');
-            writeln('  ' + colors.cyan + 'whoami' + colors.reset + '                    Show current user', '');
-            writeln('  ' + colors.cyan + 'token <token>' + colors.reset + '            Set API token (starts with hlc_)', '');
-            writeln('  ' + colors.cyan + 'auth status' + colors.reset + '               Check authentication status', '');
-            writeln('  ' + colors.cyan + 'books list [N|all]' + colors.reset + '        List books (default: 20, or N items, or all)', '');
-            writeln('  ' + colors.cyan + 'links list [N|all]' + colors.reset + '        List links (default: 20, or N items, or all)', '');
-            writeln('  ' + colors.cyan + 'ask <query>' + colors.reset + '               Ask the AI Librarian', '');
-            writeln('  ' + colors.cyan + 'status' + colors.reset + '                    Get daemon status', '');
-            writeln('  ' + colors.cyan + 'clear' + colors.reset + '                     Clear terminal', '');
-            writeln('  ' + colors.cyan + 'help' + colors.reset + '                      Show this help', '');
-            writeln('');
+
+            // Get commands grouped by category from registry
+            const byCategory = registry.getByCategory();
+            const categoryOrder = ['general', 'auth', 'library', 'ai', 'system'];
+
+            categoryOrder.forEach(category => {
+                const commands = byCategory[category];
+                if (!commands || commands.length === 0) return;
+
+                // Category header
+                const categoryName = category.charAt(0).toUpperCase() + category.slice(1);
+                writeln('  ' + colors.dim + categoryName + ':' + colors.reset, '');
+
+                commands.forEach(cmd => {
+                    const subcommands = registry.getSubcommands(cmd.name);
+                    let cmdLine = '    ' + colors.cyan + cmd.name + colors.reset;
+
+                    // Add subcommand hints
+                    if (subcommands) {
+                        const subNames = Object.keys(subcommands);
+                        cmdLine += ' ' + colors.dim + '<' + subNames.join('|') + '>' + colors.reset;
+                    }
+
+                    // Pad and add description
+                    const padding = ' '.repeat(Math.max(1, 30 - cmdLine.replace(/\\x1b\[[0-9;]*m/g, '').length));
+                    writeln(cmdLine + padding + cmd.description, '');
+                });
+
+                writeln('');
+            });
+
             writeln(colors.dim + 'Examples:', '');
             writeln(colors.dim + '  books list         ' + colors.reset + '  # Show first 20 books', '');
             writeln(colors.dim + '  books list 50      ' + colors.reset + '  # Show first 50 books', '');
