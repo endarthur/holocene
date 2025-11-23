@@ -658,6 +658,7 @@ class APIServer:
         term.loadAddon(fitAddon);
         term.open(document.getElementById('terminal'));
         fitAddon.fit();
+        term.focus(); // Auto-focus terminal on load
 
         // Resize handler
         window.addEventListener('resize', () => {
@@ -988,10 +989,7 @@ class APIServer:
                 term.write(currentLine);
             } else if (completions.length > 1) {
                 // Multiple completions - show options
-                term.write('\\r\\n');
-                write(completions.join('  ') + '\\r\\n', colors.dim);
-                // Write prompt without leading newline
-                write(colors.green + 'holo' + colors.reset + colors.dim + '@' + colors.reset + colors.cyan + 'web' + colors.reset + ' $ ');
+                write('\\r\\n' + completions.join('  ') + '\\r\\n' + colors.green + 'holo' + colors.reset + colors.dim + '@' + colors.reset + colors.cyan + 'web' + colors.reset + ' $ ', '');
                 term.write(currentLine);
             }
         }
