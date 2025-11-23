@@ -24,7 +24,7 @@ from typing import Optional
 from datetime import datetime
 
 try:
-    from flask import Flask, jsonify, request, session, redirect
+    from flask import Flask, jsonify, request, session, redirect, render_template
     from werkzeug.serving import make_server
     FLASK_AVAILABLE = True
 except ImportError:
@@ -33,6 +33,7 @@ except ImportError:
     request = None
     session = None
     redirect = None
+    render_template = None
     make_server = None
     FLASK_AVAILABLE = False
 
@@ -543,6 +544,10 @@ class APIServer:
 
     def _term(self):
         """GET /term - Web-based terminal interface."""
+        return render_template('terminal.html')
+
+    def _term_old(self):
+        """OLD: GET /term - Web-based terminal interface (embedded HTML version)."""
         return """
 <!DOCTYPE html>
 <html>

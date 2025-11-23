@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Holocene Terminal</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1e1e1e;
+            font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+            overflow: hidden;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        #header {
+            background: #2d2d2d;
+            color: #cccccc;
+            padding: 8px 16px;
+            font-size: 14px;
+            border-bottom: 1px solid #3e3e3e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #header .title {
+            font-weight: bold;
+        }
+        #header .status {
+            font-size: 12px;
+            color: #4ec9b0;
+        }
+        #terminal {
+            flex: 1;
+            padding: 10px;
+        }
+        .xterm {
+            height: 100%;
+        }
+        .xterm-viewport {
+            background-color: #1e1e1e !important;
+        }
+        /* Scrollbar theming */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3e3e3e;
+            border-radius: 5px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4e4e4e;
+        }
+        /* Firefox scrollbar */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #3e3e3e #1e1e1e;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="header">
+            <span class="title">Holocene Terminal</span>
+            <span class="status" id="status">Connecting...</span>
+        </div>
+        <div id="terminal"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script type="module">
+        // Import xterm-kit utilities from koma repo (v1.1.2)
+        import { parse as parseArgs, hasHelp, showHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/argparse.js';
+        import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/output.js';
+        import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/table.js';
+        import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/progress.js';
+        import { Autocomplete, createTabHandler } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/autocomplete.js';
+        import { CommandRegistry } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/command-registry.js';
+        import { Pager } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/pager.js';
+        import { Box, renderBox } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/box.js';
+        import { setTheme, olivineTheme } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@v1.1.2/src/lib/xterm-kit/themes.js';
+
+        // Terminal setup with xterm-kit theme
+        const term = new Terminal({
+            cursorBlink: true,
+            fontSize: 14,
+            fontFamily: 'Fira Code, JetBrains Mono, Consolas, monospace'
+        });
+
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById('terminal'));
+
+        // Apply xterm-kit olivine theme (phosphor green terminal aesthetic)
+        setTheme(olivineTheme);
+        term.options.theme = olivineTheme;
+
+        fitAddon.fit();
+        term.focus(); // Auto-focus terminal on load
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            fitAddon.fit();
+        });
+
+        // Terminal state
+        let currentLine = '';
+        let cursorPos = 0; // Cursor position in current line
+        let commandHistory = [];
+        let historyIndex = -1;
+        let apiToken = sessionStorage.getItem('holocene_api_token');
+
+        // Command registry with full metadata
+        const registry = new CommandRegistry();
+
+        // Register all commands
+        registry.register('help', {
+            description: 'Show all available commands',
+            category: 'general'
+        });
+
+        registry.register('whoami', {
+            description: 'Show current user',
+            category: 'auth'
+        });
+
+        registry.register('token', {
+            description: 'Set API token',
+            category: 'auth'
+        });
+
+        registry.register('auth', {
+            description: 'Authentication management',
+            category: 'auth',
+            subcommands: {
+                'status': 'Check authentication status'
+            }
+        });
+
+        registry.register('books', {
+            description: 'Book library management',
+            category: 'library',
+            subcommands: {
+                'list': 'List books'
+            },
+            schema: {
+                description: 'Manage your book library',
+                flags: {
+                    help: { short: 'h', description: 'Show help' }
+                }
+            }
+        });
+
+        registry.register('links', {
+            description: 'Link management',
+            category: 'library',
+            subcommands: {
+                'list': 'List links'
+            }
+        });
+
+        registry.register('ask', {
+            description: 'Ask the AI Librarian',
+            category: 'ai',
+            schema: {
+                description: 'Query your library using natural language',
+                positional: { description: '<query>' },
+                flags: {
+                    verbose: { short: 'v', description: 'Verbose output' }
+                }
+            }
+        });
+
+        registry.register('status', {
+            description: 'Get daemon status',
+            category: 'system'
+        });
+
+        registry.register('clear', {
+            description: 'Clear terminal',
+            category: 'general'
+        });
+
+        // Tab completion using registry (v1.1.2+ auto-extracts subcommands!)
+        const completer = new Autocomplete({ registry });
+
+        // ANSI color codes
+        const colors = {
+            reset: '\x1b[0m',
+            bright: '\x1b[1m',
+            dim: '\x1b[2m',
+            red: '\x1b[31m',
+            green: '\x1b[32m',
+            yellow: '\x1b[33m',
+            blue: '\x1b[34m',
+            magenta: '\x1b[35m',
+            cyan: '\x1b[36m',
+            white: '\x1b[37m'
+        };
+
+        // Write with color support
+        function write(text, color = '') {
+            if (color) {
+                term.write(color + text + colors.reset);
+            } else {
+                term.write(text);
+            }
+        }
+
+        function writeln(text, color = '') {
+            write(text + '\r\n', color);
+        }
+
+        // ASCII art banner
+        function showBanner() {
+            writeln('');
+            writeln(' ██╗  ██╗ ██████╗ ██╗      ██████╗  ██████╗███████╗███╗   ██╗███████╗', colors.cyan);
+            writeln(' ██║  ██║██╔═══██╗██║     ██╔═══██╗██╔════╝██╔════╝████╗  ██║██╔════╝', colors.cyan);
+            writeln(' ███████║██║   ██║██║     ██║   ██║██║     █████╗  ██╔██╗ ██║█████╗  ', colors.cyan);
+            writeln(' ██╔══██║██║   ██║██║     ██║   ██║██║     ██╔══╝  ██║╚██╗██║██╔══╝  ', colors.cyan);
+            writeln(' ██║  ██║╚██████╔╝███████╗╚██████╔╝╚██████╗███████╗██║ ╚████║███████╗', colors.cyan);
+            writeln(' ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝  ╚═════╝╚══════╝╚═╝  ╚═══╝╚══════╝', colors.cyan);
+            writeln('');
+            writeln(' Your personal geological record of the present', colors.dim);
+            writeln('');
+            writeln(' Type ' + colors.yellow + 'help' + colors.reset + ' for available commands', colors.dim);
+            writeln('');
+        }
+
+        // API call helper
+        async function apiCall(endpoint, options = {}) {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            };
+
+            if (apiToken) {
+                headers['Authorization'] = `Bearer ${apiToken}`;
+            }
+
+            try {
+                const response = await fetch(endpoint, {
+                    ...options,
+                    headers
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+
+                return data;
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        // Command parser
+        async function executeCommand(cmd) {
+            const parts = cmd.trim().split(/\s+/);
+            const command = parts[0].toLowerCase();
+            const args = parts.slice(1);
+
+            try {
+                switch (command) {
+                    case 'help':
+                        showAllCommands();
+                        break;
+
+                    case 'auth':
+                        if (args[0] === 'status') {
+                            await authStatus();
+                        } else {
+                            writeln('Usage: auth status', colors.red);
+                        }
+                        break;
+
+                    case 'books':
+                        // Check for --help flag
+                        if (hasHelp(args)) {
+                            const schema = registry.getSchema('books');
+                            showHelp('books', args, schema, term);
+                        } else if (args[0] === 'list' || !args[0]) {
+                            await listBooks(args.slice(1));  // Pass args after 'list'
+                        } else {
+                            writeln('Usage: books list [limit|all]', colors.red);
+                        }
+                        break;
+
+                    case 'links':
+                        if (args[0] === 'list' || !args[0]) {
+                            await listLinks(args.slice(1));  // Pass args after 'list'
+                        } else {
+                            writeln('Usage: links list [limit|all]', colors.red);
+                        }
+                        break;
+
+                    case 'ask':
+                        // Check for --help flag
+                        if (hasHelp(args)) {
+                            const schema = registry.getSchema('ask');
+                            showHelp('ask', args, schema, term);
+                        } else if (args.length === 0) {
+                            writeln('Usage: ask <your question>', colors.red);
+                        } else {
+                            await ask(args.join(' '));
+                        }
+                        break;
+
+                    case 'status':
+                        await getStatus();
+                        break;
+
+                    case 'clear':
+                        term.clear();
+                        break;
+
+                    case 'whoami':
+                        await whoami();
+                        break;
+
+                    case 'token':
+                        if (args[0]) {
+                            setToken(args[0]);
+                        } else {
+                            writeln('Usage: token <your-api-token>', colors.red);
+                        }
+                        break;
+
+                    case '':
+                        // Empty command, just show new prompt
+                        break;
+
+                    default:
+                        writeln(`Unknown command: ${command}`, colors.red);
+                        writeln('Type ' + colors.bright + 'help' + colors.reset + ' for available commands', colors.dim);
+                }
+            } catch (error) {
+                writeln(`Error: ${error.message}`, colors.red);
+            }
+
+            showPrompt();
+        }
+
+        // Utility: Clickable URL
+        function clickableUrl(url, text) {
+            // OSC 8 hyperlink support in xterm.js
+            return '\x1b]8;;' + url + '\x1b\\' + (text || url) + '\x1b]8;;\x1b\\';
+        }
+
+        // Command implementations
+        function showAllCommands() {
+            // Build help content
+            let content = 'Available Commands:\n\n';
+
+            // Get commands grouped by category from registry
+            const byCategory = registry.getByCategory();
+            const categoryOrder = ['general', 'auth', 'library', 'ai', 'system'];
+
+            categoryOrder.forEach(category => {
+                const commands = byCategory[category];
+                if (!commands || commands.length === 0) return;
+
+                // Category header
+                const categoryName = category.charAt(0).toUpperCase() + category.slice(1);
+                content += `${categoryName}:\n`;
+
+                commands.forEach(cmd => {
+                    const subcommands = registry.getSubcommands(cmd.name);
+                    let cmdLine = `  ${cmd.name}`;
+
+                    // Add subcommand hints
+                    if (subcommands) {
+                        const subNames = Object.keys(subcommands);
+                        cmdLine += ' <' + subNames.join('|') + '>';
+                    }
+
+                    // Pad and add description
+                    const padding = ' '.repeat(Math.max(1, 28 - cmdLine.length));
+                    content += `${cmdLine}${padding}${cmd.description}\n`;
+                });
+
+                content += '\n';
+            });
+
+            content += 'Examples:\n';
+            content += '  books list         # Show first 20 books\n';
+            content += '  books list 50      # Show first 50 books\n';
+            content += '  books list all     # Show all books\n\n';
+            content += 'Generate a token: holo auth token create --name "Web Terminal"';
+
+            // Render in a box for prettier output
+            writeln('');
+            renderBox(term, {
+                title: 'Holocene Terminal Help',
+                content: content,
+                style: 'rounded',
+                padding: 1
+            });
+            writeln('');
+        }
+
+        async function whoami() {
+            if (!apiToken) {
+                writeln('');
+                writeln('[!] Not authenticated', colors.red);
+                writeln('');
+                return;
+            }
+
+            try {
+                const data = await apiCall('/auth/status');
+                writeln('');
+                if (data.username) {
+                    writeln(colors.green + data.username + colors.reset, '');
+                } else {
+                    writeln(colors.dim + 'authenticated (no username)' + colors.reset, '');
+                }
+                writeln('');
+            } catch (error) {
+                writeln('');
+                writeln('[ERROR] ' + error.message, colors.red);
+                writeln('');
+            }
+        }
+
+        async function authStatus() {
+            if (!apiToken) {
+                writeln('Not authenticated. Use: token <your-token>', colors.red);
+                return;
+            }
+
+            const data = await apiCall('/auth/status');
+            writeln('');
+            writeln(colors.green + '[OK] Authenticated' + colors.reset, '');
+            if (data.username) {
+                writeln(`  User: ${data.username}`, colors.dim);
+            }
+            writeln('');
+        }
+
+        async function listBooks(args = []) {
+            try {
+                // Parse limit argument
+                let limit = 20;  // Default
+                if (args.length > 0) {
+                    if (args[0] === 'all') {
+                        limit = Infinity;
+                    } else {
+                        const parsed = parseInt(args[0]);
+                        if (!isNaN(parsed) && parsed > 0) {
+                            limit = parsed;
+                        }
+                    }
+                }
+
+                const spinner = new Spinner(term);
+                spinner.start('Fetching books...');
+                const data = await apiCall('/books');
+                spinner.stop();
+
+                if (data.books && data.books.length > 0) {
+                    const booksToShow = limit === Infinity ? data.books : data.books.slice(0, limit);
+
+                    // Use Pager for large lists (>30 books)
+                    if (booksToShow.length > 30) {
+                        // Build content for pager
+                        let content = `Books (${booksToShow.length} of ${data.books.length}):\n\n`;
+
+                        booksToShow.forEach((book, idx) => {
+                            const num = String(idx + 1).padStart(4, ' ');
+                            const title = (book.title || 'Untitled').padEnd(50, ' ').slice(0, 50);
+                            const author = (book.author || '(no author)').slice(0, 30);
+                            content += `${num}  ${title}  ${author}\n`;
+                        });
+
+                        content += `\nUse arrow keys to navigate, q to quit`;
+
+                        const pager = new Pager(term);
+                        await pager.show(content);
+                    } else {
+                        // Normal table output for small lists
+                        writeln('');
+                        writeln(colors.bright + `Books (showing ${booksToShow.length} of ${data.books.length}):` + colors.reset, '');
+                        writeln('');
+
+                        const table = new Table({
+                            columns: ['#', 'Title', 'Author'],
+                            align: ['right', 'left', 'left']
+                        });
+
+                        booksToShow.forEach((book, idx) => {
+                            table.addRow([
+                                String(idx + 1),
+                                book.title || 'Untitled',
+                                book.author || '(no author)'
+                            ]);
+                        });
+
+                        table.render(term);
+
+                        if (limit !== Infinity && data.books.length > limit) {
+                            writeln('');
+                            writeln(`  ${colors.dim}... and ${data.books.length - limit} more. Use 'books list all' to see all.${colors.reset}`, '');
+                        }
+                        writeln('');
+                    }
+                } else {
+                    writeln('');
+                    showInfo(term, 'No books found.');
+                    writeln('');
+                }
+            } catch (error) {
+                writeln('');
+                showError(term, 'books', error.message);
+                writeln('');
+            }
+        }
+
+        async function listLinks(args = []) {
+            try {
+                // Parse limit argument
+                let limit = 20;  // Default
+                if (args.length > 0) {
+                    if (args[0] === 'all') {
+                        limit = Infinity;
+                    } else {
+                        const parsed = parseInt(args[0]);
+                        if (!isNaN(parsed) && parsed > 0) {
+                            limit = parsed;
+                        }
+                    }
+                }
+
+                const spinner = new Spinner(term);
+                spinner.start('Fetching links...');
+                const data = await apiCall('/links');
+                spinner.stop();
+
+                if (data.links && data.links.length > 0) {
+                    const linksToShow = limit === Infinity ? data.links : data.links.slice(0, limit);
+
+                    writeln('');
+                    writeln(colors.bright + `Links (showing ${linksToShow.length} of ${data.links.length}):` + colors.reset, '');
+                    writeln('');
+
+                    const table = new Table({
+                        columns: ['#', 'Title', 'URL'],
+                        align: ['right', 'left', 'left']
+                    });
+
+                    linksToShow.forEach((link, idx) => {
+                        const url = link.url || '';
+                        const clickableURL = url ? clickableUrl(url, url.slice(0, 60) + (url.length > 60 ? '...' : '')) : '';
+
+                        table.addRow([
+                            String(idx + 1),
+                            link.title || 'Untitled',
+                            clickableURL
+                        ]);
+                    });
+
+                    table.render(term);
+
+                    if (limit !== Infinity && data.links.length > limit) {
+                        writeln('');
+                        writeln(`  ${colors.dim}... and ${data.links.length - limit} more. Use 'links list all' to see all.${colors.reset}`, '');
+                    }
+                    writeln('');
+                } else {
+                    writeln('');
+                    showInfo(term, 'No links found.');
+                    writeln('');
+                }
+            } catch (error) {
+                writeln('');
+                showError(term, 'links', error.message);
+                writeln('');
+            }
+        }
+
+        async function ask(query) {
+            writeln('');
+            writeln(`Asking AI Librarian: "${query}"...`, colors.dim);
+            writeln('');
+            writeln('[This feature will be implemented when /ask API endpoint is available]', colors.yellow);
+            writeln('');
+        }
+
+        async function getStatus() {
+            try {
+                const spinner = new Spinner(term);
+                spinner.start('Fetching status...');
+                const data = await apiCall('/status');
+                spinner.stop();
+
+                writeln('');
+                writeln(colors.bright + 'Holod Status:' + colors.reset, '');
+                writeln('');
+                writeln(`  Daemon: ${colors.green}Running${colors.reset}`, '');
+                writeln(`  Plugins: ${data.plugins?.length || 0} loaded`, colors.dim);
+                writeln('');
+            } catch (error) {
+                writeln('');
+                showError(term, 'status', error.message);
+                writeln('');
+            }
+        }
+
+        function setToken(token) {
+            apiToken = token;
+            sessionStorage.setItem('holocene_api_token', token);
+            document.getElementById('status').textContent = 'Authenticated';
+            document.getElementById('status').style.color = '#4ec9b0';
+            writeln('');
+            writeln(colors.green + '[OK] API token saved' + colors.reset, '');
+            writeln('');
+        }
+
+        // Prompt
+        function showPrompt() {
+            write('\r\n' + colors.green + 'holo' + colors.reset + colors.dim + '@' + colors.reset + colors.cyan + 'web' + colors.reset + ' $ ');
+        }
+
+        // Tab completion
+        // Tab completion handler using xterm-kit
+        const state = { currentLine: '', cursorPos: 0 };
+        const handleTab = createTabHandler(term, completer, state, (line) => {
+            // Redraw prompt + line
+            term.write('\r\x1b[K\x1b[32mholo\x1b[0m\x1b[2m@\x1b[0m\x1b[36mweb\x1b[0m $ ' + line);
+        });
+
+        // Input handling
+        term.onData(data => {
+            const code = data.charCodeAt(0);
+
+            // Handle special keys
+            if (code === 13) { // Enter
+                term.write('\r\n');
+                if (currentLine.trim()) {
+                    commandHistory.push(currentLine);
+                    historyIndex = commandHistory.length;
+                    executeCommand(currentLine);
+                } else {
+                    showPrompt();
+                }
+                currentLine = '';
+                cursorPos = 0;
+            } else if (code === 127) { // Backspace
+                if (cursorPos > 0) {
+                    // Delete character before cursor
+                    currentLine = currentLine.slice(0, cursorPos - 1) + currentLine.slice(cursorPos);
+                    cursorPos--;
+
+                    // Redraw line from cursor position
+                    term.write('\b' + currentLine.slice(cursorPos) + ' ');
+                    // Move cursor back to position
+                    for (let i = 0; i < currentLine.length - cursorPos + 1; i++) {
+                        term.write('\b');
+                    }
+                }
+            } else if (code === 9) { // Tab
+                // Sync state before calling handleTab
+                state.currentLine = currentLine;
+                state.cursorPos = cursorPos;
+                handleTab();
+                // Sync state back after handleTab
+                currentLine = state.currentLine;
+                cursorPos = state.cursorPos;
+            } else if (code === 27) { // Escape sequences (arrows)
+                if (data === '\x1b[A') { // Up arrow - history
+                    if (historyIndex > 0) {
+                        // Clear current line
+                        term.write('\r\x1b[K');
+                        showPrompt();
+                        historyIndex--;
+                        currentLine = commandHistory[historyIndex];
+                        cursorPos = currentLine.length;
+                        term.write(currentLine);
+                    }
+                } else if (data === '\x1b[B') { // Down arrow - history
+                    if (historyIndex < commandHistory.length - 1) {
+                        // Clear current line
+                        term.write('\r\x1b[K');
+                        showPrompt();
+                        historyIndex++;
+                        currentLine = commandHistory[historyIndex];
+                        cursorPos = currentLine.length;
+                        term.write(currentLine);
+                    } else if (historyIndex === commandHistory.length - 1) {
+                        // Clear current line
+                        term.write('\r\x1b[K');
+                        showPrompt();
+                        historyIndex = commandHistory.length;
+                        currentLine = '';
+                        cursorPos = 0;
+                    }
+                } else if (data === '\x1b[C') { // Right arrow - move cursor right
+                    if (cursorPos < currentLine.length) {
+                        cursorPos++;
+                        term.write('\x1b[C'); // Move cursor right
+                    }
+                } else if (data === '\x1b[D') { // Left arrow - move cursor left
+                    if (cursorPos > 0) {
+                        cursorPos--;
+                        term.write('\x1b[D'); // Move cursor left
+                    }
+                } else if (data === '\x1b[H') { // Home - move to start
+                    while (cursorPos > 0) {
+                        cursorPos--;
+                        term.write('\x1b[D');
+                    }
+                } else if (data === '\x1b[F') { // End - move to end
+                    while (cursorPos < currentLine.length) {
+                        cursorPos++;
+                        term.write('\x1b[C');
+                    }
+                }
+            } else if (code === 3) { // Ctrl+C
+                // Cancel current line
+                term.write('^C\r\n');
+                currentLine = '';
+                cursorPos = 0;
+                showPrompt();
+            } else if (code < 32) { // Other control characters
+                // Ignore
+            } else { // Regular character
+                // Insert character at cursor position
+                currentLine = currentLine.slice(0, cursorPos) + data + currentLine.slice(cursorPos);
+                cursorPos++;
+
+                // Redraw from cursor position
+                term.write(currentLine.slice(cursorPos - 1));
+                // Move cursor back to correct position
+                for (let i = 0; i < currentLine.length - cursorPos; i++) {
+                    term.write('\b');
+                }
+            }
+        });
+
+        // Initialize
+        showBanner();
+
+        if (apiToken) {
+            document.getElementById('status').textContent = 'Authenticated';
+            document.getElementById('status').style.color = '#4ec9b0';
+            writeln(colors.green + '[OK] API token loaded from session' + colors.reset, '');
+            writeln('');
+        } else {
+            document.getElementById('status').textContent = 'Not authenticated';
+            document.getElementById('status').style.color = '#f48771';
+            writeln(colors.yellow + '[!] Not authenticated' + colors.reset, '');
+            writeln('  Generate a token: ' + colors.cyan + 'holo auth token create --name "Web Terminal"' + colors.reset, colors.dim);
+            writeln('  Then use: ' + colors.cyan + 'token <your-token>' + colors.reset, colors.dim);
+            writeln('');
+        }
+
+        showPrompt();
+    </script>
+</body>
+</html>
