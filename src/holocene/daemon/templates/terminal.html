@@ -557,33 +557,52 @@
                 if (data.links && data.links.length > 0) {
                     const linksToShow = limit === Infinity ? data.links : data.links.slice(0, limit);
 
-                    writeln('');
-                    writeln(colors.bright + `Links (showing ${linksToShow.length} of ${data.links.length}):` + colors.reset, '');
-                    writeln('');
+                    // Use Pager for large lists (>30 links)
+                    if (linksToShow.length > 30) {
+                        // Build content for pager
+                        let content = `Links (${linksToShow.length} of ${data.links.length}):\n\n`;
 
-                    const table = new Table({
-                        columns: ['#', 'Title', 'URL'],
-                        align: ['right', 'left', 'left']
-                    });
+                        linksToShow.forEach((link, idx) => {
+                            const num = String(idx + 1).padStart(4, ' ');
+                            const title = (link.title || 'Untitled').padEnd(50, ' ').slice(0, 50);
+                            const url = (link.url || '').slice(0, 60);
+                            content += `${num}  ${title}  ${url}\n`;
+                        });
 
-                    linksToShow.forEach((link, idx) => {
-                        const url = link.url || '';
-                        const clickableURL = url ? clickableUrl(url, url.slice(0, 60) + (url.length > 60 ? '...' : '')) : '';
+                        content += `\nUse arrow keys to navigate, q to quit`;
 
-                        table.addRow([
-                            String(idx + 1),
-                            link.title || 'Untitled',
-                            clickableURL
-                        ]);
-                    });
-
-                    table.render(term);
-
-                    if (limit !== Infinity && data.links.length > limit) {
+                        // Use Pager with auto-pause/resume of input handlers
+                        const pager = new Pager(term, {
+                            pauseHandlers: [inputHandlerDisposable],
+                            onQuit: () => setupInputHandler()
+                        });
+                        await pager.show(content);
+                    } else {
+                        // Normal table output for small lists (no URL column - too wide)
                         writeln('');
-                        writeln(`  ${colors.dim}... and ${data.links.length - limit} more. Use 'links list all' to see all.${colors.reset}`, '');
+                        writeln(colors.bright + `Links (showing ${linksToShow.length} of ${data.links.length}):` + colors.reset, '');
+                        writeln('');
+
+                        const table = new Table({
+                            columns: ['#', 'Title'],
+                            align: ['right', 'left']
+                        });
+
+                        linksToShow.forEach((link, idx) => {
+                            table.addRow([
+                                String(idx + 1),
+                                link.title || 'Untitled'
+                            ]);
+                        });
+
+                        table.render(term);
+
+                        if (limit !== Infinity && data.links.length > limit) {
+                            writeln('');
+                            writeln(`  ${colors.dim}... and ${data.links.length - limit} more. Use 'links list all' to see all.${colors.reset}`, '');
+                        }
+                        writeln('');
                     }
-                    writeln('');
                 } else {
                     writeln('');
                     showInfo(term, 'No links found.');
