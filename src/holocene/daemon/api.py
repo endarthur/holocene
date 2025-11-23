@@ -989,8 +989,7 @@ class APIServer:
                 term.write(currentLine);
             } else if (completions.length > 1) {
                 // Multiple completions - show options
-                write('\\r\\n' + completions.join('  ') + '\\r\\n' + colors.green + 'holo' + colors.reset + colors.dim + '@' + colors.reset + colors.cyan + 'web' + colors.reset + ' $ ', '');
-                term.write(currentLine);
+                term.write('\\r\\n' + colors.dim + completions.join('  ') + colors.reset + '\\r\\n' + colors.green + 'holo' + colors.reset + colors.dim + '@' + colors.reset + colors.cyan + 'web' + colors.reset + ' $ ' + currentLine);
             }
         }
 
