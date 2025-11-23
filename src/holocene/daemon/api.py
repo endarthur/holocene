@@ -989,8 +989,9 @@ class APIServer:
             } else if (completions.length > 1) {
                 // Multiple completions - show options
                 term.write('\\r\\n');
-                write(completions.join('  '), colors.dim);
-                showPrompt();
+                write(completions.join('  ') + '\\r\\n', colors.dim);
+                // Write prompt without leading newline
+                write(colors.green + 'holo' + colors.reset + colors.dim + '@' + colors.reset + colors.cyan + 'web' + colors.reset + ' $ ');
                 term.write(currentLine);
             }
         }
