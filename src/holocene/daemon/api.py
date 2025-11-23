@@ -140,10 +140,8 @@ class APIServer:
         # Use __name__ so Flask can find templates/ directory relative to this module
         self.app = Flask(__name__)
 
-        # Configure secret key for sessions
-        # TODO: Load from config or generate persistent key
-        import secrets
-        self.app.secret_key = secrets.token_hex(32)  # Generate 256-bit key
+        # Configure secret key for sessions (persistent across restarts)
+        self.app.secret_key = self._get_or_create_secret_key()
 
         # Configure session lifetime (7 days)
         from datetime import timedelta
@@ -158,6 +156,47 @@ class APIServer:
         self.started_at = None
 
         logger.info(f"API server initialized on port {port}")
+
+    def _get_or_create_secret_key(self):
+        """Get or create persistent Flask secret key.
+
+        Stores the secret key in database so sessions survive daemon restarts.
+        """
+        import secrets
+
+        cursor = self.core.db.conn.cursor()
+
+        # Create settings table if it doesn't exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS daemon_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
+        # Try to load existing secret key
+        cursor.execute("SELECT value FROM daemon_settings WHERE key = 'flask_secret_key'")
+        row = cursor.fetchone()
+
+        if row:
+            logger.debug("Loaded persistent Flask secret key from database")
+            return row[0]
+
+        # Generate new secret key
+        secret_key = secrets.token_hex(32)  # 256-bit key
+        now = datetime.now().isoformat()
+
+        cursor.execute("""
+            INSERT INTO daemon_settings (key, value, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+        """, ('flask_secret_key', secret_key, now, now))
+
+        self.core.db.conn.commit()
+        logger.info("Generated new persistent Flask secret key")
+
+        return secret_key
 
     def _setup_routes(self):
         """Setup Flask routes."""
