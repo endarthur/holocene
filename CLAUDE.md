@@ -503,7 +503,7 @@ Add to `[all]` group if it should be included in full server installs.
 
 ## Project Status
 
-**Current Phase:** Phase 4 - 60% Complete (Nov 21, 2025)
+**Current Phase:** Phase 4 - 70% Complete (Nov 23, 2025)
 **Python Version:** 3.11+
 **License:** MIT
 
@@ -518,15 +518,19 @@ Add to `[all]` group if it should be included in full server installs.
 - ✅ AI Librarian (`holo ask`) - Natural language collection queries
 - ✅ CLI interface (60+ commands across 12 groups)
 - ✅ Config & stats commands (8+ subcommands each)
-- ✅ SQLite storage with migrations
+- ✅ SQLite storage with migrations (Migration 7 - auth tables)
 - ✅ Mercado Livre integration (OAuth, favorites sync, AI classification)
-- ✅ Telegram bot (mobile paper/link capture)
+- ✅ Telegram bot (mobile paper/link capture, `/login` magic links)
 - ✅ Inventory system (EAV attributes, tags)
 - ✅ HTTPFetcher (proxy support, caching)
+- ✅ **holod daemon** - REST API with Flask (port 5555)
+- ✅ **Passwordless authentication** - Magic links (Telegram/CLI, 5-min expiry, single-use)
+- ✅ **API token system** - Bearer tokens (`holo auth token create/list/revoke`)
+- ✅ **Cloudflare Tunnel** - Secure remote access at holo.stdgeo.com
+- ✅ **Dual auth support** - Session cookies OR API tokens
 
 **Partially Implemented:**
 - 🔨 Metadata enrichment (LLM summaries working, multi-source lookup TODO)
-- 🔨 Daemon infrastructure (skeleton exists, not fully operational)
 
 **Planned (Phase 5-6):**
 - ⏳ PubMed integration (36M biomedical papers)

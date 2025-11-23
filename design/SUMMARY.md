@@ -119,14 +119,18 @@ Three task types:
 
 ## Current Implementation Status
 
-### ✅ Implemented (On-Demand Mode) - Phase 4: 60% Complete
+### ✅ Implemented (On-Demand Mode) - Phase 4: 70% Complete
 
 #### Core Infrastructure
 - Manual activity logging with privacy sanitization
 - SQLite storage with full CRUD
-- **Database migrations** (6 migrations applied, auto-run on startup)
+- **Database migrations** (7 migrations applied, auto-run on startup)
+  - Migration 7: Auth tables (users, auth_tokens, api_tokens)
 - CLI interface (`holo` command via Click - 60+ commands across 12 groups)
 - **DeepSeek V3.1 integration** via NanoGPT API
+- **holod daemon** - REST API with Flask on port 5555
+- **Passwordless authentication** - Magic links + API tokens
+- **Cloudflare Tunnel deployment** - holo.stdgeo.com
 - Budget tracking (2000 calls/day monitored)
 - **journel integration** (reads 8 active projects)
 - **Git activity tracking** (scans local repos)
@@ -197,6 +201,83 @@ Three task types:
 - Recursive agent creation
 - File system access outside designated zones
 - POST/PUT/DELETE requests to external APIs
+
+---
+
+## Authentication System (Phase 4.6 - Nov 2025)
+
+### Passwordless Architecture
+
+**Design Philosophy:**
+- Zero passwords = Zero credential leakage risk
+- Magic links only (no web login forms to attack)
+- Dual authentication: Session cookies OR API tokens
+- Bot detection prevents link preview consumption
+
+### Magic Link Authentication
+
+**Flow:**
+1. User requests link via Telegram `/login` or CLI `holo auth link`
+2. System generates single-use token (256-bit, URL-safe base64)
+3. Token stored with 5-minute expiry in `auth_tokens` table
+4. User clicks link → holod validates token → creates 7-day session
+
+**Security Features:**
+- Single-use tokens (marked `used_at` on first access)
+- 5-minute expiry window
+- User-Agent detection for bot previews (Telegram, Discord, Slack)
+- IP address and User-Agent logging for audit trails
+- Automatic token cleanup (expired tokens)
+
+### API Token System
+
+**Purpose:** Programmatic access for scripts, automation, CI/CD
+
+**Commands:**
+```bash
+holo auth token create --name "My Laptop"  # Generate token
+holo auth token list                       # View active tokens
+holo auth token revoke <id>                # Revoke compromised token
+```
+
+**Features:**
+- Tokens prefixed with `hlc_` for easy identification
+- Track `last_used_at` for security monitoring
+- Revocation support (`revoked_at` timestamp)
+- Named tokens for identification ("My Laptop", "CI Server")
+- No expiry (until revoked)
+
+### Authorization Decorator
+
+**Implementation:**
+```python
+@require_auth
+def protected_endpoint():
+    # Checks session['user_id'] OR Authorization header
+    # Returns 401 if neither valid
+    pass
+```
+
+**Supports:**
+- Session cookies (after magic link login)
+- Bearer tokens: `Authorization: Bearer hlc_...`
+- Automatic token validation and refresh
+- Request context enrichment (user_id, username)
+
+### Deployment
+
+**Cloudflare Tunnel:**
+- Hostname: `holo.stdgeo.com`
+- Backend: `http://192.168.1.101:5555` (holocene-rei)
+- Zero-trust network access
+- No port forwarding required
+- Automatic HTTPS/TLS
+
+**Database:**
+- Migration 7 adds `users`, `auth_tokens`, `api_tokens` tables
+- Foreign keys with CASCADE delete
+- Indexes on token lookup columns
+- ISO 8601 timestamps for all date fields
 
 ---
 

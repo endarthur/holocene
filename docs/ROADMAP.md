@@ -52,6 +52,15 @@ Before implementing features, review these foundational docs:
 - ✅ **Bright Data proxy** - Web Unlocker integration
 - ✅ **Inventory system** - EAV attributes, normalized tags, search
 
+#### Daemon & Authentication (Phase 4.6 - Nov 22-23, 2025)
+- ✅ **holod REST API** - Background daemon with Flask (port 5555)
+- ✅ **Passwordless authentication** - Magic links via Telegram/CLI
+- ✅ **API token system** - Bearer tokens for programmatic access
+- ✅ **Cloudflare Tunnel deployment** - Secure remote access at holo.stdgeo.com
+- ✅ **Session management** - 7-day cookies, single-use magic links
+- ✅ **Bot detection** - Telegram link preview protection
+- ✅ **Multi-auth support** - Session cookies OR API tokens
+
 #### Config & UX (Phase 4.3)
 - ✅ **`holo config`** - Configuration management (8+ subcommands)
 - ✅ **`holo stats`** - Analytics dashboard (8+ analytics commands)
@@ -920,10 +929,35 @@ holo books search "machine learning" --include-calibre
 
 ---
 
-*Last Updated: 2025-11-21*
-*Current Phase: 4.1-4.5 (60% Complete - Free APIs, Infrastructure, Library Experience)*
+*Last Updated: 2025-11-23*
+*Current Phase: 4.1-4.6 (70% Complete - Free APIs, Infrastructure, Authentication, Library Experience)*
 
 ## Recent Wins 🎉
+
+**Phase 4.6 - Passwordless Authentication & API Access (2025-11-22 to 23)**
+- ✅ **holod REST API** - Background daemon serving Flask API on port 5555
+- ✅ **Magic link authentication** - Zero passwords, 5-min expiry, single-use tokens
+  - Generate via Telegram `/login` command
+  - Generate via CLI `holo auth link`
+  - Bot detection prevents Telegram link previews from consuming tokens
+- ✅ **API token system** - Bearer tokens for programmatic access
+  - `holo auth token create --name "My Laptop"` - Generate tokens with `hlc_` prefix
+  - `holo auth token list` - View active tokens with last_used_at tracking
+  - `holo auth token revoke <id>` - Revoke compromised tokens
+- ✅ **Dual authentication** - `@require_auth` decorator supports both:
+  - Session cookies (7-day lifetime from magic link login)
+  - Bearer tokens via `Authorization` header
+- ✅ **Cloudflare Tunnel deployment** - Secure remote access at holo.stdgeo.com
+- ✅ **Database Migration 7** - Added `users`, `auth_tokens`, `api_tokens` tables
+- Successfully tested magic link flow end-to-end
+- Successfully tested API token authentication with `curl`
+
+**Technical Highlights:**
+- User-Agent detection for bot link previews (Telegram, Discord, Slack)
+- Automatic `last_used_at` tracking for API tokens
+- Revocation support for compromised tokens
+- Request context stores user info for audit trails
+- Beautiful Rich-formatted CLI output with usage examples
 
 **Phase 4.5 - AI Librarian (`holo ask`) (2025-11-21)**
 - ✅ Implemented natural language queries over personal library
