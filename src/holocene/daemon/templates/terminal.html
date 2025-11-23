@@ -362,8 +362,11 @@
 
         // Command implementations
         function showAllCommands() {
-            // Build help content
-            let content = 'Available Commands:\n\n';
+            writeln('');
+            writeln(colors.bright + '═══════════════════════════════════════════════════════════' + colors.reset, '');
+            writeln(colors.cyan + colors.bright + '                   Holocene Terminal Help' + colors.reset, '');
+            writeln(colors.bright + '═══════════════════════════════════════════════════════════' + colors.reset, '');
+            writeln('');
 
             // Get commands grouped by category from registry
             const byCategory = registry.getByCategory();
@@ -375,40 +378,38 @@
 
                 // Category header
                 const categoryName = category.charAt(0).toUpperCase() + category.slice(1);
-                content += `${categoryName}:\n`;
+                writeln(colors.yellow + colors.bright + categoryName + ':' + colors.reset, '');
+
+                // Build table for this category
+                const table = new Table({
+                    columns: ['Command', 'Description'],
+                    align: ['left', 'left'],
+                    borders: false
+                });
 
                 commands.forEach(cmd => {
                     const subcommands = registry.getSubcommands(cmd.name);
-                    let cmdLine = `  ${cmd.name}`;
+                    let cmdName = cmd.name;
 
                     // Add subcommand hints
                     if (subcommands) {
                         const subNames = Object.keys(subcommands);
-                        cmdLine += ' <' + subNames.join('|') + '>';
+                        cmdName += ' <' + subNames.join('|') + '>';
                     }
 
-                    // Pad and add description
-                    const padding = ' '.repeat(Math.max(1, 28 - cmdLine.length));
-                    content += `${cmdLine}${padding}${cmd.description}\n`;
+                    table.addRow([cmdName, cmd.description]);
                 });
 
-                content += '\n';
+                table.render(term);
+                writeln('');
             });
 
-            content += 'Examples:\n';
-            content += '  books list         # Show first 20 books\n';
-            content += '  books list 50      # Show first 50 books\n';
-            content += '  books list all     # Show all books\n\n';
-            content += 'Generate a token: holo auth token create --name "Web Terminal"';
-
-            // Render in a box for prettier output
+            writeln(colors.yellow + colors.bright + 'Examples:' + colors.reset, '');
+            writeln('  books list         ' + colors.dim + '# Show first 20 books' + colors.reset, '');
+            writeln('  books list 50      ' + colors.dim + '# Show first 50 books' + colors.reset, '');
+            writeln('  books list all     ' + colors.dim + '# Show all books' + colors.reset, '');
             writeln('');
-            renderBox(term, {
-                title: 'Holocene Terminal Help',
-                content: content,
-                style: 'rounded',
-                padding: 1
-            });
+            writeln(colors.dim + 'Generate a token: ' + colors.cyan + 'holo auth token create --name "Web Terminal"' + colors.reset, '');
             writeln('');
         }
 
