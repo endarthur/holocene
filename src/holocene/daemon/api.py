@@ -988,8 +988,8 @@ class APIServer:
                 term.write(currentLine);
             } else if (completions.length > 1) {
                 // Multiple completions - show options
-                writeln('');
-                writeln(completions.join('  '), colors.dim);
+                term.write('\\r\\n');
+                write(completions.join('  '), colors.dim);
                 showPrompt();
                 term.write(currentLine);
             }
