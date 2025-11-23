@@ -625,7 +625,13 @@ class APIServer:
 
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-    <script>
+    <script type="module">
+        // Import xterm-kit utilities from koma repo
+        import { parse as parseArgs, hasHelp, showHelp } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/argparse.js';
+        import { showError, showSuccess, showInfo, formatSize, formatDate } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/output.js';
+        import { Table, renderTable } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/table.js';
+        import { Spinner } from 'https://cdn.jsdelivr.net/gh/endarthur/koma@main/src/lib/xterm-kit/progress.js';
+
         // Terminal setup
         const term = new Terminal({
             cursorBlink: true,
@@ -774,17 +780,17 @@ class APIServer:
 
                     case 'books':
                         if (args[0] === 'list' || !args[0]) {
-                            await listBooks();
+                            await listBooks(args.slice(1));  // Pass args after 'list'
                         } else {
-                            writeln('Usage: books [list]', colors.red);
+                            writeln('Usage: books list [limit|all]', colors.red);
                         }
                         break;
 
                     case 'links':
                         if (args[0] === 'list' || !args[0]) {
-                            await listLinks();
+                            await listLinks(args.slice(1));  // Pass args after 'list'
                         } else {
-                            writeln('Usage: links [list]', colors.red);
+                            writeln('Usage: links list [limit|all]', colors.red);
                         }
                         break;
 
@@ -842,15 +848,20 @@ class APIServer:
             writeln('');
             writeln(colors.bright + 'Available Commands:' + colors.reset, '');
             writeln('');
-            writeln('  ' + colors.cyan + 'whoami' + colors.reset + '              Show current user', '');
-            writeln('  ' + colors.cyan + 'token <token>' + colors.reset + '      Set API token (starts with hlc_)', '');
-            writeln('  ' + colors.cyan + 'auth status' + colors.reset + '         Check authentication status', '');
-            writeln('  ' + colors.cyan + 'books list' + colors.reset + '          List your book collection', '');
-            writeln('  ' + colors.cyan + 'links list' + colors.reset + '          List your saved links', '');
-            writeln('  ' + colors.cyan + 'ask <query>' + colors.reset + '         Ask the AI Librarian', '');
-            writeln('  ' + colors.cyan + 'status' + colors.reset + '              Get daemon status', '');
-            writeln('  ' + colors.cyan + 'clear' + colors.reset + '               Clear terminal', '');
-            writeln('  ' + colors.cyan + 'help' + colors.reset + '                Show this help', '');
+            writeln('  ' + colors.cyan + 'whoami' + colors.reset + '                    Show current user', '');
+            writeln('  ' + colors.cyan + 'token <token>' + colors.reset + '            Set API token (starts with hlc_)', '');
+            writeln('  ' + colors.cyan + 'auth status' + colors.reset + '               Check authentication status', '');
+            writeln('  ' + colors.cyan + 'books list [N|all]' + colors.reset + '        List books (default: 20, or N items, or all)', '');
+            writeln('  ' + colors.cyan + 'links list [N|all]' + colors.reset + '        List links (default: 20, or N items, or all)', '');
+            writeln('  ' + colors.cyan + 'ask <query>' + colors.reset + '               Ask the AI Librarian', '');
+            writeln('  ' + colors.cyan + 'status' + colors.reset + '                    Get daemon status', '');
+            writeln('  ' + colors.cyan + 'clear' + colors.reset + '                     Clear terminal', '');
+            writeln('  ' + colors.cyan + 'help' + colors.reset + '                      Show this help', '');
+            writeln('');
+            writeln(colors.dim + 'Examples:', '');
+            writeln(colors.dim + '  books list         ' + colors.reset + '  # Show first 20 books', '');
+            writeln(colors.dim + '  books list 50      ' + colors.reset + '  # Show first 50 books', '');
+            writeln(colors.dim + '  books list all     ' + colors.reset + '  # Show all books', '');
             writeln('');
             writeln(colors.dim + 'Generate a token: ' + colors.cyan + 'holo auth token create --name "Web Terminal"' + colors.reset, '');
             writeln('');
@@ -895,87 +906,123 @@ class APIServer:
             writeln('');
         }
 
-        async function listBooks() {
+        async function listBooks(args = []) {
             try {
-                writeln('');
-                write('Fetching books...', colors.dim);
-                const data = await apiCall('/books');
+                // Parse limit argument
+                let limit = 20;  // Default
+                if (args.length > 0) {
+                    if (args[0] === 'all') {
+                        limit = Infinity;
+                    } else {
+                        const parsed = parseInt(args[0]);
+                        if (!isNaN(parsed) && parsed > 0) {
+                            limit = parsed;
+                        }
+                    }
+                }
 
-                // Clear loading message
-                term.write('\\r\\x1b[K');
+                const spinner = new Spinner(term);
+                spinner.start('Fetching books...');
+                const data = await apiCall('/books');
+                spinner.stop();
 
                 if (data.books && data.books.length > 0) {
+                    const booksToShow = limit === Infinity ? data.books : data.books.slice(0, limit);
+
                     writeln('');
-                    writeln(colors.bright + `Books (${data.books.length} total):` + colors.reset, '');
+                    writeln(colors.bright + `Books (showing ${booksToShow.length} of ${data.books.length}):` + colors.reset, '');
                     writeln('');
 
-                    data.books.slice(0, 10).forEach((book, idx) => {
-                        const num = String(idx + 1).padStart(2, ' ');
-                        writeln(`  ${colors.cyan}${num}.${colors.reset} ${colors.bright}${book.title}${colors.reset}`, '');
-                        if (book.author) {
-                            writeln(`      ${colors.dim}by ${book.author}${colors.reset}`, '');
-                        }
+                    const table = new Table({
+                        columns: ['#', 'Title', 'Author'],
+                        align: ['right', 'left', 'left']
                     });
 
-                    if (data.books.length > 10) {
+                    booksToShow.forEach((book, idx) => {
+                        table.addRow([
+                            String(idx + 1),
+                            book.title || 'Untitled',
+                            book.author || '(no author)'
+                        ]);
+                    });
+
+                    table.render(term);
+
+                    if (limit !== Infinity && data.books.length > limit) {
                         writeln('');
-                        writeln(`  ${colors.dim}... and ${data.books.length - 10} more${colors.reset}`, '');
+                        writeln(`  ${colors.dim}... and ${data.books.length - limit} more. Use 'books list all' to see all.${colors.reset}`, '');
                     }
                     writeln('');
                 } else {
                     writeln('');
-                    writeln('No books found.', colors.yellow);
+                    showInfo(term, 'No books found.');
                     writeln('');
                 }
             } catch (error) {
-                term.write('\\r\\x1b[K');
                 writeln('');
-                writeln('[ERROR] Failed to fetch books', colors.red);
-                writeln(colors.dim + error.message + colors.reset, '');
+                showError(term, 'books', error.message);
                 writeln('');
             }
         }
 
-        async function listLinks() {
+        async function listLinks(args = []) {
             try {
-                writeln('');
-                write('Fetching links...', colors.dim);
-                const data = await apiCall('/links');
+                // Parse limit argument
+                let limit = 20;  // Default
+                if (args.length > 0) {
+                    if (args[0] === 'all') {
+                        limit = Infinity;
+                    } else {
+                        const parsed = parseInt(args[0]);
+                        if (!isNaN(parsed) && parsed > 0) {
+                            limit = parsed;
+                        }
+                    }
+                }
 
-                // Clear loading message
-                term.write('\\r\\x1b[K');
+                const spinner = new Spinner(term);
+                spinner.start('Fetching links...');
+                const data = await apiCall('/links');
+                spinner.stop();
 
                 if (data.links && data.links.length > 0) {
+                    const linksToShow = limit === Infinity ? data.links : data.links.slice(0, limit);
+
                     writeln('');
-                    writeln(colors.bright + `Links (${data.links.length} total):` + colors.reset, '');
+                    writeln(colors.bright + `Links (showing ${linksToShow.length} of ${data.links.length}):` + colors.reset, '');
                     writeln('');
 
-                    data.links.slice(0, 10).forEach((link, idx) => {
-                        const num = String(idx + 1).padStart(2, ' ');
-                        const title = link.title || 'Untitled';
-                        writeln(`  ${colors.cyan}${num}.${colors.reset} ${colors.bright}${title}${colors.reset}`, '');
-                        if (link.url) {
-                            // Make URL clickable
-                            const clickable = clickableUrl(link.url);
-                            writeln(`      ${colors.dim}${clickable}${colors.reset}`, '');
-                        }
+                    const table = new Table({
+                        columns: ['#', 'Title', 'URL'],
+                        align: ['right', 'left', 'left']
                     });
 
-                    if (data.links.length > 10) {
+                    linksToShow.forEach((link, idx) => {
+                        const url = link.url || '';
+                        const clickableURL = url ? clickableUrl(url, url.slice(0, 60) + (url.length > 60 ? '...' : '')) : '';
+
+                        table.addRow([
+                            String(idx + 1),
+                            link.title || 'Untitled',
+                            clickableURL
+                        ]);
+                    });
+
+                    table.render(term);
+
+                    if (limit !== Infinity && data.links.length > limit) {
                         writeln('');
-                        writeln(`  ${colors.dim}... and ${data.links.length - 10} more${colors.reset}`, '');
+                        writeln(`  ${colors.dim}... and ${data.links.length - limit} more. Use 'links list all' to see all.${colors.reset}`, '');
                     }
                     writeln('');
                 } else {
                     writeln('');
-                    writeln('No links found.', colors.yellow);
+                    showInfo(term, 'No links found.');
                     writeln('');
                 }
             } catch (error) {
-                term.write('\\r\\x1b[K');
                 writeln('');
-                writeln('[ERROR] Failed to fetch links', colors.red);
-                writeln(colors.dim + error.message + colors.reset, '');
+                showError(term, 'links', error.message);
                 writeln('');
             }
         }
@@ -990,12 +1037,10 @@ class APIServer:
 
         async function getStatus() {
             try {
-                writeln('');
-                write('Fetching status...', colors.dim);
+                const spinner = new Spinner(term);
+                spinner.start('Fetching status...');
                 const data = await apiCall('/status');
-
-                // Clear loading message
-                term.write('\\r\\x1b[K');
+                spinner.stop();
 
                 writeln('');
                 writeln(colors.bright + 'Holod Status:' + colors.reset, '');
@@ -1004,10 +1049,8 @@ class APIServer:
                 writeln(`  Plugins: ${data.plugins?.length || 0} loaded`, colors.dim);
                 writeln('');
             } catch (error) {
-                term.write('\\r\\x1b[K');
                 writeln('');
-                writeln('[ERROR] Failed to fetch status', colors.red);
-                writeln(colors.dim + error.message + colors.reset, '');
+                showError(term, 'status', error.message);
                 writeln('');
             }
         }
