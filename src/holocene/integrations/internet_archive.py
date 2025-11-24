@@ -108,7 +108,7 @@ class InternetArchiveClient(BaseAPIClient):
             if self.access_key and self.secret_key:
                 headers["Authorization"] = f"LOW {self.access_key}:{self.secret_key}"
 
-            response = self.get(save_endpoint, headers=headers, timeout=30)
+            response = self.get(save_endpoint, headers=headers, timeout=90)
 
             # IA returns various status codes
             if response.status_code in [200, 301, 302]:
