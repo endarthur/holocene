@@ -110,19 +110,19 @@ class InternetArchiveClient(BaseAPIClient):
 
             import logging
             logger = logging.getLogger(__name__)
-            logger.info(f"[IA] Starting save_url for: {url}")
-            logger.info(f"[IA] Save endpoint: {save_endpoint}")
-            logger.info(f"[IA] Headers: {bool(headers)}")
+            logger.warning(f"[IA] Starting save_url for: {url}")
+            logger.warning(f"[IA] Save endpoint: {save_endpoint}")
+            logger.warning(f"[IA] Headers: {bool(headers)}")
 
             import time
             start_time = time.time()
-            logger.info(f"[IA] About to call self.get() at {start_time}")
+            logger.warning(f"[IA] About to call self.get() at {start_time}")
 
             response = self.get(save_endpoint, headers=headers, timeout=90)
 
             elapsed = time.time() - start_time
-            logger.info(f"[IA] self.get() returned after {elapsed:.2f}s")
-            logger.info(f"[IA] Response status: {response.status_code}")
+            logger.warning(f"[IA] self.get() returned after {elapsed:.2f}s")
+            logger.warning(f"[IA] Response status: {response.status_code}")
 
             # IA returns various status codes
             if response.status_code in [200, 301, 302]:
