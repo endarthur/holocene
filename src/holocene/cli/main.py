@@ -448,10 +448,12 @@ def archive(urls: tuple, force: bool, check_only: bool):
     ia = InternetArchiveClient(
         access_key=config.integrations.ia_access_key,
         secret_key=config.integrations.ia_secret_key,
-        rate_limit_seconds=config.integrations.ia_rate_limit_seconds
+        rate_limit=getattr(config.integrations, 'ia_rate_limit', 0.5)
     )
 
-    console.print(f"[dim]Rate limit: {config.integrations.ia_rate_limit_seconds}s between requests[/dim]\n")
+    rate_limit = getattr(config.integrations, 'ia_rate_limit', 0.5)
+    seconds_between = 1.0 / rate_limit if rate_limit > 0 else 0
+    console.print(f"[dim]Rate limit: {seconds_between:.1f}s between requests[/dim]\n")
 
     if check_only:
         # Just check availability
@@ -749,7 +751,7 @@ def archive_links(limit: int, force: bool, retry_failed: bool):
     ia = InternetArchiveClient(
         access_key=config.integrations.ia_access_key,
         secret_key=config.integrations.ia_secret_key,
-        rate_limit_seconds=config.integrations.ia_rate_limit_seconds
+        rate_limit=getattr(config.integrations, 'ia_rate_limit', 0.5)
     )
 
     # Get links to archive
@@ -787,8 +789,10 @@ def archive_links(limit: int, force: bool, retry_failed: bool):
         return
 
     total = len(links_to_archive)
+    rate_limit = getattr(config.integrations, 'ia_rate_limit', 0.5)
+    seconds_between = 1.0 / rate_limit if rate_limit > 0 else 0
     console.print(f"[cyan]Archiving {total} link(s)...[/cyan]")
-    console.print(f"[dim]Rate limit: {config.integrations.ia_rate_limit_seconds}s between requests[/dim]\n")
+    console.print(f"[dim]Rate limit: {seconds_between:.1f}s between requests[/dim]\n")
 
     archived_count = 0
     already_archived_count = 0
@@ -979,7 +983,7 @@ def auto_archive(scan: bool, limit: int, scan_period: str):
     ia = InternetArchiveClient(
         access_key=config.integrations.ia_access_key,
         secret_key=config.integrations.ia_secret_key,
-        rate_limit_seconds=config.integrations.ia_rate_limit_seconds
+        rate_limit=getattr(config.integrations, 'ia_rate_limit', 0.5)
     )
 
     # Get unarchived links (respects exponential backoff)
@@ -1007,7 +1011,9 @@ def auto_archive(scan: bool, limit: int, scan_period: str):
         return
 
     total = len(links_to_archive)
-    console.print(f"  [dim]Archiving {total} link(s) (rate limit: {config.integrations.ia_rate_limit_seconds}s)[/dim]")
+    rate_limit = getattr(config.integrations, 'ia_rate_limit', 0.5)
+    seconds_between = 1.0 / rate_limit if rate_limit > 0 else 0
+    console.print(f"  [dim]Archiving {total} link(s) (rate limit: {seconds_between:.1f}s)[/dim]")
 
     archived_count = 0
     already_archived_count = 0

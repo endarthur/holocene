@@ -1014,7 +1014,7 @@ This link will grant you access to:
                     ia = InternetArchiveClient(
                         access_key=self.core.config.integrations.ia_access_key,
                         secret_key=self.core.config.integrations.ia_secret_key,
-                        rate_limit_seconds=self.core.config.integrations.ia_rate_limit_seconds
+                        rate_limit=getattr(self.core.config.integrations, 'ia_rate_limit', 0.5)
                     )
 
                     self.logger.info(f"Archiving link to Internet Archive: {actual_url}")
