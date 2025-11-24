@@ -33,11 +33,13 @@ class InternetArchiveClient(BaseAPIClient):
             use_global_limiter=use_global_limiter,
         )
 
-        # Register web.archive.org to use the same rate limit as archive.org
-        # Both domains are part of Internet Archive and should share rate limits
-        if self.rate_limiter and rate_limit:
-            self.rate_limiter.domain_rates["web.archive.org"] = rate_limit
-            self.rate_limiter.domain_rates["archive.org"] = rate_limit
+        # Configure rate limits per IA's API documentation:
+        # - Availability API (archive.org): Can be faster for read-only checks
+        # - Save API (web.archive.org): Max 12 captures/minute for authenticated users
+        #   = 0.2 req/s = 5 seconds between saves
+        if self.rate_limiter:
+            self.rate_limiter.domain_rates["archive.org"] = rate_limit  # Availability checks
+            self.rate_limiter.domain_rates["web.archive.org"] = 0.2  # Save API: 12/min limit
 
         self.access_key = access_key
         self.secret_key = secret_key
@@ -130,15 +132,15 @@ class InternetArchiveClient(BaseAPIClient):
 
             import time
             start_time = time.time()
-            logger.warning(f"[IA] About to call self.get() at {start_time}")
+            logger.warning(f"[IA] About to call POST to save endpoint at {start_time}")
 
+            # Use POST per IA's Save Page Now 2 API documentation
             # Don't follow redirects - IA sends 302 to snapshot, we just need the Location header
-            # NOTE: Using direct requests.get instead of self.get to avoid session pooling issues
             import requests as direct_requests
-            response = direct_requests.get(save_endpoint, headers=headers, timeout=90, allow_redirects=False)
+            response = direct_requests.post(save_endpoint, headers=headers, timeout=90, allow_redirects=False)
 
             elapsed = time.time() - start_time
-            logger.warning(f"[IA] self.get() returned after {elapsed:.2f}s")
+            logger.warning(f"[IA] POST request completed after {elapsed:.2f}s")
             logger.warning(f"[IA] Response status: {response.status_code}")
 
             # IA returns various status codes
