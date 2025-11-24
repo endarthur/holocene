@@ -24,7 +24,11 @@
       "Bash(sqlite3:*)",
       "Bash(holo papers:*)",
       "Bash(holo wikipedia:*)",
-      "Bash(holo --help:*)"
+      "Bash(holo --help:*)",
+      "Bash(SELECT id, url, archive_status, archive_date, snapshot_url, added_at)",
+      "Bash(FROM links)",
+      "Bash(WHERE id = 1190)",
+      "Bash(\"\"\").fetchone()\n\nprint(f\"Link ID: {link[0]}\")\nprint(f\"URL: {link[1]}\")\nprint(f\"Archive status: {link[2]}\")\nprint(f\"Archive date: {link[3]}\")\nprint(f\"Snapshot URL: {link[4]}\")\nprint(f\"Added at: {link[5]}\")\n\n# Check if there''s an error logged\nprint(\"nChecking for errors in recent activity...\")\nEOF\n\")"
     ],
     "deny": [],
     "ask": []

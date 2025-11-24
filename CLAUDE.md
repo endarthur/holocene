@@ -584,6 +584,18 @@ holo --help
 
 # Run specific integration
 python -m holocene.integrations.paperang.client
+
+# Access holocene-rei production server
+ssh holocene@192.168.1.101
+
+# Check daemon logs on holocene-rei
+ssh holocene@192.168.1.101 "journalctl -u holod --since '2 minutes ago' | tail -50"
+
+# Restart holod daemon (configured to allow passwordless sudo)
+ssh holocene@192.168.1.101 "sudo systemctl restart holod"
+
+# Deploy changes to holocene-rei
+ssh holocene@192.168.1.101 "cd /home/holocene/holocene && git pull && sudo systemctl restart holod"
 ```
 
 ### Common Pitfalls

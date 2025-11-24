@@ -119,7 +119,9 @@ class InternetArchiveClient(BaseAPIClient):
             logger.warning(f"[IA] About to call self.get() at {start_time}")
 
             # Don't follow redirects - IA sends 302 to snapshot, we just need the Location header
-            response = self.get(save_endpoint, headers=headers, timeout=90, allow_redirects=False)
+            # NOTE: Using direct requests.get instead of self.get to avoid session pooling issues
+            import requests as direct_requests
+            response = direct_requests.get(save_endpoint, headers=headers, timeout=90, allow_redirects=False)
 
             elapsed = time.time() - start_time
             logger.warning(f"[IA] self.get() returned after {elapsed:.2f}s")
