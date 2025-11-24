@@ -410,7 +410,7 @@ class APIServer:
 
             # Notify Telegram bot that token was used (for message editing)
             try:
-                telegram_plugin = self.core.plugin_registry.get_plugin('telegram_bot')
+                telegram_plugin = self.registry.get_plugin('telegram_bot')
                 if telegram_plugin and hasattr(telegram_plugin, 'mark_login_used'):
                     telegram_plugin.mark_login_used(token, request.remote_addr)
             except Exception as e:
