@@ -1833,27 +1833,45 @@ class APIServer:
             else:
                 mimetype = 'application/octet-stream'
 
-            # Serve file with modified CSP to allow Cloudflare beacon
-            response = send_file(
-                archive_path,
-                mimetype=mimetype,
-                as_attachment=False,  # Display in browser
-                download_name=archive_path.name
-            )
-
-            # Override strict CSP from monolith to allow Cloudflare scripts
-            # Monolith sets 'script-src none' which blocks Cloudflare Tunnel's beacon
+            # For monolith files, strip embedded CSP meta tag that blocks Cloudflare
             if service == 'local_monolith':
-                response.headers['Content-Security-Policy'] = (
-                    "default-src 'self'; "
-                    "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; "
-                    "style-src 'self' 'unsafe-inline'; "
-                    "img-src 'self' data:; "
-                    "font-src 'self' data:; "
-                    "connect-src 'self' https://cloudflareinsights.com"
+                # Read and modify HTML to remove strict CSP
+                with open(archive_path, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+
+                # Remove the CSP meta tag that monolith embeds
+                import re
+                html_content = re.sub(
+                    r'<meta\s+http-equiv=["\']Content-Security-Policy["\'][^>]*>',
+                    '',
+                    html_content,
+                    flags=re.IGNORECASE
                 )
 
-            return response
+                # Return modified HTML
+                from flask import Response
+                return Response(
+                    html_content,
+                    mimetype='text/html',
+                    headers={
+                        'Content-Security-Policy': (
+                            "default-src 'self'; "
+                            "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; "
+                            "style-src 'self' 'unsafe-inline'; "
+                            "img-src 'self' data:; "
+                            "font-src 'self' data:; "
+                            "connect-src 'self' https://cloudflareinsights.com"
+                        )
+                    }
+                )
+
+            # For other file types, serve directly
+            return send_file(
+                archive_path,
+                mimetype=mimetype,
+                as_attachment=False,
+                download_name=archive_path.name
+            )
 
         except Exception as e:
             logger.error(f"Error serving archive file {file_path}: {e}", exc_info=True)
