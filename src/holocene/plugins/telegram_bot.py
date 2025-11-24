@@ -57,6 +57,10 @@ class TelegramBotPlugin(Plugin):
         self.bot_thread = None  # Dedicated thread for bot
         self.keep_running = None  # Future that keeps bot running (so we can cancel it)
 
+        # Track login messages for auto-expiry/updates
+        # Format: {token: {'message': message_obj, 'expires_at': datetime, 'user_id': int}}
+        self.login_messages = {}
+
         if not TELEGRAM_AVAILABLE:
             self.logger.warning("python-telegram-bot not installed - bot will be disabled")
             self.logger.warning("Install with: pip install python-telegram-bot")
@@ -367,9 +371,24 @@ This link will grant you access to:
 • Research tools
 """
 
-            await update.message.reply_text(msg, parse_mode='Markdown')
+            sent_message = await update.message.reply_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
             self.messages_sent += 1
             self.logger.info(f"Magic link generated for user {user_id} (telegram: {telegram_user_id})")
+
+            # Track this message for auto-expiry and usage updates
+            self.login_messages[token] = {
+                'message': sent_message,
+                'expires_at': expires_at,
+                'user_id': user_id,
+                'telegram_username': telegram_username
+            }
+
+            # Schedule auto-expiry (edit message after 5 minutes)
+            self.run_in_background(
+                lambda: self._auto_expire_login_message(token, expires_at),
+                callback=lambda result: self.logger.debug(f"Login message auto-expired: {token[:8]}..."),
+                error_handler=lambda e: self.logger.error(f"Failed to auto-expire login message: {e}")
+            )
 
         except Exception as e:
             self.logger.error(f"Failed to generate login link: {e}", exc_info=True)
@@ -1272,6 +1291,81 @@ URL: {url[:50]}...
             asyncio.run_coroutine_threadsafe(edit(), self.bot_loop)
         except Exception as e:
             self.logger.error(f"Failed to schedule message edit: {e}")
+
+    def _auto_expire_login_message(self, token: str, expires_at: datetime):
+        """Auto-expire a login message after timeout (runs in background).
+
+        Args:
+            token: Auth token
+            expires_at: Expiry datetime
+        """
+        import time
+
+        # Calculate sleep time (add 1 second buffer)
+        sleep_seconds = (expires_at - datetime.now()).total_seconds() + 1
+
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+
+        # Check if token is still tracked (might have been used)
+        if token not in self.login_messages:
+            self.logger.debug(f"Login token {token[:8]}... already processed")
+            return
+
+        msg_info = self.login_messages[token]
+        message = msg_info['message']
+
+        # Edit message to show it expired
+        expired_msg = f"""🔐 *Web Login Link*
+
+⏱️ *EXPIRED*
+
+This magic link has expired (5 minute timeout).
+Request a new one with /login
+"""
+
+        self._edit_message(message, expired_msg)
+
+        # Clean up tracking
+        del self.login_messages[token]
+        self.logger.info(f"Login message auto-expired: {token[:8]}...")
+
+    def mark_login_used(self, token: str, ip_address: str = None):
+        """Mark a login token as used and update the Telegram message.
+
+        Args:
+            token: Auth token that was used
+            ip_address: Optional IP address of user who used it
+        """
+        if token not in self.login_messages:
+            self.logger.debug(f"Login token {token[:8]}... not tracked (already expired?)")
+            return
+
+        msg_info = self.login_messages[token]
+        message = msg_info['message']
+        username = msg_info['telegram_username']
+
+        # Edit message to show it was used
+        used_msg = f"""🔐 *Web Login Link*
+
+✅ *USED SUCCESSFULLY*
+
+Logged in as: @{username}
+Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+
+        if ip_address:
+            used_msg += f"IP: {ip_address}\n"
+
+        used_msg += """
+This link is now invalid (single-use only).
+"""
+
+        self._edit_message(message, used_msg)
+
+        # Clean up tracking
+        del self.login_messages[token]
+        self.logger.info(f"Login message marked as used: {token[:8]}...")
 
     def on_disable(self):
         """Disable the plugin and stop bot."""

@@ -408,6 +408,14 @@ class APIServer:
             ))
             self.core.db.conn.commit()
 
+            # Notify Telegram bot that token was used (for message editing)
+            try:
+                telegram_plugin = self.core.plugin_registry.get_plugin('telegram_bot')
+                if telegram_plugin and hasattr(telegram_plugin, 'mark_login_used'):
+                    telegram_plugin.mark_login_used(token, request.remote_addr)
+            except Exception as e:
+                logger.warning(f"Failed to notify Telegram bot of login: {e}")
+
             # Create session
             session.permanent = True  # Use configured lifetime (7 days)
             session['user_id'] = user_id
