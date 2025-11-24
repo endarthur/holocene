@@ -1127,7 +1127,7 @@ class Database:
             # Return original URL if unwrapping fails
             return url
 
-    def insert_link(self, url: str, source: str, title: str = None, notes: str = None) -> int:
+    def insert_link(self, url: str, source: str, title: str = None, notes: str = None, metadata: str = None) -> int:
         """Insert or update a link. Returns link ID."""
         # Unwrap URL redirects (Google shortened URLs, etc.)
         url = self._unwrap_url(url)
@@ -1137,13 +1137,14 @@ class Database:
 
         # Try to insert, update if exists
         cursor.execute("""
-            INSERT INTO links (url, title, source, first_seen, last_seen, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO links (url, title, source, first_seen, last_seen, created_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET
                 last_seen = ?,
                 title = COALESCE(?, title),
-                notes = COALESCE(?, notes)
-        """, (url, title, source, now, now, now, now, title, notes))
+                notes = COALESCE(?, notes),
+                metadata = COALESCE(?, metadata)
+        """, (url, title, source, now, now, now, metadata, now, title, notes, metadata))
 
         self.conn.commit()
 
