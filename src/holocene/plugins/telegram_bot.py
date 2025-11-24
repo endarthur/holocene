@@ -398,11 +398,12 @@ You'll receive updates when:
             magic_link = f"{base_url}/auth/login?token={token}"
 
             # Send magic link to user
+            # Wrap URL in backticks to prevent markdown parsing issues with token characters
             msg = f"""🔐 *Web Login Link*
 
 Your magic link is ready! Click below to log in to the Holocene web interface.
 
-{magic_link}
+`{magic_link}`
 
 ⏱️ *Expires in 5 minutes*
 🔒 *Single-use only*
