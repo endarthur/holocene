@@ -113,6 +113,7 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("recent", self._cmd_recent))
         self.application.add_handler(CommandHandler("search", self._cmd_search))
         self.application.add_handler(CommandHandler("classify", self._cmd_classify))
+        self.application.add_handler(CommandHandler("spn", self._cmd_spn))
 
         # Register message handlers for content (text, PDFs, etc.)
         self.application.add_handler(MessageHandler(
@@ -285,6 +286,7 @@ Available commands:
 /recent - Show recently added items
 /search <query> - Search books and papers
 /classify <topic> - Get Dewey classification
+/spn <url> - Force new archive snapshot (Save Page Now)
 
 *Send me:*
 • DOIs - I'll fetch paper metadata
@@ -681,6 +683,112 @@ This link will grant you access to:
                 await update.message.reply_text(f"❌ Classification failed: {str(e)[:100]}")
             except:
                 await update.message.reply_text("❌ Classification failed")
+
+    async def _cmd_spn(self, update, context):
+        """Handle /spn command - force new Internet Archive snapshot for existing link."""
+        self.commands_received += 1
+
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        # Get URL from command args
+        url = ' '.join(context.args) if context.args else None
+        if not url:
+            await update.message.reply_text(
+                "Usage: `/spn <url>`\n\n"
+                "Force a new Internet Archive snapshot for a URL already in your collection.\n"
+                "Respects IA's rate limits (5 seconds between saves).",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Check if URL is in database
+        db = self.core.db
+        link = db.conn.execute("SELECT id, url, archived FROM links WHERE url = ?", (url,)).fetchone()
+
+        if not link:
+            await update.message.reply_text(
+                "❌ URL not in database.\n\n"
+                "Send the URL first to add it to your collection, then use `/spn` to force re-archiving.",
+                parse_mode='Markdown'
+            )
+            return
+
+        link_id, actual_url, currently_archived = link
+
+        # Send initial message
+        status_msg = await update.message.reply_text(
+            f"📦 *Save Page Now*\n\n"
+            f"`{actual_url}`\n\n"
+            f"⏳ Forcing new snapshot...\n"
+            f"_(Respects 5s rate limit)_",
+            parse_mode='Markdown'
+        )
+
+        # Force archive in background
+        def force_archive():
+            if not hasattr(self.core.config, 'integrations') or \
+               not getattr(self.core.config.integrations, 'internet_archive_enabled', False):
+                return {'status': 'error', 'message': 'Internet Archive integration not enabled'}
+
+            from ..integrations import InternetArchiveClient
+
+            ia = InternetArchiveClient(
+                access_key=self.core.config.integrations.ia_access_key,
+                secret_key=self.core.config.integrations.ia_secret_key,
+                rate_limit=getattr(self.core.config.integrations, 'ia_rate_limit', 0.5)
+            )
+
+            result = ia.save_url(actual_url, force=True)  # Force new snapshot
+
+            # Update database
+            if result.get('status') in ('archived', 'already_archived'):
+                db.update_link_archive_status(
+                    url=actual_url,
+                    archived=True,
+                    archive_url=result.get('snapshot_url'),
+                    archive_date=result.get('archive_date')
+                )
+
+            return result
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(None, force_archive)
+
+            status = result.get('status')
+            if status == 'archived':
+                snapshot_url = result.get('snapshot_url', 'N/A')
+                msg = (
+                    f"✅ *New Snapshot Created*\n\n"
+                    f"`{actual_url}`\n\n"
+                    f"[View snapshot ↗]({snapshot_url})"
+                )
+            elif status == 'already_archived':
+                snapshot_url = result.get('snapshot_url', 'N/A')
+                msg = (
+                    f"ℹ️ *Already Archived*\n\n"
+                    f"`{actual_url}`\n\n"
+                    f"Internet Archive reported this URL was already archived.\n"
+                    f"[View snapshot ↗]({snapshot_url})"
+                )
+            else:
+                error_msg = result.get('message', 'Unknown error')
+                msg = f"❌ *Archive Failed*\n\n`{actual_url}`\n\n{error_msg}"
+
+            await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
+            self.messages_sent += 1
+
+        except Exception as e:
+            self.logger.error(f"SPN command error: {e}", exc_info=True)
+            try:
+                await status_msg.edit_text(
+                    f"❌ *Archive Failed*\n\n`{actual_url}`\n\n{str(e)[:200]}",
+                    parse_mode='Markdown'
+                )
+            except:
+                await update.message.reply_text("❌ Archive failed")
 
     # Message and document handlers
 
