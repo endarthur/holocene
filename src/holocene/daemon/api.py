@@ -1857,7 +1857,7 @@ class APIServer:
                         'Content-Security-Policy': (
                             "default-src 'self'; "
                             "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; "
-                            "style-src 'self' 'unsafe-inline'; "
+                            "style-src 'self' 'unsafe-inline' data:; "
                             "img-src 'self' data:; "
                             "font-src 'self' data:; "
                             "connect-src 'self' https://cloudflareinsights.com"
