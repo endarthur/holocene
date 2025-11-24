@@ -727,6 +727,128 @@ def import_bookmarks(browser: str):
     db.close()
 
 
+@links.command("import-telegram")
+@click.argument("json_file", type=click.Path(exists=True))
+@click.option("--dry-run", is_flag=True, help="Preview import without saving to database")
+def import_telegram(json_file: str, dry_run: bool):
+    """Import links from Telegram JSON export.
+
+    Parses Telegram export JSON and imports all URLs found in messages.
+    Each link is tagged with source='telegram_export' and the message timestamp.
+
+    Example:
+        holo links import-telegram personal/telegram.json
+        holo links import-telegram telegram.json --dry-run
+    """
+    import json
+    from ..core.link_utils import should_archive_url
+    from urllib.parse import urlparse
+
+    config = load_config()
+    db = Database(config.db_path)
+
+    # Load JSON file
+    with console.status(f"[cyan]Reading {json_file}...", spinner="dots"):
+        with open(json_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+    if 'messages' not in data:
+        console.print("[red]Error:[/red] No 'messages' field found in JSON")
+        console.print("Make sure this is a valid Telegram export JSON file")
+        db.close()
+        return
+
+    messages = data['messages']
+    console.print(f"[green]✓[/green] Found {len(messages)} messages")
+
+    # Extract all links from messages
+    links_found = []
+    for msg in messages:
+        if msg.get('type') != 'message':
+            continue
+
+        # Check text_entities for links
+        text_entities = msg.get('text_entities', [])
+        for entity in text_entities:
+            if entity.get('type') == 'link':
+                url = entity.get('text', '').strip()
+                if url and should_archive_url(url):
+                    # Parse domain for display
+                    try:
+                        domain = urlparse(url).netloc
+                    except:
+                        domain = 'unknown'
+
+                    links_found.append({
+                        'url': url,
+                        'date': msg.get('date', ''),
+                        'domain': domain,
+                        'message_id': msg.get('id'),
+                    })
+
+    console.print(f"[green]✓[/green] Extracted {len(links_found)} valid URLs")
+
+    if not links_found:
+        console.print("[yellow]No valid URLs found to import[/yellow]")
+        db.close()
+        return
+
+    # Show domain breakdown
+    from collections import Counter
+    domain_counts = Counter(link['domain'] for link in links_found)
+    console.print("\n[bold]Top domains:[/bold]")
+    for domain, count in domain_counts.most_common(10):
+        console.print(f"  {domain}: {count}")
+
+    if dry_run:
+        console.print(f"\n[yellow]Dry run - would import {len(links_found)} links[/yellow]")
+        console.print("Run without --dry-run to actually import")
+        db.close()
+        return
+
+    # Get existing URLs to avoid duplicates
+    existing_urls = {link["url"] for link in db.get_links()}
+
+    # Import to database
+    new_count = 0
+    updated_count = 0
+    skipped_count = 0
+
+    with console.status("[cyan]Importing links...", spinner="dots"):
+        for link_data in links_found:
+            url = link_data['url']
+
+            if url in existing_urls:
+                updated_count += 1
+            else:
+                new_count += 1
+
+            try:
+                db.insert_link(
+                    url=url,
+                    source="telegram_export",
+                    title=None,  # No titles in Telegram export
+                    metadata=json.dumps({
+                        'telegram_message_id': link_data['message_id'],
+                        'telegram_date': link_data['date'],
+                    })
+                )
+            except Exception as e:
+                console.print(f"[red]Error importing {url}:[/red] {e}")
+                skipped_count += 1
+
+    console.print(f"\n[green]✓[/green] Import complete!")
+    console.print(f"[green]✓[/green] Added {new_count} new link(s)")
+    if updated_count > 0:
+        console.print(f"[blue]ℹ[/blue] Updated {updated_count} existing link(s)")
+    if skipped_count > 0:
+        console.print(f"[yellow]⚠[/yellow] Skipped {skipped_count} link(s) due to errors")
+
+    console.print(f"\n[dim]💡 Tip: Use 'holo links archive-queue start' to gradually archive these links[/dim]")
+
+    db.close()
+
+
 @links.command("archive")
 @click.option("--limit", "-n", type=int, help="Limit number of links to archive")
 @click.option("--force", is_flag=True, help="Ignore exponential backoff and retry failed links")
@@ -1058,6 +1180,156 @@ def auto_archive(scan: bool, limit: int, scan_period: str):
         f"[red]✗[/red] Errors: {error_count}",
         title="Auto-Archive Summary"
     ))
+
+    db.close()
+
+
+@links.command("archive-queue")
+@click.option("--batch-size", "-n", type=int, default=10, help="Number of links to archive in this batch")
+@click.option("--delay", "-d", type=int, default=60, help="Delay in seconds between archives (default: 60)")
+@click.option("--service", type=click.Choice(["archivebox", "local", "ia"]), default="archivebox",
+              help="Which archiving service to use")
+@click.option("--source", help="Only archive links from specific source (e.g., telegram_export)")
+def archive_queue(batch_size: int, delay: int, service: str, source: str):
+    """Gradually archive links from the queue (safe for cron).
+
+    Processes unarchived links in small batches with delays to avoid rate limiting.
+    Designed to be run periodically via cron for gradual background archiving.
+
+    Examples:
+        # Archive 10 links with 60s delays (safe default)
+        holo links archive-queue
+
+        # Faster batch: 20 links with 30s delays
+        holo links archive-queue --batch-size 20 --delay 30
+
+        # Only archive telegram imports
+        holo links archive-queue --source telegram_export
+
+    Cron example (every hour):
+        0 * * * * cd /home/holocene/holocene && venv/bin/holo links archive-queue
+    """
+    import time
+    import random
+    from ..storage.archiving import ArchivingService
+    from ..integrations.local_archive import LocalArchiveClient
+    from ..integrations.archivebox import ArchiveBoxClient
+    from ..integrations.internet_archive import InternetArchiveClient
+
+    config = load_config()
+    db = Database(config.db_path)
+
+    # Initialize archiving clients based on service choice
+    local_client = None
+    ia_client = None
+    archivebox_client = None
+
+    if service == "archivebox":
+        if getattr(config.integrations, 'archivebox_enabled', False):
+            archivebox_client = ArchiveBoxClient(
+                ssh_host=config.integrations.archivebox_host,
+                ssh_user=config.integrations.archivebox_user,
+                data_dir=config.integrations.archivebox_data_dir,
+            )
+        else:
+            console.print("[red]Error:[/red] ArchiveBox not enabled in config")
+            db.close()
+            return
+    elif service == "local":
+        local_client = LocalArchiveClient()
+    elif service == "ia":
+        if getattr(config.integrations, 'internet_archive_enabled', False):
+            ia_client = InternetArchiveClient(
+                access_key=config.integrations.ia_access_key,
+                secret_key=config.integrations.ia_secret_key,
+                rate_limit=getattr(config.integrations, 'ia_rate_limit_seconds', 2.0)
+            )
+        else:
+            console.print("[red]Error:[/red] Internet Archive not enabled in config")
+            db.close()
+            return
+
+    archiving = ArchivingService(
+        db=db,
+        local_client=local_client,
+        ia_client=ia_client,
+        archivebox_client=archivebox_client
+    )
+
+    # Get unarchived links
+    filters = {"archived": False}
+    if source:
+        filters["source"] = source
+
+    # Get links without any successful archive snapshots
+    cursor = db.conn.cursor()
+    query = """
+        SELECT l.id, l.url, l.source
+        FROM links l
+        LEFT JOIN archive_snapshots a ON l.id = a.link_id AND a.status = 'success'
+        WHERE a.id IS NULL
+    """
+    params = []
+
+    if source:
+        query += " AND l.source = ?"
+        params.append(source)
+
+    query += " LIMIT ?"
+    params.append(batch_size)
+
+    cursor.execute(query, params)
+    links_to_archive = [{'id': row[0], 'url': row[1], 'source': row[2]} for row in cursor.fetchall()]
+
+    if not links_to_archive:
+        console.print("[green]✓[/green] No unarchived links in queue")
+        db.close()
+        return
+
+    console.print(f"[cyan]Processing {len(links_to_archive)} link(s) with {delay}s delays[/cyan]")
+    console.print(f"[dim]Service: {service}[/dim]\n")
+
+    success_count = 0
+    error_count = 0
+
+    for i, link in enumerate(links_to_archive, 1):
+        console.print(f"[{i}/{len(links_to_archive)}] {link['url'][:60]}...")
+
+        try:
+            # Archive using selected service
+            result = archiving.archive_url(
+                link_id=link['id'],
+                url=link['url'],
+                local_format='monolith' if service == 'local' else None,
+                use_ia=(service == 'ia'),
+                use_archivebox=(service == 'archivebox')
+            )
+
+            if result.get('success'):
+                console.print(f"  [green]✓[/green] Archived")
+                success_count += 1
+            else:
+                errors = ', '.join(result.get('errors', ['Unknown error']))
+                console.print(f"  [red]✗[/red] {errors}")
+                error_count += 1
+
+        except Exception as e:
+            console.print(f"  [red]✗[/red] Exception: {e}")
+            error_count += 1
+
+        # Delay between archives (except after last one)
+        if i < len(links_to_archive):
+            # Add random jitter (±20%) to avoid patterns
+            jitter = random.uniform(0.8, 1.2)
+            actual_delay = int(delay * jitter)
+            console.print(f"  [dim]Waiting {actual_delay}s...[/dim]")
+            time.sleep(actual_delay)
+
+    # Summary
+    console.print(f"\n[bold]Summary:[/bold]")
+    console.print(f"[green]✓[/green] Success: {success_count}")
+    console.print(f"[red]✗[/red] Errors: {error_count}")
+    console.print(f"\n[dim]Remaining: Check with 'holo links list --unarchived'[/dim]")
 
     db.close()
 
