@@ -12,6 +12,7 @@ import json
 
 from holocene.integrations.local_archive import LocalArchiveClient, ArchiveFormat
 from holocene.integrations.internet_archive import InternetArchiveClient
+from holocene.integrations.archivebox import ArchiveBoxClient
 from holocene.storage.database import Database
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class ArchivingService:
         db: Database,
         local_client: Optional[LocalArchiveClient] = None,
         ia_client: Optional[InternetArchiveClient] = None,
+        archivebox_client: Optional[ArchiveBoxClient] = None,
     ):
         """
         Initialize archiving service.
@@ -33,10 +35,12 @@ class ArchivingService:
             db: Database instance
             local_client: Local archive client (will create if None)
             ia_client: Internet Archive client (optional)
+            archivebox_client: ArchiveBox client (optional)
         """
         self.db = db
         self.local = local_client or LocalArchiveClient()
         self.ia = ia_client
+        self.archivebox = archivebox_client
 
     def archive_url(
         self,
@@ -45,6 +49,7 @@ class ArchivingService:
         local_format: Optional[ArchiveFormat] = "monolith",
         use_ia: bool = True,
         force_ia: bool = False,
+        use_archivebox: bool = False,
     ) -> Dict[str, Any]:
         """
         Archive a URL using configured services.
@@ -52,7 +57,8 @@ class ArchivingService:
         Strategy:
         1. Try local archiving first (fast, always works offline)
         2. Try Internet Archive (slower, requires internet)
-        3. Record all results in archive_snapshots table
+        3. Try ArchiveBox (comprehensive, handles lazy-loading)
+        4. Record all results in archive_snapshots table
 
         Args:
             link_id: Link ID in database
@@ -60,6 +66,7 @@ class ArchivingService:
             local_format: Format for local archive ('monolith' or 'warc', None to skip)
             use_ia: Whether to also archive to Internet Archive
             force_ia: Force new IA snapshot even if already archived
+            use_archivebox: Whether to also archive to ArchiveBox
 
         Returns:
             Dict with results for each service
@@ -175,6 +182,62 @@ class ArchivingService:
         elif use_ia and not self.ia:
             logger.warning("[Archiving] IA archiving requested but no IA client configured")
             results["errors"].append("IA client not configured")
+
+        # 3. ArchiveBox
+        if use_archivebox and self.archivebox:
+            logger.info(f"[Archiving] Starting ArchiveBox for {url}")
+
+            ab_result = self.archivebox.archive_url(url, timeout=180)
+
+            if ab_result["status"] == "archived":
+                # Record success
+                metadata = {
+                    "snapshot_id": ab_result.get("snapshot_id"),
+                }
+
+                snapshot_id = self.db.add_archive_snapshot(
+                    link_id=link_id,
+                    service="archivebox",
+                    snapshot_url=ab_result.get("archive_url"),
+                    archive_date=ab_result.get("archive_date"),
+                    status="success",
+                    metadata=json.dumps(metadata),
+                )
+
+                results["services"]["archivebox"] = {
+                    "status": "success",
+                    "snapshot_id": snapshot_id,
+                    "archive_url": ab_result.get("archive_url"),
+                    "archivebox_snapshot_id": ab_result.get("snapshot_id"),
+                }
+                results["success"] = True
+
+                logger.info(
+                    f"[Archiving] ArchiveBox successful: {ab_result.get('archive_url', 'N/A')}"
+                )
+
+            else:
+                # Record failure
+                error_msg = ab_result.get("error", "Unknown error")
+
+                failure = self.db.record_snapshot_failure(
+                    link_id=link_id,
+                    service="archivebox",
+                    error_message=error_msg,
+                )
+
+                results["services"]["archivebox"] = {
+                    "status": "failed",
+                    "error": error_msg,
+                    "attempts": failure["attempts"],
+                }
+                results["errors"].append(f"ArchiveBox failed: {error_msg}")
+
+                logger.error(f"[Archiving] ArchiveBox failed: {error_msg}")
+
+        elif use_archivebox and not self.archivebox:
+            logger.warning("[Archiving] ArchiveBox requested but no client configured")
+            results["errors"].append("ArchiveBox client not configured")
 
         return results
 
@@ -310,6 +373,11 @@ class ArchivingService:
                 "available": self.ia is not None,
                 "authenticated": self.ia and (self.ia.access_key is not None),
             },
+            "archivebox": (
+                self.archivebox.get_server_info()
+                if self.archivebox
+                else {"available": False}
+            ),
         }
 
         return info

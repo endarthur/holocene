@@ -20,6 +20,7 @@ from pathlib import Path
 from holocene.core import Plugin, Message
 from holocene.storage.archiving import ArchivingService
 from holocene.integrations.local_archive import LocalArchiveClient
+from holocene.integrations.archivebox import ArchiveBoxClient
 from holocene.integrations.internet_archive import InternetArchiveClient
 
 try:
@@ -147,7 +148,7 @@ class TelegramBotPlugin(Plugin):
         self.logger.info("Telegram bot thread started")
 
     def _init_archiving_service(self):
-        """Initialize the archiving service with local and IA clients."""
+        """Initialize the archiving service with local, IA, and ArchiveBox clients."""
         # Create local archive client
         local_client = LocalArchiveClient()
 
@@ -164,11 +165,23 @@ class TelegramBotPlugin(Plugin):
         else:
             self.logger.info("Archiving service initialized with local only (IA disabled)")
 
+        # Create ArchiveBox client if enabled
+        archivebox_client = None
+        if hasattr(self.core.config, 'integrations') and \
+           getattr(self.core.config.integrations, 'archivebox_enabled', False):
+            archivebox_client = ArchiveBoxClient(
+                ssh_host=getattr(self.core.config.integrations, 'archivebox_host', '192.168.1.102'),
+                ssh_user=getattr(self.core.config.integrations, 'archivebox_user', 'holocene'),
+                data_dir=getattr(self.core.config.integrations, 'archivebox_data_dir', '/opt/archivebox/data'),
+            )
+            self.logger.info("ArchiveBox client initialized")
+
         # Create unified archiving service
         self.archiving = ArchivingService(
             db=self.core.db,
             local_client=local_client,
-            ia_client=ia_client
+            ia_client=ia_client,
+            archivebox_client=archivebox_client
         )
 
         # Log available tools
@@ -179,6 +192,8 @@ class TelegramBotPlugin(Plugin):
             self.logger.info("Local archiving: wget available")
         if not tool_info['local']['monolith']['available'] and not tool_info['local']['wget']['available']:
             self.logger.warning("No local archiving tools available - install monolith or wget")
+        if tool_info['archivebox']['available']:
+            self.logger.info(f"ArchiveBox available: {tool_info['archivebox'].get('web_ui', 'N/A')}")
 
     def _start_bot(self):
         """Start the bot (runs in dedicated thread).
