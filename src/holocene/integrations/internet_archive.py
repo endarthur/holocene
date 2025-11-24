@@ -54,7 +54,16 @@ class InternetArchiveClient(BaseAPIClient):
         Returns:
             Dict with 'available' (bool), 'url' (str), and optional 'timestamp' and 'snapshot_url'
         """
-        api_url = f"/wayback/available?url={url}"
+        # Normalize URL for IA's availability API - strip trailing slash from domain-only URLs
+        # IA treats "example.com/" and "example.com" as different, but we want to check both
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        check_url = url
+        if parsed.path in ('/', '') and not parsed.query and not parsed.fragment:
+            # Domain-only URL with trailing slash - remove it
+            check_url = url.rstrip('/')
+
+        api_url = f"/wayback/available?url={check_url}"
 
         try:
             import logging
