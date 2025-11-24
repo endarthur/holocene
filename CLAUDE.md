@@ -111,12 +111,17 @@ Main command groups (60+ commands total):
 - `holo ask` - AI Librarian for natural language queries (NEW - Nov 21, 2025)
 - `holo books` - Book library management (search, add, list, enrich, classify)
 - `holo papers` - Research paper management (arXiv, Crossref, OpenAlex)
-- `holo links` - Link and bookmark management
+- `holo links` - Link and bookmark management with Internet Archive integration
+  - `scan` - Extract URLs from activities/journel
+  - `import-bookmarks` - Import browser bookmarks
+  - `archive` - Archive to Internet Archive with retry/backoff
+  - `auto-archive` - Automated scan + archive for cron (NEW - Nov 23, 2025)
 - `holo wikipedia` - Wikipedia article search
 - `holo research` - Research session management
 - `holo print` - Thermal printing commands
 - `holo config` - Configuration management (8+ subcommands)
 - `holo stats` - Analytics and collection statistics (8+ subcommands)
+  - `archives` - Archive coverage, link health, trust tiers (NEW - Nov 23, 2025)
 - `holo inventory` - Inventory item management
 - `holo mercadolivre` - Mercado Livre favorites integration (10+ commands)
 - `holo daemon` - Background service management
@@ -514,6 +519,12 @@ Add to `[all]` group if it should be included in full server installs.
 - ✅ Academic papers (arXiv, Crossref, OpenAlex, Unpaywall - 19 papers)
 - ✅ Wikipedia integration (REST API with caching)
 - ✅ Link management (1,160+ links with trust tiers, bookmark import)
+- ✅ **"Full Gwern" archiving Phase 1** - Link preservation and rot prevention
+  - Internet Archive integration (auto-archive, exponential backoff)
+  - Telegram bot immediate archiving (instant preservation on mobile capture)
+  - Archive statistics dashboard (`holo stats archives`)
+  - Trust tier classification (pre-llm/early-llm/recent)
+  - URL unwrapping (shortener resolution)
 - ✅ LLM integrations (DeepSeek V3, Qwen Coder via NanoGPT)
 - ✅ AI Librarian (`holo ask`) - Natural language collection queries
 - ✅ CLI interface (60+ commands across 12 groups)
@@ -540,12 +551,13 @@ Add to `[all]` group if it should be included in full server installs.
 - ⏳ Obsidian vault sync
 - ⏳ Home Assistant integration
 
-See `docs/ROADMAP.md` for detailed roadmap and implementation status.
+See `docs/ROADMAP.md` and `docs/ARCHIVING_ROADMAP.md` for detailed roadmaps.
 
 ## Documentation
 
 - **Design Doc:** `holocene_design.md` - Comprehensive system design
 - **Thermal Printer:** `docs/thermal_printer_architecture.md` - Printing architecture
+- **Archiving Roadmap:** `docs/ARCHIVING_ROADMAP.md` - "Full Gwern" archiving implementation plan (Phase 1 ✅)
 - **This File:** `CLAUDE.md` - Quick reference for Claude sessions
 
 ## Tips for Claude

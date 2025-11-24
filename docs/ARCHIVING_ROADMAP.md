@@ -98,6 +98,212 @@
 - Telegram immediate archiving
 - Statistics dashboard
 
+#### Phase 1: Implementation Summary ✅ **COMPLETED**
+
+**What Was Built:**
+
+**1. `holo links auto-archive` - Automated Archiving Command**
+
+Location: `src/holocene/cli/main.py:877-1057`
+
+Single command combining scanning and archiving for cron automation:
+
+```bash
+# Basic usage (default: scan today, archive up to 50 links)
+holo links auto-archive
+
+# Custom limit
+holo links auto-archive --limit 100
+
+# Scan different periods
+holo links auto-archive --scan-period week   # Scan this week's activities
+holo links auto-archive --scan-period all    # Scan all activities
+
+# Skip scanning (only archive existing links)
+holo links auto-archive --no-scan
+```
+
+**Features:**
+- Step 1: Scans activities and journel for new links (configurable period)
+- Step 2: Archives unarchived links to Internet Archive
+- Respects exponential backoff for previously failed links
+- Rate-limited to avoid overwhelming IA servers
+- Suitable for automated cron jobs
+
+**Cron Setup (holocene-rei):**
+```bash
+# Daily at 3 AM - scan today's activity and archive up to 50 links
+0 3 * * * /usr/bin/holo links auto-archive --limit 50 >> /var/log/holocene/archive.log 2>&1
+
+# Or weekly scan on Sundays
+0 3 * * 0 /usr/bin/holo links auto-archive --scan-period week --limit 100 >> /var/log/holocene/archive.log 2>&1
+```
+
+**Implementation Notes:**
+- Uses existing `InternetArchiveClient` from `integrations/internet_archive.py`
+- Uses existing `extract_urls()` and `should_archive_url()` from `core/link_utils.py`
+- Database methods: `db.insert_link()`, `db.update_link_archive_status()`, `db.record_archive_failure()`
+- Exponential backoff logic handled by existing `db.record_archive_failure()` (1, 2, 4, 8... 30 days max)
+
+---
+
+**2. Telegram Bot Immediate Archiving**
+
+Location: `src/holocene/plugins/telegram_bot.py:971-1085`
+
+When user sends URL to Telegram bot (eunice device), immediately archive to IA:
+
+**Flow:**
+1. User sends URL to bot (e.g., `https://example.com/article`)
+2. Bot saves link to database (unwrapping shorteners automatically)
+3. **Immediately archives to Internet Archive** (don't wait for daily scan)
+4. Updates database with archive status and trust tier
+5. Sends notification with result
+
+**Notification Examples:**
+
+```
+✅ Link Added
+
+https://example.com/article
+
+Link ID: 1234
+Source: Telegram
+
+📦 Archived to IA
+Snapshot: https://web.archive.org/web/20251123/example.com
+```
+
+```
+✅ Link Added
+
+🔗 Original: https://bit.ly/3abc123
+📍 Unwrapped: https://realsite.com/actual-page
+
+Link ID: 1235
+Source: Telegram
+
+📦 Already archived (pre-llm)
+Snapshot: https://web.archive.org/web/20180415/realsite.com
+```
+
+```
+✅ Link Added
+
+https://brokensite.com/page
+
+Link ID: 1236
+Source: Telegram
+
+⚠️ Archive failed (will retry later)
+```
+
+**Implementation Notes:**
+- Integration point: `_add_link_from_url()` method in `TelegramBotPlugin`
+- Uses same `InternetArchiveClient` as CLI commands
+- Archives immediately in background thread (doesn't block bot responses)
+- Failure handling: Records failure with `db.record_archive_failure()` for exponential backoff
+- Trust tier calculation: Uses `calculate_trust_tier(archive_date)` from `storage/database.py`
+- URL unwrapping: Handled automatically by `db.insert_link()` calling `_unwrap_url()`
+
+---
+
+**3. `holo stats archives` - Archive Statistics Dashboard**
+
+Location: `src/holocene/cli/main.py:3165-3337`
+
+Visual dashboard showing comprehensive archiving metrics:
+
+```bash
+holo stats archives
+```
+
+**Output Example:**
+```
+╭──────────────── Archive Statistics ────────────────╮
+│                                                     │
+│ Total Links: 1,160                                  │
+│                                                     │
+│ Coverage:                                           │
+│   Internet Archive:     847 ( 73.0%)  ██████████████████████░░░░░░░░   │
+│   Failed:                23 (  2.0%)  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   │
+│   Pending:              290 ( 25.0%)  ███████░░░░░░░░░░░░░░░░░░░░░░░   │
+│                                                     │
+│ Link Health:                                        │
+│   Alive:                987 ( 85.1%)                   │
+│   Dead:                  23 (  2.0%)                   │
+│   Unchecked:            150 ( 12.9%)                   │
+│                                                     │
+│ Trust Tier Distribution (Archived):                │
+│   Pre-LLM:              234 (high value)                │
+│   Early-LLM:            412 (medium value)             │
+│   Recent:               201 (low value)                │
+│                                                     │
+│ Recent Archiving Activity (last 7 days):           │
+│   2025-11-23:   12 archived                         │
+│   2025-11-22:    8 archived                         │
+│   2025-11-21:   15 archived                         │
+│                                                     │
+│ Last Archive: 2 hours ago                         │
+╰─────────────────────────────────────────────────────╯
+
+Tip: Run holo links auto-archive to archive 290 pending link(s)
+```
+
+**Metrics Displayed:**
+- **Coverage**: Archived/Failed/Pending with ASCII progress bars
+- **Link Health**: Alive/Dead/Unchecked percentages (from link status checker plugin)
+- **Trust Tiers**: Distribution of archived links by historical value
+  - Pre-LLM (< 2022-11-30): High value, rare pre-ChatGPT content
+  - Early-LLM (2022-11-30 to 2024-01-01): Medium value
+  - Recent (> 2024-01-01): Low value (can likely re-archive)
+- **Recent Activity**: Archives per day for last 7 days
+- **Last Archive**: Time since most recent archiving
+- **Actionable Tips**: Suggests commands to run based on current state
+
+**Implementation Notes:**
+- Pure SQL queries on `links` table (no API calls)
+- Uses box-drawing characters (╭─╮│╰╯) for clean ASCII art
+- Progress bars use block characters (█░)
+- Rich library for colored output
+- Handles empty states gracefully (no links, no archived links, etc.)
+
+---
+
+**Integration with Existing Infrastructure:**
+
+All Phase 1 implementations leverage existing code:
+
+✅ **Internet Archive Client** (`integrations/internet_archive.py`)
+- `save_url()` - Submit URL for archiving
+- `check_availability()` - Check if URL already archived
+- Rate limiting (0.5 req/sec default)
+- Exponential backoff on failures
+
+✅ **Database Schema** (no changes needed!)
+- `links` table already has all required columns:
+  - `archived`, `archive_url`, `archive_date`
+  - `archive_attempts`, `last_archive_error`, `next_retry_after`
+  - `trust_tier`, `status` (from link status checker)
+
+✅ **URL Utilities** (`core/link_utils.py`)
+- `extract_urls()` - Extract URLs from text
+- `unwrap_url()` - Follow redirects, unwrap shorteners
+- `should_archive_url()` - Filter out localhost, private IPs
+
+✅ **Database Methods** (`storage/database.py`)
+- `insert_link()` - Auto-unwraps URLs via `_unwrap_url()`
+- `update_link_archive_status()` - Mark as archived
+- `record_archive_failure()` - Exponential backoff (1, 2, 4, 8... 30 days)
+- `get_links_ready_for_retry()` - Get failed links past backoff period
+- `calculate_trust_tier()` - Classify by archive date
+
+**No Breaking Changes:**
+- Existing `holo links scan` and `holo links archive` commands unchanged
+- Auto-archive is additive (combines their functionality)
+- Telegram bot maintains backwards compatibility
+- Stats command is new, doesn't affect existing stats
+
 ---
 
 ### Phase 2: Local Snapshots (Week 2-3)
