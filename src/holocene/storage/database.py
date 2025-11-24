@@ -1245,17 +1245,19 @@ class Database:
         snapshot_url: str = None,
         archive_date: str = None,
         status: str = 'success',
-        error_message: str = None
+        error_message: str = None,
+        metadata: str = '{}'
     ) -> int:
         """Add a new archive snapshot for a link.
 
         Args:
             link_id: Link ID
-            service: Service name ('internet_archive', 'archive_is', 'archive_today')
-            snapshot_url: URL of the archived snapshot
+            service: Service name ('internet_archive', 'local_monolith', 'local_warc', etc.)
+            snapshot_url: URL of the archived snapshot (or local file path)
             archive_date: Service's archive date/timestamp
             status: 'success', 'failed', or 'pending'
             error_message: Error message if failed
+            metadata: JSON string with additional metadata
 
         Returns:
             Snapshot ID
@@ -1266,9 +1268,9 @@ class Database:
         cursor.execute("""
             INSERT INTO archive_snapshots (
                 link_id, service, snapshot_url, archive_date, status,
-                error_message, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (link_id, service, snapshot_url, archive_date, status, error_message, now, now))
+                error_message, metadata, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (link_id, service, snapshot_url, archive_date, status, error_message, metadata, now, now))
 
         self.conn.commit()
         return cursor.lastrowid

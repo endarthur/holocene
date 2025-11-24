@@ -18,6 +18,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from holocene.core import Plugin, Message
+from holocene.storage.archiving import ArchivingService
+from holocene.integrations.local_archive import LocalArchiveClient
+from holocene.integrations.internet_archive import InternetArchiveClient
 
 try:
     from telegram import Update
@@ -60,6 +63,9 @@ class TelegramBotPlugin(Plugin):
         # Track login messages for auto-expiry/updates
         # Format: {token: {'message': message_obj, 'expires_at': datetime, 'user_id': int}}
         self.login_messages = {}
+
+        # Initialize archiving service (local + IA)
+        self._init_archiving_service()
 
         if not TELEGRAM_AVAILABLE:
             self.logger.warning("python-telegram-bot not installed - bot will be disabled")
@@ -138,6 +144,40 @@ class TelegramBotPlugin(Plugin):
         )
         self.bot_thread.start()
         self.logger.info("Telegram bot thread started")
+
+    def _init_archiving_service(self):
+        """Initialize the archiving service with local and IA clients."""
+        # Create local archive client
+        local_client = LocalArchiveClient()
+
+        # Create IA client if enabled
+        ia_client = None
+        if hasattr(self.core.config, 'integrations') and \
+           getattr(self.core.config.integrations, 'internet_archive_enabled', False):
+            ia_client = InternetArchiveClient(
+                access_key=self.core.config.integrations.ia_access_key,
+                secret_key=self.core.config.integrations.ia_secret_key,
+                rate_limit=getattr(self.core.config.integrations, 'ia_rate_limit', 0.5)
+            )
+            self.logger.info("Archiving service initialized with local + Internet Archive")
+        else:
+            self.logger.info("Archiving service initialized with local only (IA disabled)")
+
+        # Create unified archiving service
+        self.archiving = ArchivingService(
+            db=self.core.db,
+            local_client=local_client,
+            ia_client=ia_client
+        )
+
+        # Log available tools
+        tool_info = self.archiving.get_tool_info()
+        if tool_info['local']['monolith']['available']:
+            self.logger.info("Local archiving: monolith available")
+        if tool_info['local']['wget']['available']:
+            self.logger.info("Local archiving: wget available")
+        if not tool_info['local']['monolith']['available'] and not tool_info['local']['wget']['available']:
+            self.logger.warning("No local archiving tools available - install monolith or wget")
 
     def _start_bot(self):
         """Start the bot (runs in dedicated thread).
@@ -727,55 +767,61 @@ This link will grant you access to:
             parse_mode='Markdown'
         )
 
-        # Force archive in background
+        # Force archive in background (local + IA)
         def force_archive():
-            if not hasattr(self.core.config, 'integrations') or \
-               not getattr(self.core.config.integrations, 'internet_archive_enabled', False):
-                return {'status': 'error', 'message': 'Internet Archive integration not enabled'}
-
-            from ..integrations import InternetArchiveClient
-
-            ia = InternetArchiveClient(
-                access_key=self.core.config.integrations.ia_access_key,
-                secret_key=self.core.config.integrations.ia_secret_key,
-                rate_limit=getattr(self.core.config.integrations, 'ia_rate_limit', 0.5)
+            # Archive with unified service (local + force IA snapshot)
+            result = self.archiving.archive_url(
+                link_id=link[0],
+                url=actual_url,
+                local_format='monolith',  # Always create local archive
+                use_ia=True,
+                force_ia=True  # Force new IA snapshot
             )
 
-            result = ia.save_url(actual_url, force=True)  # Force new snapshot
-
-            # Update database
-            if result.get('status') in ('archived', 'already_archived'):
-                db.update_link_archive_status(
-                    url=actual_url,
-                    archived=True,
-                    archive_url=result.get('snapshot_url'),
-                    archive_date=result.get('archive_date')
-                )
+            # Update old columns for backward compatibility
+            if result.get('success') and 'internet_archive' in result.get('services', {}):
+                ia_service = result['services']['internet_archive']
+                if ia_service.get('status') == 'success':
+                    db.update_link_archive_status(
+                        url=actual_url,
+                        archived=True,
+                        archive_url=ia_service.get('snapshot_url'),
+                        archive_date=None  # Stored in archive_snapshots now
+                    )
 
             return result
 
         try:
             result = await asyncio.get_event_loop().run_in_executor(None, force_archive)
 
-            status = result.get('status')
-            if status == 'archived':
-                snapshot_url = result.get('snapshot_url', 'N/A')
-                msg = (
-                    f"✅ *New Snapshot Created*\n\n"
-                    f"`{actual_url}`\n\n"
-                    f"[View snapshot ↗]({snapshot_url})"
-                )
-            elif status == 'already_archived':
-                snapshot_url = result.get('snapshot_url', 'N/A')
-                msg = (
-                    f"ℹ️ *Already Archived*\n\n"
-                    f"`{actual_url}`\n\n"
-                    f"Internet Archive reported this URL was already archived.\n"
-                    f"[View snapshot ↗]({snapshot_url})"
-                )
+            if result.get('success'):
+                # Build success message with all services
+                msg = f"✅ *New Snapshot Created*\n\n`{actual_url}`\n\n"
+
+                services = result.get('services', {})
+
+                # Local archive
+                if 'local_monolith' in services:
+                    local = services['local_monolith']
+                    if local.get('status') == 'success':
+                        file_size = local.get('file_size', 0)
+                        size_kb = file_size // 1024
+                        msg += f"💾 Local: {size_kb:,} KB\n"
+
+                # Internet Archive
+                if 'internet_archive' in services:
+                    ia = services['internet_archive']
+                    if ia.get('status') == 'success':
+                        snapshot_url = ia.get('snapshot_url', 'N/A')
+                        was_cached = ia.get('already_archived', False)
+                        status_icon = "📦" if was_cached else "🌐"
+                        msg += f"{status_icon} Internet Archive: [View ↗]({snapshot_url})\n"
+
             else:
-                error_msg = result.get('message', 'Unknown error')
-                msg = f"❌ *Archive Failed*\n\n`{actual_url}`\n\n{error_msg}"
+                # Failed
+                errors = result.get('errors', ['Unknown error'])
+                error_text = '\n'.join(errors)
+                msg = f"❌ *Archive Failed*\n\n`{actual_url}`\n\n{error_text}"
 
             await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
             self.messages_sent += 1
@@ -1135,44 +1181,36 @@ This link will grant you access to:
             saved_link = cursor.fetchone()
             actual_url = saved_link['url'] if saved_link else url
 
-            # Immediate archiving to Internet Archive (Phase 1: Full Gwern)
-            archive_status = None
+            # Immediate archiving (Phase 2: Local + Internet Archive)
             archive_result = None
-            if hasattr(self.core.config, 'integrations') and \
-               getattr(self.core.config.integrations, 'internet_archive_enabled', False):
-                try:
-                    from ..integrations import InternetArchiveClient
+            try:
+                self.logger.info(f"Archiving link (local + IA): {actual_url}")
 
-                    ia = InternetArchiveClient(
-                        access_key=self.core.config.integrations.ia_access_key,
-                        secret_key=self.core.config.integrations.ia_secret_key,
-                        rate_limit=getattr(self.core.config.integrations, 'ia_rate_limit', 0.5)
-                    )
+                # Archive with unified service (local + IA)
+                archive_result = self.archiving.archive_url(
+                    link_id=link_id,
+                    url=actual_url,
+                    local_format='monolith',  # Fast, browser-viewable
+                    use_ia=True,
+                    force_ia=False  # Don't force if already archived
+                )
 
-                    self.logger.info(f"Archiving link to Internet Archive: {actual_url}")
-                    archive_result = ia.save_url(actual_url, force=False)
-                    archive_status = archive_result.get('status')
-
-                    # Update database with archive info
-                    if archive_status in ('archived', 'already_archived'):
+                # Update old columns for backward compatibility
+                if archive_result.get('success') and 'internet_archive' in archive_result.get('services', {}):
+                    ia_service = archive_result['services']['internet_archive']
+                    if ia_service.get('status') == 'success':
                         db.update_link_archive_status(
                             url=actual_url,
                             archived=True,
-                            archive_url=archive_result.get('snapshot_url'),
-                            archive_date=archive_result.get('archive_date')
+                            archive_url=ia_service.get('snapshot_url'),
+                            archive_date=None  # Stored in archive_snapshots now
                         )
-                        self.logger.info(f"Link archived: {archive_status}")
-                    else:
-                        # Record failure
-                        error_msg = archive_result.get('error') or archive_result.get('message') or 'Unknown error'
-                        db.record_archive_failure(actual_url, error_msg)
-                        self.logger.warning(f"Archive failed: {error_msg}")
 
-                except Exception as e:
-                    self.logger.error(f"Failed to archive link: {e}", exc_info=True)
-                    archive_status = 'error'
-            else:
-                self.logger.debug("Internet Archive integration not enabled, skipping immediate archiving")
+                self.logger.info(f"Archiving complete: success={archive_result.get('success')}")
+
+            except Exception as e:
+                self.logger.error(f"Failed to archive link: {e}", exc_info=True)
+                archive_result = {'success': False, 'errors': [str(e)]}
 
             # Build notification message
             msg = f"✅ *Link Added*\n\n"
@@ -1190,38 +1228,56 @@ This link will grant you access to:
             msg += f"📱 Source: Telegram\n"
 
             # Add archive status to notification
-            if archive_status == 'archived':
-                msg += f"\n━━━━━━━━━━━━━━━━\n"
-                msg += f"📦 *Archived to IA*\n"
-                snapshot_url = archive_result.get('snapshot_url', '')
-                msg += f"[View snapshot ↗]({snapshot_url})"
-            elif archive_status == 'already_archived':
-                from ..storage.database import calculate_trust_tier
-                archive_date = archive_result.get('archive_date')
-                msg += f"\n━━━━━━━━━━━━━━━━\n"
-                if archive_date:
-                    trust_tier = calculate_trust_tier(archive_date)
-                    # Format date nicely
-                    try:
-                        if len(archive_date) >= 8:
-                            year = archive_date[:4]
-                            month = archive_date[4:6]
-                            day = archive_date[6:8]
-                            date_str = f"{year}-{month}-{day}"
-                        else:
-                            date_str = archive_date
-                    except:
-                        date_str = archive_date
+            if archive_result and archive_result.get('success'):
+                services = archive_result.get('services', {})
 
-                    msg += f"📦 *Already archived* ({trust_tier})\n"
-                    msg += f"📅 Snapshot: {date_str}\n"
-                    snapshot_url = archive_result.get('snapshot_url', '')
-                    msg += f"[View snapshot ↗]({snapshot_url})"
-                else:
-                    msg += f"📦 *Already archived*"
-            elif archive_status == 'error' or (archive_result and archive_status not in ('archived', 'already_archived')):
+                # Local archive
+                if 'local_monolith' in services and services['local_monolith'].get('status') == 'success':
+                    local = services['local_monolith']
+                    file_size = local.get('file_size', 0)
+                    size_kb = file_size // 1024
+                    msg += f"\n━━━━━━━━━━━━━━━━\n"
+                    msg += f"💾 *Local archive*: {size_kb:,} KB\n"
+
+                # Internet Archive
+                if 'internet_archive' in services:
+                    ia = services['internet_archive']
+                    if ia.get('status') == 'success':
+                        was_cached = ia.get('already_archived', False)
+                        snapshot_url = ia.get('snapshot_url', '')
+
+                        if not 'local_monolith' in services:  # Add separator if not already added
+                            msg += f"\n━━━━━━━━━━━━━━━━\n"
+
+                        if was_cached:
+                            # Extract date from snapshot URL for trust tier
+                            from ..storage.database import calculate_trust_tier
+                            import re
+                            date_match = re.search(r'/web/(\d{14})/', snapshot_url)
+                            if date_match:
+                                archive_date = date_match.group(1)
+                                trust_tier = calculate_trust_tier(archive_date)
+                                # Format date
+                                try:
+                                    year, month, day = archive_date[:4], archive_date[4:6], archive_date[6:8]
+                                    date_str = f"{year}-{month}-{day}"
+                                except:
+                                    date_str = archive_date
+                                msg += f"📦 *Already archived* ({trust_tier})\n"
+                                msg += f"📅 Snapshot: {date_str}\n"
+                            else:
+                                msg += f"📦 *Already archived*\n"
+                        else:
+                            msg += f"🌐 *Archived to IA*\n"
+
+                        msg += f"[View snapshot ↗]({snapshot_url})"
+
+            elif archive_result and not archive_result.get('success'):
                 msg += f"\n━━━━━━━━━━━━━━━━\n"
                 msg += f"⚠️ *Archive failed*\n"
+                errors = archive_result.get('errors', [])
+                if errors:
+                    msg += f"{errors[0][:80]}\n"
                 msg += f"Will retry with exponential backoff"
 
             # Edit the processing message if provided, otherwise send new notification
