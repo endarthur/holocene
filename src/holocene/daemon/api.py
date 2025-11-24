@@ -20,6 +20,7 @@ Endpoints:
 
 import logging
 import threading
+import requests
 from typing import Optional
 from datetime import datetime
 
@@ -241,6 +242,9 @@ class APIServer:
         self.app.route("/mono/<int:link_id>/first", methods=["GET"])(self._mono_first)
         self.app.route("/mono/<int:link_id>/<int:index>", methods=["GET"])(self._mono_index)
         self.app.route("/snapshot/<int:snapshot_id>", methods=["GET"])(self._snapshot_by_id)
+
+        # ArchiveBox proxy endpoints
+        self.app.route("/box/<snapshot_id>", methods=["GET"])(self._box_snapshot)
 
         # Error handlers
         self.app.errorhandler(404)(self._not_found)
@@ -1749,6 +1753,62 @@ class APIServer:
 
         except Exception as e:
             logger.error(f"Error serving snapshot {snapshot_id}: {e}", exc_info=True)
+            return abort(500, description=str(e))
+
+    @require_auth
+    def _box_snapshot(self, snapshot_id: str):
+        """GET /box/<snapshot_id> - Proxy ArchiveBox snapshot from archivebox-rei.
+
+        Args:
+            snapshot_id: ArchiveBox snapshot ID (timestamp like 1764022942.528686)
+        """
+        try:
+            # Get ArchiveBox config
+            archivebox_host = getattr(self.core.config.integrations, 'archivebox_host', '192.168.1.102')
+            archivebox_port = 8000
+
+            # ArchiveBox URL
+            archivebox_url = f"http://{archivebox_host}:{archivebox_port}/archive/{snapshot_id}/"
+
+            logger.info(f"Proxying ArchiveBox snapshot: {archivebox_url}")
+
+            # Make request to ArchiveBox
+            response = requests.get(archivebox_url, timeout=30, stream=True)
+
+            if response.status_code == 404:
+                return abort(404, description=f"ArchiveBox snapshot {snapshot_id} not found")
+            elif response.status_code != 200:
+                return abort(response.status_code, description=f"ArchiveBox returned status {response.status_code}")
+
+            # Proxy the response
+            from flask import Response
+
+            # Get content type from ArchiveBox response
+            content_type = response.headers.get('Content-Type', 'text/html')
+
+            # Stream the response
+            def generate():
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        yield chunk
+
+            return Response(
+                generate(),
+                status=response.status_code,
+                content_type=content_type,
+                headers={
+                    'X-Proxied-From': archivebox_url,
+                }
+            )
+
+        except requests.Timeout:
+            logger.error(f"Timeout proxying ArchiveBox snapshot {snapshot_id}")
+            return abort(504, description="ArchiveBox request timed out")
+        except requests.ConnectionError:
+            logger.error(f"Connection error proxying ArchiveBox snapshot {snapshot_id}")
+            return abort(502, description="Cannot connect to ArchiveBox")
+        except Exception as e:
+            logger.error(f"Error proxying ArchiveBox snapshot {snapshot_id}: {e}", exc_info=True)
             return abort(500, description=str(e))
 
     def _serve_monolith(self, link_id: int, version='latest'):

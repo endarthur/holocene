@@ -1019,14 +1019,15 @@ This link will grant you access to:
                 if 'archivebox' in services:
                     ab = services['archivebox']
                     if ab.get('status') == 'success':
-                        archive_url = ab.get('archive_url', 'N/A')
                         snapshot_id = ab.get('archivebox_snapshot_id', 'unknown')
+                        # Use proxied URL through holo.stdgeo.com
+                        proxied_url = f"https://holo.stdgeo.com/box/{snapshot_id}"
 
                         msg = (
                             f"✅ *ArchiveBox Archive Complete*\n\n"
                             f"`{actual_url}`\n\n"
                             f"📦 Snapshot ID: `{snapshot_id}`\n"
-                            f"[View archive ↗]({archive_url})\n\n"
+                            f"[View archive ↗]({proxied_url})\n\n"
                             f"_Includes: SingleFile, Screenshot, WARC, etc._"
                         )
                     else:
