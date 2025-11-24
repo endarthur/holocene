@@ -740,7 +740,6 @@ def import_telegram(json_file: str, dry_run: bool):
         holo links import-telegram personal/telegram.json
         holo links import-telegram telegram.json --dry-run
     """
-    import json
     from ..core.link_utils import should_archive_url
     from urllib.parse import urlparse
 
