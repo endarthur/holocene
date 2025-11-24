@@ -740,15 +740,16 @@ def import_telegram(json_file: str, dry_run: bool):
         holo links import-telegram personal/telegram.json
         holo links import-telegram telegram.json --dry-run
     """
+    import builtins
     from ..core.link_utils import should_archive_url
     from urllib.parse import urlparse
 
     config = load_config()
     db = Database(config.db_path)
 
-    # Load JSON file
+    # Load JSON file (use builtins.open to avoid conflict with 'open' command group)
     with console.status(f"[cyan]Reading {json_file}...", spinner="dots"):
-        with open(json_file, 'r', encoding='utf-8') as f:
+        with builtins.open(json_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
     if 'messages' not in data:
