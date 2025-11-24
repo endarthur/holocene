@@ -33,6 +33,12 @@ class InternetArchiveClient(BaseAPIClient):
             use_global_limiter=use_global_limiter,
         )
 
+        # Register web.archive.org to use the same rate limit as archive.org
+        # Both domains are part of Internet Archive and should share rate limits
+        if self.rate_limiter and rate_limit:
+            self.rate_limiter.domain_rates["web.archive.org"] = rate_limit
+            self.rate_limiter.domain_rates["archive.org"] = rate_limit
+
         self.access_key = access_key
         self.secret_key = secret_key
 
@@ -49,21 +55,29 @@ class InternetArchiveClient(BaseAPIClient):
         api_url = f"/wayback/available?url={url}"
 
         try:
+            import logging
+            logger = logging.getLogger(__name__)
+
             response = self.get(api_url, timeout=10)
             response.raise_for_status()
             data = response.json()
 
+            logger.warning(f"[IA] Availability check response: {data}")
+
             if "archived_snapshots" in data and "closest" in data["archived_snapshots"]:
                 snapshot = data["archived_snapshots"]["closest"]
                 timestamp = snapshot.get("timestamp")  # Format: YYYYMMDDhhmmss
-                return {
+                result = {
                     "available": snapshot.get("available", False),
                     "url": url,
                     "timestamp": timestamp,
                     "archive_date": timestamp,  # Keep IA timestamp format for trust tier calc
                     "snapshot_url": snapshot.get("url"),
                 }
+                logger.warning(f"[IA] Availability: {result['available']}, snapshot: {result.get('snapshot_url', 'N/A')[:80]}")
+                return result
 
+            logger.warning(f"[IA] No archived snapshots found for {url}")
             return {
                 "available": False,
                 "url": url,
