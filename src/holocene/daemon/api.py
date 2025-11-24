@@ -24,7 +24,7 @@ from typing import Optional
 from datetime import datetime
 
 try:
-    from flask import Flask, jsonify, request, session, redirect, render_template
+    from flask import Flask, jsonify, request, session, redirect, render_template, send_file, abort
     from werkzeug.serving import make_server
     FLASK_AVAILABLE = True
 except ImportError:
@@ -234,6 +234,13 @@ class APIServer:
         # Link endpoints
         self.app.route("/links", methods=["GET", "POST"])(self._links)
         self.app.route("/links/<int:link_id>", methods=["GET"])(self._get_link)
+
+        # Archive viewer endpoints (local monolith archives)
+        self.app.route("/mono/<int:link_id>", methods=["GET"])(self._mono_latest)
+        self.app.route("/mono/<int:link_id>/latest", methods=["GET"])(self._mono_latest)
+        self.app.route("/mono/<int:link_id>/first", methods=["GET"])(self._mono_first)
+        self.app.route("/mono/<int:link_id>/<int:index>", methods=["GET"])(self._mono_index)
+        self.app.route("/snapshot/<int:snapshot_id>", methods=["GET"])(self._snapshot_by_id)
 
         # Error handlers
         self.app.errorhandler(404)(self._not_found)
@@ -1697,6 +1704,146 @@ class APIServer:
         except Exception as e:
             logger.error(f"Error getting link {link_id}: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
+
+    # Archive viewer endpoints
+
+    @require_auth
+    def _mono_latest(self, link_id: int):
+        """GET /mono/<link_id> or /mono/<link_id>/latest - Serve latest local monolith archive."""
+        return self._serve_monolith(link_id, version='latest')
+
+    @require_auth
+    def _mono_first(self, link_id: int):
+        """GET /mono/<link_id>/first - Serve first local monolith archive."""
+        return self._serve_monolith(link_id, version='first')
+
+    @require_auth
+    def _mono_index(self, link_id: int, index: int):
+        """GET /mono/<link_id>/<index> - Serve nth local monolith archive (0=latest, 1=previous, etc)."""
+        return self._serve_monolith(link_id, version=index)
+
+    @require_auth
+    def _snapshot_by_id(self, snapshot_id: int):
+        """GET /snapshot/<snapshot_id> - Serve archive snapshot by ID."""
+        try:
+            cursor = self.core.db.cursor()
+            cursor.execute("""
+                SELECT snapshot_url, service
+                FROM archive_snapshots
+                WHERE id = ?
+            """, (snapshot_id,))
+
+            row = cursor.fetchone()
+            if not row:
+                return abort(404, description=f"Snapshot {snapshot_id} not found")
+
+            snapshot_url = row[0]
+            service = row[1]
+
+            # Only serve local archives
+            if not service.startswith('local_'):
+                return abort(400, description="Only local archives can be served directly")
+
+            # Serve the file
+            return self._serve_archive_file(snapshot_url, service)
+
+        except Exception as e:
+            logger.error(f"Error serving snapshot {snapshot_id}: {e}", exc_info=True)
+            return abort(500, description=str(e))
+
+    def _serve_monolith(self, link_id: int, version='latest'):
+        """Helper to serve a monolith archive for a link.
+
+        Args:
+            link_id: Link ID
+            version: 'latest', 'first', or integer index (0=latest, 1=previous, etc)
+        """
+        try:
+            cursor = self.core.db.cursor()
+
+            # Get snapshots for this link (monolith only)
+            cursor.execute("""
+                SELECT id, snapshot_url, created_at
+                FROM archive_snapshots
+                WHERE link_id = ? AND service = 'local_monolith' AND status = 'success'
+                ORDER BY created_at DESC
+            """, (link_id,))
+
+            snapshots = cursor.fetchall()
+
+            if not snapshots:
+                return abort(404, description=f"No local monolith archives found for link {link_id}")
+
+            # Select snapshot based on version
+            if version == 'latest':
+                snapshot = snapshots[0]  # First in DESC order
+            elif version == 'first':
+                snapshot = snapshots[-1]  # Last in DESC order
+            elif isinstance(version, int):
+                if version < 0 or version >= len(snapshots):
+                    return abort(404, description=f"Snapshot index {version} out of range (0-{len(snapshots)-1})")
+                snapshot = snapshots[version]
+            else:
+                return abort(400, description=f"Invalid version: {version}")
+
+            snapshot_url = snapshot[1]
+
+            # Serve the file
+            return self._serve_archive_file(snapshot_url, 'local_monolith')
+
+        except Exception as e:
+            logger.error(f"Error serving monolith for link {link_id}: {e}", exc_info=True)
+            return abort(500, description=str(e))
+
+    def _serve_archive_file(self, file_path: str, service: str):
+        """Helper to serve an archive file from disk.
+
+        Args:
+            file_path: Path to archive file
+            service: Service type (for validation)
+        """
+        from pathlib import Path
+        import os
+
+        try:
+            # Security: Validate file path
+            archive_path = Path(file_path)
+
+            # Must be absolute path
+            if not archive_path.is_absolute():
+                return abort(400, description="Invalid file path")
+
+            # Must exist
+            if not archive_path.exists():
+                return abort(404, description="Archive file not found")
+
+            # Must be under ~/.holocene/archives/
+            holocene_archives = Path.home() / ".holocene" / "archives"
+            try:
+                archive_path.resolve().relative_to(holocene_archives.resolve())
+            except ValueError:
+                # Path is not under archives directory
+                return abort(403, description="Access denied")
+
+            # Determine MIME type based on service
+            if service == 'local_monolith':
+                mimetype = 'text/html'
+            elif service == 'local_warc':
+                mimetype = 'application/warc'
+            else:
+                mimetype = 'application/octet-stream'
+
+            # Serve file
+            return send_file(
+                archive_path,
+                mimetype=mimetype,
+                as_attachment=False,  # Display in browser
+                download_name=archive_path.name
+            )
+
+        except Exception as e:
+            logger.error(f"Error serving archive file {file_path}: {e}", exc_info=True)
+            return abort(500, description=str(e))
 
     # Error handlers
 

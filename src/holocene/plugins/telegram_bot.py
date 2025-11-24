@@ -806,7 +806,8 @@ This link will grant you access to:
                     if local.get('status') == 'success':
                         file_size = local.get('file_size', 0)
                         size_kb = file_size // 1024
-                        msg += f"💾 Local: {size_kb:,} KB\n"
+                        mono_url = f"https://holo.stdgeo.com/mono/{link[0]}/latest"
+                        msg += f"💾 Local: {size_kb:,} KB - [View ↗]({mono_url})\n"
 
                 # Internet Archive
                 if 'internet_archive' in services:
@@ -1238,6 +1239,9 @@ This link will grant you access to:
                     size_kb = file_size // 1024
                     msg += f"\n━━━━━━━━━━━━━━━━\n"
                     msg += f"💾 *Local archive*: {size_kb:,} KB\n"
+                    # Add link to web viewer
+                    mono_url = f"https://holo.stdgeo.com/mono/{link_id}/latest"
+                    msg += f"[View local ↗]({mono_url})\n"
 
                 # Internet Archive
                 if 'internet_archive' in services:
