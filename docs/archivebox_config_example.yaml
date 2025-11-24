@@ -1,0 +1,33 @@
+# ArchiveBox Integration Configuration Example
+#
+# Add this to your ~/.config/holocene/config.yaml to enable ArchiveBox
+
+integrations:
+  # Enable ArchiveBox for comprehensive web archiving
+  archivebox_enabled: true
+
+  # ArchiveBox server connection (defaults shown)
+  archivebox_host: "192.168.1.102"         # IP or hostname of archivebox-rei
+  archivebox_user: "holocene"              # SSH user
+  archivebox_data_dir: "/opt/archivebox/data"  # ArchiveBox data directory
+
+  # Internet Archive (optional)
+  internet_archive_enabled: true
+  ia_access_key: "your_ia_s3_access_key"
+  ia_secret_key: "your_ia_s3_secret_key"
+  ia_rate_limit: 0.5  # Seconds between requests
+
+# Example usage in code:
+#
+# archiving_service.archive_url(
+#     link_id=123,
+#     url="https://example.com",
+#     local_format="monolith",      # Fast local copy
+#     use_ia=True,                   # Also save to Internet Archive
+#     use_archivebox=True            # Also save to ArchiveBox (with images!)
+# )
+#
+# This will create 3 snapshots:
+# 1. local_monolith - Fast, but may miss lazy-loaded images
+# 2. internet_archive - Public backup
+# 3. archivebox - Comprehensive with full JS rendering

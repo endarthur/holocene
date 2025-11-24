@@ -122,6 +122,7 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("classify", self._cmd_classify))
         self.application.add_handler(CommandHandler("spn", self._cmd_spn))
         self.application.add_handler(CommandHandler("mono", self._cmd_mono))
+        self.application.add_handler(CommandHandler("box", self._cmd_box))
 
         # Register message handlers for content (text, PDFs, etc.)
         self.application.add_handler(MessageHandler(
@@ -344,6 +345,7 @@ Available commands:
 /classify <topic> - Get Dewey classification
 /spn <url> - Force new archive snapshot (Save Page Now)
 /mono <url> - Update local monolith archive
+/box <url> - Archive with ArchiveBox (full JS rendering)
 
 *Send me:*
 • DOIs - I'll fetch paper metadata
@@ -944,6 +946,105 @@ This link will grant you access to:
 
         except Exception as e:
             self.logger.error(f"Mono command error: {e}", exc_info=True)
+            try:
+                await status_msg.edit_text(
+                    f"❌ *Archive Failed*\n\n`{actual_url}`\n\n{str(e)[:200]}",
+                    parse_mode='Markdown'
+                )
+            except:
+                await update.message.reply_text("❌ Archive failed")
+
+    async def _cmd_box(self, update, context):
+        """Handle /box command - archive with ArchiveBox (comprehensive with JS rendering)."""
+        self.commands_received += 1
+
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        # Get URL from command args
+        url = ' '.join(context.args) if context.args else None
+        if not url:
+            await update.message.reply_text(
+                "Usage: `/box <url>`\n\n"
+                "Archive URL with ArchiveBox (handles lazy-loaded images & JavaScript).\n"
+                "Creates comprehensive archive with SingleFile, screenshots, and more.",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Check if URL is in database
+        db = self.core.db
+        link = db.conn.execute("SELECT id, url FROM links WHERE url = ?", (url,)).fetchone()
+
+        if not link:
+            await update.message.reply_text(
+                "❌ URL not in database.\n\n"
+                "Send the URL first to add it to your collection, then use `/box` to archive.",
+                parse_mode='Markdown'
+            )
+            return
+
+        link_id, actual_url = link
+
+        # Send initial message
+        status_msg = await update.message.reply_text(
+            f"📦 *ArchiveBox*\n\n"
+            f"`{actual_url}`\n\n"
+            f"⏳ Archiving with headless Chrome...\n"
+            f"_(This may take 1-3 minutes)_",
+            parse_mode='Markdown'
+        )
+
+        # Archive with ArchiveBox in background
+        def box_archive():
+            # Archive with unified service (ArchiveBox only)
+            result = self.archiving.archive_url(
+                link_id=link_id,
+                url=actual_url,
+                local_format=None,  # Skip local monolith
+                use_ia=False,  # Skip Internet Archive
+                use_archivebox=True  # Use ArchiveBox
+            )
+            return result
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(None, box_archive)
+
+            if result.get('success'):
+                # Build success message
+                services = result.get('services', {})
+
+                if 'archivebox' in services:
+                    ab = services['archivebox']
+                    if ab.get('status') == 'success':
+                        archive_url = ab.get('archive_url', 'N/A')
+                        snapshot_id = ab.get('archivebox_snapshot_id', 'unknown')
+
+                        msg = (
+                            f"✅ *ArchiveBox Archive Complete*\n\n"
+                            f"`{actual_url}`\n\n"
+                            f"📦 Snapshot ID: `{snapshot_id}`\n"
+                            f"[View archive ↗]({archive_url})\n\n"
+                            f"_Includes: SingleFile, Screenshot, WARC, etc._"
+                        )
+                    else:
+                        msg = f"❌ *Archive Failed*\n\n`{actual_url}`\n\n{ab.get('error', 'Unknown error')}"
+                else:
+                    msg = f"❌ *Archive Failed*\n\n`{actual_url}`\n\nNo ArchiveBox archive created"
+
+            else:
+                # Failed
+                errors = result.get('errors', ['Unknown error'])
+                error_text = '\n'.join(errors)
+                msg = f"❌ *Archive Failed*\n\n`{actual_url}`\n\n{error_text}"
+
+            await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
+            self.messages_sent += 1
+
+        except Exception as e:
+            self.logger.error(f"Box command error: {e}", exc_info=True)
             try:
                 await status_msg.edit_text(
                     f"❌ *Archive Failed*\n\n`{actual_url}`\n\n{str(e)[:200]}",

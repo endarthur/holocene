@@ -119,6 +119,12 @@ class IntegrationsConfig(BaseModel):
     window_focus_enabled: bool = False
     window_sampling_interval: int = 30
 
+    # ArchiveBox integration
+    archivebox_enabled: bool = False
+    archivebox_host: str = "192.168.1.102"
+    archivebox_user: str = "holocene"
+    archivebox_data_dir: str = "/opt/archivebox/data"
+
     def model_post_init(self, __context):
         """Expand paths after initialization."""
         if self.journel_path:
