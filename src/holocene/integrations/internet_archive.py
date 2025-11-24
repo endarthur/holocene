@@ -118,7 +118,8 @@ class InternetArchiveClient(BaseAPIClient):
             start_time = time.time()
             logger.warning(f"[IA] About to call self.get() at {start_time}")
 
-            response = self.get(save_endpoint, headers=headers, timeout=90)
+            # Don't follow redirects - IA sends 302 to snapshot, we just need the Location header
+            response = self.get(save_endpoint, headers=headers, timeout=90, allow_redirects=False)
 
             elapsed = time.time() - start_time
             logger.warning(f"[IA] self.get() returned after {elapsed:.2f}s")
@@ -127,7 +128,8 @@ class InternetArchiveClient(BaseAPIClient):
             # IA returns various status codes
             if response.status_code in [200, 301, 302]:
                 # Try to extract snapshot URL from headers or response
-                snapshot_url = response.headers.get("Content-Location")
+                # With allow_redirects=False, the snapshot URL is in Location header (302 redirect)
+                snapshot_url = response.headers.get("Location") or response.headers.get("Content-Location")
                 timestamp = None
 
                 if snapshot_url:
