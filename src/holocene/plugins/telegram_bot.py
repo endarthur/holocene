@@ -1003,6 +1003,45 @@ This link will grant you access to:
             saved_link = cursor.fetchone()
             actual_url = saved_link['url'] if saved_link else url
 
+            # Immediate archiving to Internet Archive (Phase 1: Full Gwern)
+            archive_status = None
+            archive_result = None
+            if hasattr(self.core.config, 'integrations') and \
+               getattr(self.core.config.integrations, 'internet_archive_enabled', False):
+                try:
+                    from ..integrations import InternetArchiveClient
+
+                    ia = InternetArchiveClient(
+                        access_key=self.core.config.integrations.ia_access_key,
+                        secret_key=self.core.config.integrations.ia_secret_key,
+                        rate_limit_seconds=self.core.config.integrations.ia_rate_limit_seconds
+                    )
+
+                    self.logger.info(f"Archiving link to Internet Archive: {actual_url}")
+                    archive_result = ia.save_url(actual_url, force=False)
+                    archive_status = archive_result.get('status')
+
+                    # Update database with archive info
+                    if archive_status in ('archived', 'already_archived'):
+                        db.update_link_archive_status(
+                            url=actual_url,
+                            archived=True,
+                            archive_url=archive_result.get('snapshot_url'),
+                            archive_date=archive_result.get('archive_date')
+                        )
+                        self.logger.info(f"Link archived: {archive_status}")
+                    else:
+                        # Record failure
+                        error_msg = archive_result.get('error') or archive_result.get('message') or 'Unknown error'
+                        db.record_archive_failure(actual_url, error_msg)
+                        self.logger.warning(f"Archive failed: {error_msg}")
+
+                except Exception as e:
+                    self.logger.error(f"Failed to archive link: {e}", exc_info=True)
+                    archive_status = 'error'
+            else:
+                self.logger.debug("Internet Archive integration not enabled, skipping immediate archiving")
+
             # Build notification message
             msg = f"✅ *Link Added*\n\n"
 
@@ -1015,12 +1054,28 @@ This link will grant you access to:
                 msg += f"{url}\n\n"
 
             msg += f"Link ID: {link_id}\n"
-            msg += f"Source: Telegram"
+            msg += f"Source: Telegram\n"
+
+            # Add archive status to notification
+            if archive_status == 'archived':
+                msg += f"\n📦 *Archived to IA*\n"
+                msg += f"Snapshot: {archive_result.get('snapshot_url', '')[:50]}"
+            elif archive_status == 'already_archived':
+                from ..storage.database import calculate_trust_tier
+                archive_date = archive_result.get('archive_date')
+                if archive_date:
+                    trust_tier = calculate_trust_tier(archive_date)
+                    msg += f"\n📦 *Already archived* ({trust_tier})\n"
+                    msg += f"Snapshot: {archive_result.get('snapshot_url', '')[:50]}"
+                else:
+                    msg += f"\n📦 *Already archived*"
+            elif archive_status == 'error' or (archive_result and archive_status not in ('archived', 'already_archived')):
+                msg += f"\n⚠️ *Archive failed* (will retry later)"
 
             self._send_notification(msg, chat_id)
 
             # Publish event for archiving
-            self.publish('link.added', {'url': url, 'link_id': link_id})
+            self.publish('link.added', {'url': actual_url, 'link_id': link_id, 'archived': archive_status in ('archived', 'already_archived')})
 
             return link_id
 

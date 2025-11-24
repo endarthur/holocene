@@ -874,6 +874,188 @@ def archive_links(limit: int, force: bool, retry_failed: bool):
     db.close()
 
 
+@links.command("auto-archive")
+@click.option("--scan/--no-scan", default=True, help="Scan for new links before archiving")
+@click.option("--limit", "-n", type=int, default=50, help="Maximum links to archive per run")
+@click.option("--scan-period", type=click.Choice(["today", "week", "all"]), default="today",
+              help="Period to scan for new links")
+def auto_archive(scan: bool, limit: int, scan_period: str):
+    """Automated link discovery and archiving (cron-friendly).
+
+    This command combines scanning and archiving into a single operation
+    suitable for scheduled runs via cron:
+
+    1. Scans for new links (optional, default: yes)
+    2. Archives unarchived links
+    3. Retries failed links that are ready (respects exponential backoff)
+
+    Example cron entry (daily at 3 AM):
+        0 3 * * * /usr/bin/holo links auto-archive --limit 50 >> /var/log/holocene/archive.log 2>&1
+    """
+    from ..core.link_utils import extract_urls, should_archive_url
+    from ..integrations import JournelReader, InternetArchiveClient
+
+    config = load_config()
+    db = Database(config.db_path)
+
+    # Step 1: Scan for new links (if enabled)
+    if scan:
+        console.print("[bold cyan]Step 1: Scanning for new links[/bold cyan]")
+
+        found_links = set()
+        now = datetime.now()
+
+        # Determine time range
+        if scan_period == "week":
+            start_date = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            period = "this week"
+        elif scan_period == "all":
+            start_date = None
+            period = "all time"
+        else:  # today
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            period = "today"
+
+        # Scan activities
+        activities = db.get_activities(start_date=start_date)
+        for activity in activities:
+            urls = extract_urls(activity.description)
+            for url in urls:
+                if should_archive_url(url):
+                    found_links.add((url, "activity"))
+
+            if activity.metadata:
+                metadata_str = str(activity.metadata)
+                urls = extract_urls(metadata_str)
+                for url in urls:
+                    if should_archive_url(url):
+                        found_links.add((url, "activity"))
+
+        console.print(f"  [green]✓[/green] Scanned {len(activities)} activities from {period}")
+
+        # Scan journel projects if enabled
+        if config.integrations.journel_enabled:
+            try:
+                journel_reader = JournelReader(
+                    journel_path=config.integrations.journel_path,
+                    ignore_projects=config.integrations.journel_ignore_projects
+                )
+                projects = journel_reader.get_active_projects()
+
+                for project in projects:
+                    text = f"{project.name} {project.next_steps or ''} {project.blockers or ''} {project.github or ''}"
+                    urls = extract_urls(text)
+                    for url in urls:
+                        if should_archive_url(url):
+                            found_links.add((url, "journel"))
+
+                console.print(f"  [green]✓[/green] Scanned {len(projects)} journel projects")
+            except Exception as e:
+                console.print(f"  [yellow]Warning: Could not scan journel: {e}[/yellow]")
+
+        # Insert discovered links
+        if found_links:
+            new_count = 0
+            existing_urls = {link["url"] for link in db.get_links()}
+
+            for url, source in found_links:
+                if url not in existing_urls:
+                    new_count += 1
+                db.insert_link(url=url, source=source)
+
+            console.print(f"  [green]✓[/green] Found {len(found_links)} link(s), {new_count} new\n")
+        else:
+            console.print(f"  [dim]No new links found[/dim]\n")
+
+    # Step 2: Archive unarchived links
+    console.print("[bold cyan]Step 2: Archiving links[/bold cyan]")
+
+    if not config.integrations.internet_archive_enabled:
+        console.print("  [yellow]Internet Archive integration is disabled[/yellow]")
+        console.print("  [dim]Enable in config: integrations.internet_archive_enabled = true[/dim]")
+        db.close()
+        return
+
+    ia = InternetArchiveClient(
+        access_key=config.integrations.ia_access_key,
+        secret_key=config.integrations.ia_secret_key,
+        rate_limit_seconds=config.integrations.ia_rate_limit_seconds
+    )
+
+    # Get unarchived links (respects exponential backoff)
+    all_unarchived = db.get_links(archived=False)
+    links_to_archive = []
+    now_dt = datetime.now()
+
+    for link in all_unarchived:
+        # Skip if failed and not yet ready for retry
+        if link.get("archive_attempts", 0) > 0:
+            next_retry = link.get("next_retry_after")
+            if next_retry:
+                next_retry_dt = datetime.fromisoformat(next_retry)
+                if next_retry_dt > now_dt:
+                    continue  # Not ready yet
+
+        links_to_archive.append(link)
+
+        if len(links_to_archive) >= limit:
+            break
+
+    if not links_to_archive:
+        console.print("  [green]✓[/green] No links ready for archiving\n")
+        db.close()
+        return
+
+    total = len(links_to_archive)
+    console.print(f"  [dim]Archiving {total} link(s) (rate limit: {config.integrations.ia_rate_limit_seconds}s)[/dim]")
+
+    archived_count = 0
+    already_archived_count = 0
+    error_count = 0
+
+    for idx, link in enumerate(links_to_archive, 1):
+        url = link["url"]
+
+        result = ia.save_url(url, force=False)
+        status = result.get("status")
+
+        if status == "already_archived":
+            already_archived_count += 1
+            archive_date = result.get("archive_date")
+
+            db.update_link_archive_status(
+                url=url,
+                archived=True,
+                archive_url=result.get("snapshot_url"),
+                archive_date=archive_date
+            )
+        elif status == "archived":
+            archived_count += 1
+            archive_date = result.get("archive_date")
+
+            db.update_link_archive_status(
+                url=url,
+                archived=True,
+                archive_url=result.get("snapshot_url"),
+                archive_date=archive_date
+            )
+        else:
+            error_count += 1
+            error_msg = result.get("error") or result.get("message") or "Unknown error"
+            backoff_info = db.record_archive_failure(url, error_msg)
+
+    # Summary
+    console.print()
+    console.print(Panel.fit(
+        f"[green]✓[/green] Newly archived: {archived_count}\n"
+        f"[blue]ℹ[/blue] Already archived: {already_archived_count}\n"
+        f"[red]✗[/red] Errors: {error_count}",
+        title="Auto-Archive Summary"
+    ))
+
+    db.close()
+
+
 @cli.group()
 def books():
     """Manage your book collection for research."""
@@ -2978,6 +3160,180 @@ Status: {'[green]Enabled[/green]' if plugin.enabled else '[dim]Disabled[/dim]'}
     console.print()
 
     core.shutdown()
+
+
+@cli.group()
+def stats():
+    """View collection statistics and analytics."""
+    pass
+
+
+@stats.command("archives")
+def stats_archives():
+    """Show archive statistics and link health metrics.
+
+    Displays comprehensive statistics about link archiving:
+    - Internet Archive coverage
+    - Link health status
+    - Trust tier distribution
+    - Storage usage
+    - Recent archiving activity
+    """
+    from rich.table import Table
+    from rich.panel import Panel
+
+    config = load_config()
+    db = Database(config.db_path)
+
+    # Get archive statistics
+    cursor = db.conn.cursor()
+
+    # Total links
+    cursor.execute("SELECT COUNT(*) FROM links")
+    total_links = cursor.fetchone()[0]
+
+    if total_links == 0:
+        console.print("[yellow]No links tracked yet.[/yellow]")
+        console.print("Start tracking links with: [cyan]holo links scan[/cyan]")
+        db.close()
+        return
+
+    # Archived links
+    cursor.execute("SELECT COUNT(*) FROM links WHERE archived = 1")
+    archived_count = cursor.fetchone()[0]
+
+    # Failed links (with retry attempts)
+    cursor.execute("SELECT COUNT(*) FROM links WHERE archive_attempts > 0 AND archived = 0")
+    failed_count = cursor.fetchone()[0]
+
+    # Pending links (never attempted)
+    cursor.execute("SELECT COUNT(*) FROM links WHERE archived = 0 AND archive_attempts = 0")
+    pending_count = cursor.fetchone()[0]
+
+    # Link health status
+    cursor.execute("SELECT status, COUNT(*) FROM links WHERE status IS NOT NULL GROUP BY status")
+    status_counts = dict(cursor.fetchall())
+
+    # Trust tier distribution (archived links only)
+    cursor.execute("SELECT trust_tier, COUNT(*) FROM links WHERE archived = 1 AND trust_tier IS NOT NULL GROUP BY trust_tier")
+    trust_tier_counts = dict(cursor.fetchall())
+
+    # Recent archiving activity
+    cursor.execute("""
+        SELECT DATE(archive_date) as date, COUNT(*) as count
+        FROM links
+        WHERE archive_date IS NOT NULL
+        AND DATE(archive_date) >= DATE('now', '-7 days')
+        GROUP BY DATE(archive_date)
+        ORDER BY date DESC
+        LIMIT 7
+    """)
+    recent_archives = cursor.fetchall()
+
+    # Calculate percentages
+    archived_pct = (archived_count / total_links * 100) if total_links > 0 else 0
+    failed_pct = (failed_count / total_links * 100) if total_links > 0 else 0
+    pending_pct = (pending_count / total_links * 100) if total_links > 0 else 0
+
+    # Build statistics display
+    console.print()
+    console.print("╭──────────────── Archive Statistics ────────────────╮")
+    console.print("│                                                     │")
+    console.print(f"│ Total Links: [bold cyan]{total_links:,}[/bold cyan]                                  │")
+    console.print("│                                                     │")
+    console.print("│ Coverage:                                           │")
+
+    # Internet Archive coverage bar
+    bar_width = 30
+    archived_bar = int((archived_count / total_links) * bar_width) if total_links > 0 else 0
+    archived_bar_str = "█" * archived_bar + "░" * (bar_width - archived_bar)
+    console.print(f"│   Internet Archive:    [green]{archived_count:4}[/green] ([green]{archived_pct:5.1f}%[/green])  {archived_bar_str}   │")
+
+    # Failed links
+    failed_bar = int((failed_count / total_links) * bar_width) if total_links > 0 else 0
+    failed_bar_str = "█" * failed_bar + "░" * (bar_width - failed_bar)
+    console.print(f"│   Failed:              [red]{failed_count:4}[/red] ([red]{failed_pct:5.1f}%[/red])  {failed_bar_str}   │")
+
+    # Pending links
+    pending_bar = int((pending_count / total_links) * bar_width) if total_links > 0 else 0
+    pending_bar_str = "█" * pending_bar + "░" * (bar_width - pending_bar)
+    console.print(f"│   Pending:             [yellow]{pending_count:4}[/yellow] ([yellow]{pending_pct:5.1f}%[/yellow])  {pending_bar_str}   │")
+
+    console.print("│                                                     │")
+
+    # Link health section
+    if status_counts:
+        console.print("│ Link Health:                                        │")
+        alive = status_counts.get('alive', 0)
+        dead = status_counts.get('dead', 0)
+        timeout = status_counts.get('timeout', 0)
+        error = status_counts.get('connection_error', 0)
+        total_checked = alive + dead + timeout + error
+        unchecked = total_links - total_checked
+
+        if alive > 0:
+            alive_pct = (alive / total_links * 100) if total_links > 0 else 0
+            console.print(f"│   Alive:               [green]{alive:4}[/green] ([green]{alive_pct:5.1f}%[/green])                   │")
+        if dead > 0:
+            dead_pct = (dead / total_links * 100) if total_links > 0 else 0
+            console.print(f"│   Dead:                [red]{dead:4}[/red] ([red]{dead_pct:5.1f}%[/red])                   │")
+        if unchecked > 0:
+            unchecked_pct = (unchecked / total_links * 100) if total_links > 0 else 0
+            console.print(f"│   Unchecked:           [dim]{unchecked:4}[/dim] ([dim]{unchecked_pct:5.1f}%[/dim])                   │")
+
+        console.print("│                                                     │")
+
+    # Trust tier distribution
+    if trust_tier_counts:
+        console.print("│ Trust Tier Distribution (Archived):                │")
+        pre_llm = trust_tier_counts.get('pre-llm', 0)
+        early_llm = trust_tier_counts.get('early-llm', 0)
+        recent = trust_tier_counts.get('recent', 0)
+
+        if pre_llm > 0:
+            console.print(f"│   Pre-LLM:             [green]{pre_llm:4}[/green] (high value)                │")
+        if early_llm > 0:
+            console.print(f"│   Early-LLM:           [yellow]{early_llm:4}[/yellow] (medium value)             │")
+        if recent > 0:
+            console.print(f"│   Recent:              [red]{recent:4}[/red] (low value)                │")
+
+        console.print("│                                                     │")
+
+    # Recent activity
+    if recent_archives:
+        console.print("│ Recent Archiving Activity (last 7 days):           │")
+        for date, count in recent_archives[:5]:  # Show up to 5 days
+            console.print(f"│   {date}:  [cyan]{count:3}[/cyan] archived                         │")
+        console.print("│                                                     │")
+
+    # Last run info (approximate - check most recent archive date)
+    cursor.execute("SELECT MAX(archive_date) FROM links WHERE archive_date IS NOT NULL")
+    last_archive = cursor.fetchone()[0]
+    if last_archive:
+        from datetime import datetime
+        try:
+            last_dt = datetime.fromisoformat(last_archive)
+            time_ago = datetime.now() - last_dt
+            if time_ago.days > 0:
+                time_ago_str = f"{time_ago.days} days ago"
+            elif time_ago.seconds > 3600:
+                time_ago_str = f"{time_ago.seconds // 3600} hours ago"
+            else:
+                time_ago_str = f"{time_ago.seconds // 60} minutes ago"
+            console.print(f"│ Last Archive: [dim]{time_ago_str}[/dim]                         │")
+        except:
+            pass
+
+    console.print("╰─────────────────────────────────────────────────────╯")
+    console.print()
+
+    # Suggestions
+    if pending_count > 0:
+        console.print(f"[yellow]Tip:[/yellow] Run [cyan]holo links auto-archive[/cyan] to archive {pending_count} pending link(s)")
+    if failed_count > 0:
+        console.print(f"[yellow]Tip:[/yellow] {failed_count} failed link(s) will retry according to exponential backoff")
+
+    db.close()
 
 
 # Register print commands (optional: requires paperang dependencies)
