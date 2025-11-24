@@ -698,9 +698,13 @@ This link will grant you access to:
         # Check for URL (generic links)
         url = self._detect_url(text)
         if url:
-            await update.message.reply_text(f"🔗 Detected URL: `{url}`\nProcessing...", parse_mode='Markdown')
+            # Send initial "Processing..." message and keep reference for editing
+            processing_msg = await update.message.reply_text(
+                f"🔗 Detected URL\n`{url}`\n\n⏳ Processing...",
+                parse_mode='Markdown'
+            )
             self.run_in_background(
-                lambda: self._add_link_from_url(url, update.effective_chat.id),
+                lambda: self._add_link_from_url(url, update.effective_chat.id, processing_msg),
                 callback=lambda result: self.logger.info(f"Link added: {result}"),
                 error_handler=lambda e: self.logger.error(f"Failed to add link: {e}")
             )
@@ -968,12 +972,13 @@ This link will grant you access to:
             self._send_notification(f"❌ Failed to add arXiv paper: {str(e)}", chat_id)
             raise
 
-    def _add_link_from_url(self, url: str, chat_id: int):
+    def _add_link_from_url(self, url: str, chat_id: int, processing_msg=None):
         """Add link from URL (runs in background).
 
         Args:
             url: URL string
             chat_id: Telegram chat ID for notifications
+            processing_msg: Optional message to edit with results (instead of sending new)
         """
         try:
             db = self.core.db
@@ -1047,32 +1052,56 @@ This link will grant you access to:
 
             if actual_url != url:
                 # URL was unwrapped
-                msg += f"🔗 Original: {url}\n"
-                msg += f"📍 Unwrapped: {actual_url}\n\n"
+                msg += f"🔗 Original\n`{url}`\n\n"
+                msg += f"📍 Unwrapped\n`{actual_url}`\n\n"
             else:
                 # URL unchanged
-                msg += f"{url}\n\n"
+                msg += f"`{url}`\n\n"
 
-            msg += f"Link ID: {link_id}\n"
-            msg += f"Source: Telegram\n"
+            msg += f"━━━━━━━━━━━━━━━━\n"
+            msg += f"📋 Link ID: `{link_id}`\n"
+            msg += f"📱 Source: Telegram\n"
 
             # Add archive status to notification
             if archive_status == 'archived':
-                msg += f"\n📦 *Archived to IA*\n"
-                msg += f"Snapshot: {archive_result.get('snapshot_url', '')[:50]}"
+                msg += f"\n━━━━━━━━━━━━━━━━\n"
+                msg += f"📦 *Archived to IA*\n"
+                snapshot_url = archive_result.get('snapshot_url', '')
+                msg += f"[View snapshot ↗]({snapshot_url})"
             elif archive_status == 'already_archived':
                 from ..storage.database import calculate_trust_tier
                 archive_date = archive_result.get('archive_date')
+                msg += f"\n━━━━━━━━━━━━━━━━\n"
                 if archive_date:
                     trust_tier = calculate_trust_tier(archive_date)
-                    msg += f"\n📦 *Already archived* ({trust_tier})\n"
-                    msg += f"Snapshot: {archive_result.get('snapshot_url', '')[:50]}"
-                else:
-                    msg += f"\n📦 *Already archived*"
-            elif archive_status == 'error' or (archive_result and archive_status not in ('archived', 'already_archived')):
-                msg += f"\n⚠️ *Archive failed* (will retry later)"
+                    # Format date nicely
+                    try:
+                        if len(archive_date) >= 8:
+                            year = archive_date[:4]
+                            month = archive_date[4:6]
+                            day = archive_date[6:8]
+                            date_str = f"{year}-{month}-{day}"
+                        else:
+                            date_str = archive_date
+                    except:
+                        date_str = archive_date
 
-            self._send_notification(msg, chat_id)
+                    msg += f"📦 *Already archived* ({trust_tier})\n"
+                    msg += f"📅 Snapshot: {date_str}\n"
+                    snapshot_url = archive_result.get('snapshot_url', '')
+                    msg += f"[View snapshot ↗]({snapshot_url})"
+                else:
+                    msg += f"📦 *Already archived*"
+            elif archive_status == 'error' or (archive_result and archive_status not in ('archived', 'already_archived')):
+                msg += f"\n━━━━━━━━━━━━━━━━\n"
+                msg += f"⚠️ *Archive failed*\n"
+                msg += f"Will retry with exponential backoff"
+
+            # Edit the processing message if provided, otherwise send new notification
+            if processing_msg:
+                self._edit_message(processing_msg, msg)
+            else:
+                self._send_notification(msg, chat_id)
 
             # Publish event for archiving
             self.publish('link.added', {'url': actual_url, 'link_id': link_id, 'archived': archive_status in ('archived', 'already_archived')})
@@ -1203,7 +1232,8 @@ URL: {url[:50]}...
                 await self.application.bot.send_message(
                     chat_id=target_chat_id,
                     text=message,
-                    parse_mode='Markdown'
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
                 )
                 self.messages_sent += 1
             except Exception as e:
@@ -1214,6 +1244,34 @@ URL: {url[:50]}...
             asyncio.run_coroutine_threadsafe(send(), self.bot_loop)
         except Exception as e:
             self.logger.error(f"Failed to schedule notification: {e}")
+
+    def _edit_message(self, message, new_text: str):
+        """Edit an existing message.
+
+        Args:
+            message: Message object to edit
+            new_text: New message text
+        """
+        if not self.bot_loop or not self.bot_loop.is_running():
+            self.logger.warning("Bot loop not running, cannot edit message")
+            return
+
+        async def edit():
+            try:
+                await message.edit_text(
+                    text=new_text,
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
+                )
+                self.logger.debug("Message edited successfully")
+            except Exception as e:
+                self.logger.error(f"Failed to edit message: {e}")
+
+        # Schedule the edit on the bot's event loop (thread-safe)
+        try:
+            asyncio.run_coroutine_threadsafe(edit(), self.bot_loop)
+        except Exception as e:
+            self.logger.error(f"Failed to schedule message edit: {e}")
 
     def on_disable(self):
         """Disable the plugin and stop bot."""
