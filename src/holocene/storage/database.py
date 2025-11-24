@@ -1236,6 +1236,189 @@ class Database:
             "delay_days": delay_days
         }
 
+    # Archive Snapshots - Multi-service archiving methods
+
+    def add_archive_snapshot(
+        self,
+        link_id: int,
+        service: str,
+        snapshot_url: str = None,
+        archive_date: str = None,
+        status: str = 'success',
+        error_message: str = None
+    ) -> int:
+        """Add a new archive snapshot for a link.
+
+        Args:
+            link_id: Link ID
+            service: Service name ('internet_archive', 'archive_is', 'archive_today')
+            snapshot_url: URL of the archived snapshot
+            archive_date: Service's archive date/timestamp
+            status: 'success', 'failed', or 'pending'
+            error_message: Error message if failed
+
+        Returns:
+            Snapshot ID
+        """
+        cursor = self.conn.cursor()
+        now = datetime.now().isoformat()
+
+        cursor.execute("""
+            INSERT INTO archive_snapshots (
+                link_id, service, snapshot_url, archive_date, status,
+                error_message, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (link_id, service, snapshot_url, archive_date, status, error_message, now, now))
+
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_latest_snapshot(self, link_id: int, service: str) -> Optional[Dict]:
+        """Get the latest snapshot for a link from a specific service.
+
+        Args:
+            link_id: Link ID
+            service: Service name
+
+        Returns:
+            Snapshot dict or None if not found
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, link_id, service, snapshot_url, archive_date, status,
+                   attempts, last_attempt, next_retry_after, error_message,
+                   created_at, updated_at, metadata
+            FROM archive_snapshots
+            WHERE link_id = ? AND service = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (link_id, service))
+
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        return {
+            'id': row[0],
+            'link_id': row[1],
+            'service': row[2],
+            'snapshot_url': row[3],
+            'archive_date': row[4],
+            'status': row[5],
+            'attempts': row[6],
+            'last_attempt': row[7],
+            'next_retry_after': row[8],
+            'error_message': row[9],
+            'created_at': row[10],
+            'updated_at': row[11],
+            'metadata': row[12]
+        }
+
+    def get_all_snapshots(self, link_id: int) -> List[Dict]:
+        """Get all successful snapshots for a link across all services.
+
+        Args:
+            link_id: Link ID
+
+        Returns:
+            List of snapshot dicts
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT ON (service)
+                id, link_id, service, snapshot_url, archive_date, status, created_at
+            FROM archive_snapshots
+            WHERE link_id = ? AND status = 'success'
+            ORDER BY service, created_at DESC
+        """, (link_id,))
+
+        # SQLite doesn't support DISTINCT ON, use a different approach
+        cursor.execute("""
+            SELECT s.id, s.link_id, s.service, s.snapshot_url, s.archive_date, s.status, s.created_at
+            FROM archive_snapshots s
+            INNER JOIN (
+                SELECT service, MAX(created_at) as max_created
+                FROM archive_snapshots
+                WHERE link_id = ? AND status = 'success'
+                GROUP BY service
+            ) latest ON s.service = latest.service AND s.created_at = latest.max_created
+            WHERE s.link_id = ?
+        """, (link_id, link_id))
+
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                'id': row[0],
+                'link_id': row[1],
+                'service': row[2],
+                'snapshot_url': row[3],
+                'archive_date': row[4],
+                'status': row[5],
+                'created_at': row[6]
+            })
+        return results
+
+    def record_snapshot_failure(self, link_id: int, service: str, error_message: str) -> Dict:
+        """Record a failed snapshot attempt with exponential backoff.
+
+        Args:
+            link_id: Link ID
+            service: Service name
+            error_message: Error description
+
+        Returns:
+            Dict with retry info
+        """
+        cursor = self.conn.cursor()
+        now = datetime.now()
+
+        # Get or create existing snapshot record for this service
+        snapshot = self.get_latest_snapshot(link_id, service)
+
+        if snapshot and snapshot['status'] == 'failed':
+            # Update existing failed snapshot
+            attempts = snapshot['attempts'] + 1
+            snapshot_id = snapshot['id']
+
+            # Calculate next retry
+            delay_days = min(1 * (2 ** (attempts - 1)), 30)
+            next_retry = now + timedelta(days=delay_days)
+
+            cursor.execute("""
+                UPDATE archive_snapshots
+                SET attempts = ?, last_attempt = ?, error_message = ?,
+                    next_retry_after = ?, updated_at = ?
+                WHERE id = ?
+            """, (attempts, now.isoformat(), error_message, next_retry.isoformat(),
+                  now.isoformat(), snapshot_id))
+        else:
+            # Create new failed snapshot
+            attempts = 1
+            delay_days = 1
+            next_retry = now + timedelta(days=delay_days)
+
+            snapshot_id = self.add_archive_snapshot(
+                link_id=link_id,
+                service=service,
+                status='failed',
+                error_message=error_message
+            )
+
+            cursor.execute("""
+                UPDATE archive_snapshots
+                SET attempts = ?, last_attempt = ?, next_retry_after = ?
+                WHERE id = ?
+            """, (attempts, now.isoformat(), next_retry.isoformat(), snapshot_id))
+
+        self.conn.commit()
+
+        return {
+            "snapshot_id": snapshot_id,
+            "attempts": attempts,
+            "next_retry_after": next_retry,
+            "delay_days": delay_days
+        }
+
     def get_links_ready_for_retry(self) -> List[Dict]:
         """Get links that failed but are ready to retry based on backoff."""
         cursor = self.conn.cursor()
