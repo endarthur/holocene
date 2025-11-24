@@ -12,7 +12,7 @@ import json
 
 from holocene.integrations.local_archive import LocalArchiveClient, ArchiveFormat
 from holocene.integrations.internet_archive import InternetArchiveClient
-from holocene.storage.database import HoloceneDatabase
+from holocene.storage.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class ArchivingService:
 
     def __init__(
         self,
-        db: HoloceneDatabase,
+        db: Database,
         local_client: Optional[LocalArchiveClient] = None,
         ia_client: Optional[InternetArchiveClient] = None,
     ):
