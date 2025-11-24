@@ -110,8 +110,17 @@ class LocalArchiveClient:
             # -j: Include JavaScript
             # -i: Include images
             # -I: Isolate document (prevent external requests)
+            # -u: User-Agent (pretend to be Firefox to avoid blocking)
+            # -t: Timeout for network requests
             result = subprocess.run(
-                ["monolith", "-j", "-i", "-I", url, "-o", str(output_path)],
+                [
+                    "monolith",
+                    "-j", "-i", "-I",
+                    "-u", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+                    "-t", "30",
+                    url,
+                    "-o", str(output_path)
+                ],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
