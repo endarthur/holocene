@@ -108,7 +108,21 @@ class InternetArchiveClient(BaseAPIClient):
             if self.access_key and self.secret_key:
                 headers["Authorization"] = f"LOW {self.access_key}:{self.secret_key}"
 
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[IA] Starting save_url for: {url}")
+            logger.info(f"[IA] Save endpoint: {save_endpoint}")
+            logger.info(f"[IA] Headers: {bool(headers)}")
+
+            import time
+            start_time = time.time()
+            logger.info(f"[IA] About to call self.get() at {start_time}")
+
             response = self.get(save_endpoint, headers=headers, timeout=90)
+
+            elapsed = time.time() - start_time
+            logger.info(f"[IA] self.get() returned after {elapsed:.2f}s")
+            logger.info(f"[IA] Response status: {response.status_code}")
 
             # IA returns various status codes
             if response.status_code in [200, 301, 302]:
@@ -145,6 +159,11 @@ class InternetArchiveClient(BaseAPIClient):
                 }
 
         except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"[IA] Exception after {elapsed:.2f}s: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"[IA] Traceback:\n{traceback.format_exc()}")
+
             return {
                 "status": "error",
                 "url": url,

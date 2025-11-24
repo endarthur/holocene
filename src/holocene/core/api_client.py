@@ -121,11 +121,23 @@ class BaseAPIClient:
 
         # Apply rate limiting if enabled
         if respect_rate_limit and self.rate_limiter:
+            import time
+            logger.info(f"[BaseAPIClient] Waiting for rate limiter: {url}")
+            wait_start = time.time()
             self.rate_limiter.wait_for_token(url)
+            wait_elapsed = time.time() - wait_start
+            logger.info(f"[BaseAPIClient] Rate limiter released after {wait_elapsed:.2f}s")
 
         # Make request
         logger.debug(f"{method} {url}")
+        logger.info(f"[BaseAPIClient] Making {method} request to {url} (timeout={timeout}s)")
+
+        import time
+        req_start = time.time()
         response = self.session.request(method, url, timeout=timeout, **kwargs)
+        req_elapsed = time.time() - req_start
+
+        logger.info(f"[BaseAPIClient] Request completed in {req_elapsed:.2f}s, status={response.status_code}")
 
         return response
 
