@@ -134,6 +134,73 @@ MIGRATIONS: List[Dict] = [
             CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_user_id);
         """,
     },
+    {
+        'version': 8,
+        'name': 'add_archive_snapshots_table',
+        'description': 'Create archive_snapshots table for multi-service archiving and time-series snapshots',
+        'up': """
+            -- Archive snapshots table - supports multiple services and historical snapshots
+            CREATE TABLE IF NOT EXISTS archive_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                link_id INTEGER NOT NULL,
+                service TEXT NOT NULL,  -- 'internet_archive', 'archive_is', 'archive_today'
+                snapshot_url TEXT,
+                archive_date TEXT,  -- Service's timestamp (e.g., IA's YYYYMMDDhhmmss)
+                status TEXT NOT NULL,  -- 'success', 'failed', 'pending'
+                attempts INTEGER DEFAULT 0,
+                last_attempt TEXT,
+                next_retry_after TEXT,
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                metadata TEXT DEFAULT '{}',
+                FOREIGN KEY(link_id) REFERENCES links(id) ON DELETE CASCADE
+            );
+
+            -- Indexes for efficient queries
+            CREATE INDEX IF NOT EXISTS idx_snapshots_latest ON archive_snapshots(link_id, service, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_snapshots_status ON archive_snapshots(status);
+            CREATE INDEX IF NOT EXISTS idx_snapshots_next_retry ON archive_snapshots(next_retry_after);
+            CREATE INDEX IF NOT EXISTS idx_snapshots_link_id ON archive_snapshots(link_id);
+
+            -- Migrate existing archive data from links table to archive_snapshots
+            -- Only migrate rows that have an archive_url
+            INSERT INTO archive_snapshots (
+                link_id,
+                service,
+                snapshot_url,
+                archive_date,
+                status,
+                attempts,
+                last_attempt,
+                next_retry_after,
+                error_message,
+                created_at,
+                updated_at
+            )
+            SELECT
+                id AS link_id,
+                'internet_archive' AS service,
+                archive_url AS snapshot_url,
+                archive_date,
+                CASE
+                    WHEN archived = 1 THEN 'success'
+                    WHEN archive_attempts > 0 THEN 'failed'
+                    ELSE 'pending'
+                END AS status,
+                COALESCE(archive_attempts, 0) AS attempts,
+                last_archive_attempt AS last_attempt,
+                next_retry_after,
+                last_archive_error AS error_message,
+                COALESCE(created_at, datetime('now')) AS created_at,
+                COALESCE(created_at, datetime('now')) AS updated_at
+            FROM links
+            WHERE archive_url IS NOT NULL OR archive_attempts > 0;
+
+            -- Note: We keep the old columns in links table for backwards compatibility
+            -- They will be deprecated in future versions but not removed yet
+        """,
+    },
 ]
 
 
