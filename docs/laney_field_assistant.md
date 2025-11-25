@@ -216,13 +216,91 @@ Laney: "Field session complete. 8.2km traveled, 7 samples logged,
 - AR glasses (XReal Air 2 or similar)
 - M4 Mac Mini for local LLM
 - Rugged Android phone (CAT S62 or similar)
-- Satellite communicator (Garmin inReach) for emergencies
+- Satellite communicator (Garmin inReach or SPOT Gen4) for emergencies
 - Portable battery pack
 
 ### Future Dream Setup
 - Meta Orion-style AR glasses (2026+)
 - Bone conduction audio (AfterShokz)
-- Always-on cellular via satellite (Starlink Direct-to-Cell)
+- Satellite messaging integration (see below)
+
+## Connectivity Tiers
+
+Laney's capabilities adapt based on available connectivity:
+
+### Tier 1: Full Network (HQ Connected)
+**Scenario:** WiFi/cellular to holocene-rei
+**Capabilities:**
+- Full DeepSeek V3 inference (128K context)
+- Access to complete archive (1,200+ links, all papers)
+- Real-time sync with main database
+- High-quality TTS (Bark)
+- Full map data
+
+### Tier 2: PicoLaney (Phone-only, Offline)
+**Scenario:** No network, phone has local LLM
+**Capabilities:**
+- Lightweight LLM on phone (Phi-3, Gemma 2B, or Llama 3.2 3B)
+- Pre-cached map tiles (50-100MB for region)
+- Recent field notes (last 30 days)
+- Basic voice commands
+- Photo geotagging and logging
+- Fast TTS (Piper)
+
+**Tech Stack:**
+- **LLM:** Phi-3-mini (3.8B) or Llama 3.2 3B via Ollama Android
+- **Storage:** SQLite database (syncs when connected)
+- **Maps:** MBTiles format (vector tiles, 50-100MB per region)
+- **Voice:** Whisper.cpp (optimized for mobile)
+
+**Use Case:** Deep in the field, no signal, but still want voice logging and basic AI assistance.
+
+### Tier 3: Emergency (Satellite Only)
+**Scenario:** No cellular, only satellite messenger
+**Capabilities:**
+- Emergency beacon (SOS)
+- Check-in messages ("All good", "Need pickup", "Medical")
+- GPS position sharing
+- Receive weather alerts
+- Minimal text messages (140 chars, like SMS)
+
+**Hardware Options (all non-Musk):**
+- **Garmin inReach Mini 2** ($400, Iridium network)
+  - Two-way messaging
+  - Weather forecasts
+  - SOS to GEOS rescue
+  - ~50 hours battery
+
+- **SPOT Gen4** ($150, Globalstar network)
+  - Pre-set messages only
+  - SOS to rescue
+  - GPS tracking
+  - Cheaper but less flexible
+
+- **Zoleo** ($200, Iridium network)
+  - Two-way messaging via phone app
+  - SOS rescue
+  - Weather forecasts
+  - Good middle ground
+
+**Integration Idea:**
+- Send check-in to holocene-rei via satellite
+- Laney logs your position automatically
+- If check-in doesn't arrive on schedule, alert emergency contact
+- Can request simple data: "WEATHER" → Laney replies with forecast via satellite
+
+**Satellite Message Protocol:**
+```
+From field: "CHECKIN komatiite zone, 3 samples"
+Laney reply: "Logged. Weather clear 4h. Sunset 1823."
+
+From field: "QUERY nearest water"
+Laney reply: "Stream 2.3km SE (23.54°S 45.32°E)"
+
+Emergency: "SOS medical"
+Laney action: Alert emergency contact, send last known position,
+              notify rescue services, keep position tracking active
+```
 
 ## Implementation Roadmap
 
