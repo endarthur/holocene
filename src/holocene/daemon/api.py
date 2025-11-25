@@ -1798,54 +1798,94 @@ class APIServer:
             elif response.status_code != 200:
                 return abort(response.status_code, description=f"ArchiveBox returned status {response.status_code}")
 
-            # Get HTML content
+            # Get HTML content with proper encoding detection
+            # Force UTF-8 if encoding is not detected
+            if response.encoding is None:
+                response.encoding = 'utf-8'
             html_content = response.text
 
-            # Create archive banner (inspired by Wayback Machine)
+            # Create archive banner with holographic effect
             banner_html = f"""
-            <div id="holocene-archive-banner" style="
-                position: sticky;
-                top: 0;
-                z-index: 999999;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 12px 20px;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                font-size: 14px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-                border-bottom: 2px solid rgba(255,255,255,0.2);
-            ">
-                <div style="max-width: 1200px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-size: 20px;">📦</span>
+            <style>
+                @keyframes holo-shimmer {{
+                    0% {{ background-position: -200% center; }}
+                    100% {{ background-position: 200% center; }}
+                }}
+                #holocene-archive-banner {{
+                    position: fixed !important;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    width: 100%;
+                    z-index: 2147483647;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 10px 20px;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    font-size: 14px;
+                    box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+                    border-bottom: 2px solid rgba(255,255,255,0.2);
+                    box-sizing: border-box;
+                }}
+                #holocene-archive-banner::before {{
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: linear-gradient(
+                        90deg,
+                        transparent 0%,
+                        rgba(255,255,255,0.15) 25%,
+                        rgba(255,255,255,0.3) 50%,
+                        rgba(255,255,255,0.15) 75%,
+                        transparent 100%
+                    );
+                    background-size: 200% 100%;
+                    animation: holo-shimmer 3s linear infinite;
+                    pointer-events: none;
+                }}
+                #holocene-banner-spacer {{
+                    height: 60px;
+                    display: block;
+                }}
+            </style>
+            <div id="holocene-archive-banner">
+                <div style="max-width: 1400px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; position: relative; z-index: 1;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 18px;">📦</span>
                         <div>
-                            <div style="font-weight: 600; margin-bottom: 2px;">
+                            <div style="font-weight: 600; font-size: 13px; margin-bottom: 1px;">
                                 Holocene Archive
                             </div>
-                            <div style="font-size: 12px; opacity: 0.9;">
+                            <div style="font-size: 11px; opacity: 0.85;">
                                 Archived on {archive_date[:10] if archive_date != "Unknown" else "Unknown date"}
                             </div>
                         </div>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                         <a href="{original_url}" target="_blank" rel="noopener noreferrer" style="
                             color: white;
                             text-decoration: none;
-                            padding: 6px 16px;
+                            padding: 5px 14px;
                             background: rgba(255,255,255,0.2);
                             border-radius: 4px;
                             font-weight: 500;
+                            font-size: 13px;
                             transition: background 0.2s;
                             border: 1px solid rgba(255,255,255,0.3);
-                        " onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
+                            white-space: nowrap;
+                        " onmouseover="this.style.background='rgba(255,255,255,0.35)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
                             🔗 Visit Live Site
                         </a>
-                        <div style="font-size: 11px; opacity: 0.8; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{original_url}">
+                        <div style="font-size: 11px; opacity: 0.75; max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{original_url}">
                             {original_url}
                         </div>
                     </div>
                 </div>
             </div>
+            <div id="holocene-banner-spacer"></div>
             """
 
             # Inject banner after <body> tag
