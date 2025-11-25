@@ -1761,14 +1761,16 @@ class APIServer:
 
         Args:
             snapshot_id: ArchiveBox snapshot ID (timestamp like 1764022942.528686)
+
+        Serves singlefile.html by default (comprehensive single-file archive with all assets embedded).
         """
         try:
             # Get ArchiveBox config
             archivebox_host = getattr(self.core.config.integrations, 'archivebox_host', '192.168.1.102')
             archivebox_port = 8000
 
-            # ArchiveBox URL
-            archivebox_url = f"http://{archivebox_host}:{archivebox_port}/archive/{snapshot_id}/"
+            # ArchiveBox URL - serve singlefile.html (comprehensive single-file archive)
+            archivebox_url = f"http://{archivebox_host}:{archivebox_port}/archive/{snapshot_id}/singlefile.html"
 
             logger.info(f"Proxying ArchiveBox snapshot: {archivebox_url}")
 

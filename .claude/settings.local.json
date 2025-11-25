@@ -11,7 +11,8 @@
       "Bash(git push:*)",
       "Bash(git commit:*)",
       "Bash(python3:*)",
-      "Bash(scp:*)"
+      "Bash(scp:*)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []
