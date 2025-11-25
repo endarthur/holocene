@@ -18,7 +18,8 @@
       "WebFetch(domain:tteck.github.io)",
       "WebFetch(domain:helper-scripts.com)",
       "WebSearch",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(pip show:*)"
     ],
     "deny": [],
     "ask": []

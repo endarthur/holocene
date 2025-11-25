@@ -136,7 +136,9 @@ class IntegrationsConfig(BaseModel):
     # Uptime Kuma (monitoring dashboard)
     uptime_kuma_enabled: bool = False
     uptime_kuma_url: str = "http://192.168.1.103:3001"
-    uptime_kuma_api_key: Optional[str] = None
+    uptime_kuma_api_key: Optional[str] = None  # For simple API calls
+    uptime_kuma_username: Optional[str] = None  # For Socket.IO API (monitor creation)
+    uptime_kuma_password: Optional[str] = None  # For Socket.IO API (monitor creation)
     uptime_kuma_push_token: Optional[str] = None  # For push monitor (daemon pings Uptime Kuma)
 
     def model_post_init(self, __context):
@@ -290,7 +292,9 @@ mercadolivre:
   uptime_kuma_enabled: false
   uptime_kuma_url: "http://192.168.1.103:3001"
   # uptime_kuma_api_key: "uk_xxxxx"  # Generate in Uptime Kuma Settings → API Keys
-  # uptime_kuma_push_token: "abc123"  # Create Push monitor, copy token from URL
+  # uptime_kuma_username: "admin"  # For auto-creating monitors
+  # uptime_kuma_password: "password"  # For auto-creating monitors
+  # uptime_kuma_push_token: "abc123"  # Auto-populated by 'holo monitor setup --create'
 """
 
 

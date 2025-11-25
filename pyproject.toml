@@ -74,6 +74,7 @@ all = [
     "holocene[paperang]",
     "holocene[research]",
     "holocene[integrations]",
+    "holocene[monitoring]",
 ]
 
 # Research features (embeddings, advanced search)
@@ -85,6 +86,11 @@ research = [
 integrations = [
     "apify-client>=1.7.0",    # Apify web scraping
     "urllib3>=2.0.0",         # HTTP client (explicit)
+]
+
+# Monitoring integrations (Uptime Kuma)
+monitoring = [
+    "uptime-kuma-api>=1.2.0", # Uptime Kuma Socket.IO API
 ]
 
 # Development dependencies
