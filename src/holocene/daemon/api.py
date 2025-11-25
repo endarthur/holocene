@@ -1763,6 +1763,7 @@ class APIServer:
             snapshot_id: ArchiveBox snapshot ID (timestamp like 1764022942.528686)
 
         Serves singlefile.html by default (comprehensive single-file archive with all assets embedded).
+        Injects an archive banner at the top showing metadata and link to live site.
         """
         try:
             # Get ArchiveBox config
@@ -1774,32 +1775,101 @@ class APIServer:
 
             logger.info(f"Proxying ArchiveBox snapshot: {archivebox_url}")
 
+            # Get archive metadata from database
+            cursor = self.core.db.conn.cursor()
+            cursor.execute("""
+                SELECT l.url, a.archive_date, a.created_at, a.metadata
+                FROM archive_snapshots a
+                JOIN links l ON a.link_id = l.id
+                WHERE a.service = 'archivebox' AND a.metadata LIKE ?
+                LIMIT 1
+            """, (f'%{snapshot_id}%',))
+
+            metadata = cursor.fetchone()
+            original_url = metadata[0] if metadata else "Unknown"
+            archive_date = metadata[1] if metadata else "Unknown"
+            created_at = metadata[2] if metadata else "Unknown"
+
             # Make request to ArchiveBox
-            response = requests.get(archivebox_url, timeout=30, stream=True)
+            response = requests.get(archivebox_url, timeout=30)
 
             if response.status_code == 404:
                 return abort(404, description=f"ArchiveBox snapshot {snapshot_id} not found")
             elif response.status_code != 200:
                 return abort(response.status_code, description=f"ArchiveBox returned status {response.status_code}")
 
+            # Get HTML content
+            html_content = response.text
+
+            # Create archive banner (inspired by Wayback Machine)
+            banner_html = f"""
+            <div id="holocene-archive-banner" style="
+                position: sticky;
+                top: 0;
+                z-index: 999999;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 12px 20px;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                font-size: 14px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                border-bottom: 2px solid rgba(255,255,255,0.2);
+            ">
+                <div style="max-width: 1200px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 20px;">📦</span>
+                        <div>
+                            <div style="font-weight: 600; margin-bottom: 2px;">
+                                Holocene Archive
+                            </div>
+                            <div style="font-size: 12px; opacity: 0.9;">
+                                Archived on {archive_date[:10] if archive_date != "Unknown" else "Unknown date"}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <a href="{original_url}" target="_blank" rel="noopener noreferrer" style="
+                            color: white;
+                            text-decoration: none;
+                            padding: 6px 16px;
+                            background: rgba(255,255,255,0.2);
+                            border-radius: 4px;
+                            font-weight: 500;
+                            transition: background 0.2s;
+                            border: 1px solid rgba(255,255,255,0.3);
+                        " onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">
+                            🔗 Visit Live Site
+                        </a>
+                        <div style="font-size: 11px; opacity: 0.8; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{original_url}">
+                            {original_url}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """
+
+            # Inject banner after <body> tag
+            if '<body' in html_content.lower():
+                # Find the end of the <body> tag (handles attributes)
+                import re
+                body_match = re.search(r'<body[^>]*>', html_content, re.IGNORECASE)
+                if body_match:
+                    insert_pos = body_match.end()
+                    html_content = html_content[:insert_pos] + banner_html + html_content[insert_pos:]
+            else:
+                # Fallback: prepend to content
+                html_content = banner_html + html_content
+
             # Proxy the response
             from flask import Response
 
-            # Get content type from ArchiveBox response
-            content_type = response.headers.get('Content-Type', 'text/html')
-
-            # Stream the response
-            def generate():
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        yield chunk
-
             return Response(
-                generate(),
-                status=response.status_code,
-                content_type=content_type,
+                html_content,
+                status=200,
+                content_type='text/html; charset=utf-8',
                 headers={
                     'X-Proxied-From': archivebox_url,
+                    'X-Original-URL': original_url,
                 }
             )
 
