@@ -1826,6 +1826,10 @@ class APIServer:
                     box-shadow: 0 2px 12px rgba(0,0,0,0.2);
                     border-bottom: 2px solid rgba(255,255,255,0.2);
                     box-sizing: border-box;
+                    transition: transform 0.3s ease;
+                }}
+                #holocene-archive-banner.hidden {{
+                    transform: translateY(-100%);
                 }}
                 #holocene-archive-banner::before {{
                     content: '';
@@ -1843,12 +1847,38 @@ class APIServer:
                         transparent 100%
                     );
                     background-size: 200% 100%;
-                    animation: holo-shimmer 3s linear infinite;
+                    animation: holo-shimmer 12s linear infinite;
                     pointer-events: none;
                 }}
                 #holocene-banner-spacer {{
                     height: 60px;
                     display: block;
+                    transition: height 0.3s ease;
+                }}
+                #holocene-banner-spacer.hidden {{
+                    height: 0;
+                }}
+                #holocene-banner-toggle {{
+                    position: fixed;
+                    top: 65px;
+                    right: 20px;
+                    z-index: 2147483646;
+                    background: rgba(102, 126, 234, 0.9);
+                    color: white;
+                    border: 1px solid rgba(255,255,255,0.3);
+                    padding: 6px 10px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    font-size: 12px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                    transition: all 0.3s ease;
+                }}
+                #holocene-banner-toggle:hover {{
+                    background: rgba(118, 75, 162, 0.9);
+                }}
+                #holocene-banner-toggle.banner-hidden {{
+                    top: 10px;
                 }}
             </style>
             <div id="holocene-archive-banner">
@@ -1885,6 +1915,15 @@ class APIServer:
                     </div>
                 </div>
             </div>
+            <button id="holocene-banner-toggle" onclick="
+                var banner = document.getElementById('holocene-archive-banner');
+                var spacer = document.getElementById('holocene-banner-spacer');
+                var toggle = document.getElementById('holocene-banner-toggle');
+                var isHidden = banner.classList.toggle('hidden');
+                spacer.classList.toggle('hidden');
+                toggle.classList.toggle('banner-hidden');
+                toggle.innerHTML = isHidden ? '▼ Show Archive Banner' : '▲ Hide Banner';
+            ">▲ Hide Banner</button>
             <div id="holocene-banner-spacer"></div>
             """
 
