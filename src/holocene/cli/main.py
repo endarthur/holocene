@@ -1336,6 +1336,268 @@ def archive_queue(batch_size: int, delay: int, service: str, source: str):
     db.close()
 
 
+@links.command("check")
+@click.option("--batch-size", "-n", type=int, default=50, help="Number of links to check (default: 50)")
+@click.option("--delay", "-d", type=float, default=1.5, help="Delay in seconds between checks (default: 1.5)")
+def links_check(batch_size: int, delay: float):
+    """Check link health for a batch of links.
+
+    Checks links that haven't been checked recently (>21 days) or never.
+    Prioritizes pre-llm era links (most valuable) over recent links.
+
+    Examples:
+        # Check 50 links (default)
+        holo links check
+
+        # Check 100 links with faster polling
+        holo links check -n 100 -d 0.5
+    """
+    import time
+    import requests
+    from datetime import datetime, timedelta
+
+    config = load_config()
+    db = Database(config.db_path)
+    cursor = db.conn.cursor()
+
+    # Get links to check (same priority as plugin)
+    cutoff_date = (datetime.now() - timedelta(days=21)).isoformat()
+
+    cursor.execute("""
+        SELECT id, url, title, trust_tier, last_checked FROM links
+        WHERE last_checked IS NULL
+           OR last_checked < ?
+        ORDER BY
+            CASE WHEN last_checked IS NULL THEN 0 ELSE 1 END,
+            CASE WHEN trust_tier = 'pre-llm' THEN 0
+                 WHEN trust_tier = 'early-llm' THEN 1
+                 ELSE 2 END,
+            last_checked ASC
+        LIMIT ?
+    """, (cutoff_date, batch_size))
+
+    links_to_check = cursor.fetchall()
+
+    if not links_to_check:
+        console.print("[green]✓[/green] All links have been checked recently")
+        db.close()
+        return
+
+    console.print(f"[cyan]Checking {len(links_to_check)} link(s)[/cyan]")
+    console.print(f"[dim]Delay: {delay}s between checks[/dim]\n")
+
+    # HTTP session with pooling
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (compatible; HoloceneBot/1.0; +https://github.com/endarthur/holocene)'
+    })
+
+    stats = {"alive": 0, "dead": 0, "timeout": 0, "error": 0}
+
+    for i, (link_id, url, title, trust_tier, last_checked) in enumerate(links_to_check, 1):
+        display_url = url[:55] + "..." if len(url) > 58 else url
+        tier_badge = f"[magenta]{trust_tier}[/magenta]" if trust_tier == "pre-llm" else f"[dim]{trust_tier or 'recent'}[/dim]"
+        console.print(f"[{i}/{len(links_to_check)}] {tier_badge} {display_url}", end=" ")
+
+        try:
+            # Try HEAD first (faster)
+            start_time = time.time()
+            response = session.head(url, timeout=15, allow_redirects=True)
+
+            # Fall back to GET if HEAD not allowed
+            if response.status_code == 405:
+                response = session.get(url, timeout=15, allow_redirects=True, stream=True)
+                response.close()
+
+            response_time = int((time.time() - start_time) * 1000)
+
+            if 200 <= response.status_code < 400:
+                console.print(f"[green]✓[/green] {response.status_code} ({response_time}ms)")
+                status = "alive"
+                stats["alive"] += 1
+            else:
+                console.print(f"[red]✗[/red] {response.status_code}")
+                status = "not_found" if response.status_code == 404 else "dead"
+                stats["dead"] += 1
+
+            status_code = response.status_code
+
+        except requests.Timeout:
+            console.print("[yellow]⏱[/yellow] timeout")
+            status = "timeout"
+            status_code = 0
+            stats["timeout"] += 1
+
+        except requests.ConnectionError as e:
+            if 'Name or service not known' in str(e) or 'getaddrinfo failed' in str(e):
+                console.print("[red]✗[/red] DNS error")
+                status = "dns_error"
+            else:
+                console.print("[red]✗[/red] connection error")
+                status = "connection_error"
+            status_code = 0
+            stats["error"] += 1
+
+        except Exception as e:
+            console.print(f"[red]✗[/red] {str(e)[:30]}")
+            status = "error"
+            status_code = 0
+            stats["error"] += 1
+
+        # Update database
+        now = datetime.now().isoformat()
+        cursor.execute("""
+            UPDATE links SET last_checked = ?, status = ?, status_code = ?
+            WHERE id = ?
+        """, (now, status, status_code, link_id))
+        db.conn.commit()
+
+        # Rate limiting delay (except after last)
+        if i < len(links_to_check):
+            time.sleep(delay)
+
+    session.close()
+
+    # Summary
+    console.print(f"\n[bold]Summary:[/bold]")
+    console.print(f"[green]✓[/green] Alive: {stats['alive']}")
+    console.print(f"[red]✗[/red] Dead: {stats['dead']}")
+    console.print(f"[yellow]⏱[/yellow] Timeout: {stats['timeout']}")
+    console.print(f"[dim]Errors: {stats['error']}[/dim]")
+
+    db.close()
+
+
+@links.command("health")
+def links_health():
+    """Show overall link health statistics.
+
+    Displays:
+    - Total links and how many have been checked
+    - Breakdown by status (alive, dead, timeout, etc.)
+    - Health percentage by trust tier
+    """
+    config = load_config()
+    db = Database(config.db_path)
+    cursor = db.conn.cursor()
+
+    # Total links
+    cursor.execute("SELECT COUNT(*) FROM links")
+    total = cursor.fetchone()[0]
+
+    if total == 0:
+        console.print("[yellow]No links in database[/yellow]")
+        db.close()
+        return
+
+    # Checked vs unchecked
+    cursor.execute("SELECT COUNT(*) FROM links WHERE last_checked IS NOT NULL")
+    checked = cursor.fetchone()[0]
+    unchecked = total - checked
+
+    # Status breakdown
+    cursor.execute("""
+        SELECT status, COUNT(*) FROM links
+        WHERE status IS NOT NULL
+        GROUP BY status
+        ORDER BY COUNT(*) DESC
+    """)
+    status_counts = dict(cursor.fetchall())
+
+    # By trust tier
+    cursor.execute("""
+        SELECT
+            COALESCE(trust_tier, 'recent') as tier,
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'alive' THEN 1 ELSE 0 END) as alive,
+            SUM(CASE WHEN last_checked IS NOT NULL THEN 1 ELSE 0 END) as checked
+        FROM links
+        GROUP BY trust_tier
+        ORDER BY
+            CASE WHEN trust_tier = 'pre-llm' THEN 0
+                 WHEN trust_tier = 'early-llm' THEN 1
+                 ELSE 2 END
+    """)
+    tier_stats = cursor.fetchall()
+
+    # Display
+    console.print()
+    console.print(Panel.fit("[bold cyan]Link Health Report[/bold cyan]", border_style="cyan"))
+    console.print()
+
+    # Overall stats
+    alive = status_counts.get('alive', 0)
+    health_pct = (alive / checked * 100) if checked > 0 else 0
+    coverage_pct = (checked / total * 100) if total > 0 else 0
+
+    table = Table(show_header=False, box=None)
+    table.add_column("Metric", style="bold")
+    table.add_column("Value", justify="right")
+    table.add_row("Total Links", f"{total:,}")
+    table.add_row("Checked", f"{checked:,} ({coverage_pct:.1f}%)")
+    table.add_row("Unchecked", f"{unchecked:,}")
+    table.add_row("", "")
+    table.add_row("Alive", f"[green]{alive:,}[/green]")
+    table.add_row("Health", f"[{'green' if health_pct >= 90 else 'yellow' if health_pct >= 70 else 'red'}]{health_pct:.1f}%[/]")
+    console.print(table)
+    console.print()
+
+    # Status breakdown
+    if status_counts:
+        console.print("[bold]Status Breakdown:[/bold]")
+        status_table = Table(show_header=True)
+        status_table.add_column("Status", style="cyan")
+        status_table.add_column("Count", justify="right")
+        status_table.add_column("Percentage", justify="right")
+
+        status_colors = {
+            'alive': 'green',
+            'dead': 'red',
+            'not_found': 'red',
+            'timeout': 'yellow',
+            'dns_error': 'red',
+            'connection_error': 'yellow',
+            'forbidden': 'yellow',
+            'server_error': 'red',
+        }
+
+        for status, count in sorted(status_counts.items(), key=lambda x: -x[1]):
+            color = status_colors.get(status, 'white')
+            pct = (count / checked * 100) if checked > 0 else 0
+            status_table.add_row(f"[{color}]{status}[/]", str(count), f"{pct:.1f}%")
+
+        console.print(status_table)
+        console.print()
+
+    # By trust tier
+    if tier_stats:
+        console.print("[bold]By Trust Tier:[/bold]")
+        tier_table = Table(show_header=True)
+        tier_table.add_column("Tier", style="magenta")
+        tier_table.add_column("Total", justify="right")
+        tier_table.add_column("Checked", justify="right")
+        tier_table.add_column("Alive", justify="right")
+        tier_table.add_column("Health", justify="right")
+
+        for tier, tier_total, tier_alive, tier_checked in tier_stats:
+            tier_health = (tier_alive / tier_checked * 100) if tier_checked > 0 else 0
+            health_color = 'green' if tier_health >= 90 else 'yellow' if tier_health >= 70 else 'red'
+            tier_table.add_row(
+                tier,
+                str(tier_total),
+                str(tier_checked),
+                f"[green]{tier_alive}[/green]",
+                f"[{health_color}]{tier_health:.1f}%[/]"
+            )
+
+        console.print(tier_table)
+
+    console.print()
+    console.print("[dim]Run 'holo links check' to check more links[/dim]")
+
+    db.close()
+
+
 @cli.group()
 def books():
     """Manage your book collection for research."""

@@ -235,6 +235,17 @@ class Database:
             )
         """)
 
+        # Add link health check columns if they don't exist
+        try:
+            cursor.execute("ALTER TABLE links ADD COLUMN status TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            cursor.execute("ALTER TABLE links ADD COLUMN status_code INTEGER")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
         # Create books table
         # NOTE: Several columns are DEPRECATED as of Migration 6 (2025-11-21):
         # - enriched_summary, enriched_tags, enriched_at → Use metadata.enrichment

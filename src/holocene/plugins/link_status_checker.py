@@ -1,33 +1,40 @@
 """Link Status Checker Plugin - Monitors link health and detects rot.
 
 This plugin:
-- Checks if links are alive (HTTP status codes)
-- Fetches metadata (title, description, OpenGraph)
+- Checks links in batches to avoid overwhelming servers
 - Detects link rot (404s, timeouts, etc.)
 - Updates link status in database
-- Subscribes to links.added events for new links
-- Publishes link.checked events
-- Supports periodic checking of stale links
+- Reports overall link health to Uptime Kuma (if configured)
+- Runs on a schedule (default: every hour, 50 links per batch)
 """
 
+import time
+import sqlite3
+import threading
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from urllib.parse import urlparse
 
 from holocene.core import Plugin, Message
 
 
 class LinkStatusCheckerPlugin(Plugin):
-    """Automatically checks link health and detects rot."""
+    """Monitors link health and detects link rot."""
+
+    # Configuration
+    BATCH_SIZE = 50  # Links per batch
+    CHECK_INTERVAL_SECONDS = 3600  # 1 hour between batch checks
+    DELAY_BETWEEN_CHECKS = 1.5  # Seconds between individual link checks
+    REQUEST_TIMEOUT = 15  # Seconds
+    MAX_LINK_AGE_DAYS = 21  # Re-check links older than this
 
     def get_metadata(self):
         return {
             "name": "link_status_checker",
-            "version": "1.0.0",
-            "description": "Monitors link health, fetches metadata, and detects link rot",
-            "runs_on": ["rei", "wmut", "both"],
+            "version": "2.0.0",
+            "description": "Monitors link health with batch processing and Uptime Kuma integration",
+            "runs_on": ["rei"],
             "requires": []
         }
 
@@ -35,49 +42,99 @@ class LinkStatusCheckerPlugin(Plugin):
         """Initialize the plugin."""
         self.logger.info("LinkStatusChecker plugin loaded")
 
-        # Stats
-        self.checked_count = 0
-        self.alive_count = 0
-        self.dead_count = 0
-        self.failed_count = 0
+        # Stats for current session
+        self.session_stats = {
+            "checked": 0,
+            "alive": 0,
+            "dead": 0,
+            "errors": 0,
+            "last_batch_time": None
+        }
 
-        # HTTP session for connection pooling
+        # Background thread for scheduled checks
+        self._check_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+
+        # HTTP session with connection pooling
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (compatible; HoloceneBot/1.0; +https://github.com/endarthur/holocene)'
         })
 
     def on_enable(self):
-        """Enable the plugin and subscribe to events."""
+        """Enable the plugin and start scheduled checks."""
         self.logger.info("LinkStatusChecker plugin enabled")
 
-        # Subscribe to link events
-        self.subscribe('links.added', self._on_link_added)
+        # Subscribe to events
+        self.subscribe('links.check_batch', self._on_check_batch)
         self.subscribe('link.check_requested', self._on_check_requested)
-        self.subscribe('links.check_stale', self._on_check_stale)
 
-    def _on_link_added(self, msg: Message):
-        """Handle links.added event - check new links."""
-        link_id = msg.data.get('link_id')
-        if not link_id:
+        # Start background checker
+        self._start_scheduled_checker()
+
+    def on_disable(self):
+        """Disable the plugin and stop background thread."""
+        self._stop_scheduled_checker()
+
+        self.logger.info(
+            f"LinkStatusChecker disabled - Session stats: "
+            f"{self.session_stats['checked']} checked, "
+            f"{self.session_stats['alive']} alive, "
+            f"{self.session_stats['dead']} dead, "
+            f"{self.session_stats['errors']} errors"
+        )
+
+        if hasattr(self, 'session'):
+            self.session.close()
+
+    def _start_scheduled_checker(self):
+        """Start the background scheduled checker thread."""
+        self._stop_event.clear()
+        self._check_thread = threading.Thread(
+            target=self._scheduled_checker_worker,
+            daemon=True,
+            name="link_checker"
+        )
+        self._check_thread.start()
+        self.logger.info("Scheduled link checker started")
+
+    def _stop_scheduled_checker(self):
+        """Stop the background scheduled checker thread."""
+        if self._check_thread and self._check_thread.is_alive():
+            self.logger.info("Stopping scheduled link checker...")
+            self._stop_event.set()
+            self._check_thread.join(timeout=5)
+            self.logger.info("Scheduled link checker stopped")
+
+    def _scheduled_checker_worker(self):
+        """Background worker that runs batch checks on schedule."""
+        self.logger.info(f"Link checker worker started (interval: {self.CHECK_INTERVAL_SECONDS}s)")
+
+        # Initial delay to let daemon fully start
+        if self._stop_event.wait(30):
             return
 
-        self.logger.info(f"New link added: {link_id}, checking status")
+        while not self._stop_event.is_set():
+            try:
+                self._run_batch_check()
+            except Exception as e:
+                self.logger.error(f"Batch check failed: {e}", exc_info=True)
 
-        # Get link from database
-        link = self._get_link(link_id)
-        if not link:
-            self.logger.warning(f"Link {link_id} not found")
-            return
+            # Wait for next check interval
+            if self._stop_event.wait(self.CHECK_INTERVAL_SECONDS):
+                break
 
-        # Check in background
-        self._check_link_async(link_id, link)
+        self.logger.info("Link checker worker stopped")
+
+    def _on_check_batch(self, msg: Message):
+        """Handle manual batch check request."""
+        batch_size = msg.data.get('batch_size', self.BATCH_SIZE)
+        self.logger.info(f"Manual batch check requested (size: {batch_size})")
+        self._run_batch_check(batch_size=batch_size)
 
     def _on_check_requested(self, msg: Message):
-        """Handle manual check requests."""
+        """Handle single link check request."""
         link_id = msg.data.get('link_id')
-        force = msg.data.get('force', False)
-
         if not link_id:
             return
 
@@ -86,292 +143,292 @@ class LinkStatusCheckerPlugin(Plugin):
             self.logger.warning(f"Link {link_id} not found")
             return
 
-        # Check if recently checked (unless forced)
-        if not force and self._was_recently_checked(link):
-            self.logger.info(f"Link {link_id} was recently checked, skipping")
+        self.logger.info(f"Checking single link: {link_id}")
+        result = self._check_link(link)
+        self._update_link_status(link_id, result)
+
+    def _run_batch_check(self, batch_size: Optional[int] = None):
+        """Run a batch check of stale links."""
+        batch_size = batch_size or self.BATCH_SIZE
+
+        # Get links to check
+        links = self._get_links_to_check(batch_size)
+
+        if not links:
+            self.logger.info("No links to check")
+            self._report_health_to_uptime_kuma()
             return
 
-        self.logger.info(f"Checking link {link_id} (force={force})")
-        self._check_link_async(link_id, link)
+        self.logger.info(f"Starting batch check of {len(links)} links")
+        self.session_stats['last_batch_time'] = datetime.now().isoformat()
 
-    def _on_check_stale(self, msg: Message):
-        """Handle periodic stale link checking."""
-        max_age_days = msg.data.get('max_age_days', 7)
+        batch_stats = {"checked": 0, "alive": 0, "dead": 0, "errors": 0}
 
-        self.logger.info(f"Checking for stale links (older than {max_age_days} days)")
+        for link in links:
+            if self._stop_event.is_set():
+                self.logger.info("Batch check interrupted by stop event")
+                break
 
-        # Get stale links
-        stale_links = self._get_stale_links(max_age_days)
+            link_id = link['id']
+            url = link['url']
 
-        if not stale_links:
-            self.logger.info("No stale links to check")
-            return
+            try:
+                result = self._check_link(link)
+                self._update_link_status(link_id, result)
 
-        self.logger.info(f"Found {len(stale_links)} stale links to check")
+                batch_stats['checked'] += 1
+                self.session_stats['checked'] += 1
 
-        # Check each in background
-        for link in stale_links:
-            link_id = link.get('id')
-            self._check_link_async(link_id, link)
+                if result['is_alive']:
+                    batch_stats['alive'] += 1
+                    self.session_stats['alive'] += 1
+                else:
+                    batch_stats['dead'] += 1
+                    self.session_stats['dead'] += 1
+
+            except Exception as e:
+                self.logger.error(f"Error checking {url}: {e}")
+                batch_stats['errors'] += 1
+                self.session_stats['errors'] += 1
+
+            # Rate limiting - wait between checks
+            time.sleep(self.DELAY_BETWEEN_CHECKS)
+
+        self.logger.info(
+            f"Batch check complete: {batch_stats['checked']} checked, "
+            f"{batch_stats['alive']} alive, {batch_stats['dead']} dead, "
+            f"{batch_stats['errors']} errors"
+        )
+
+        # Publish batch complete event
+        self.publish('links.batch_checked', {
+            'stats': batch_stats,
+            'session_stats': self.session_stats
+        })
+
+        # Report health to Uptime Kuma
+        self._report_health_to_uptime_kuma()
+
+    def _get_links_to_check(self, limit: int) -> List[Dict]:
+        """Get links that need checking, prioritized by age and importance."""
+        try:
+            cursor = self.core.db.conn.cursor()
+            cutoff_date = (datetime.now() - timedelta(days=self.MAX_LINK_AGE_DAYS)).isoformat()
+
+            # Prioritize:
+            # 1. Never checked links
+            # 2. Links with trust_tier 'pre-llm' (most valuable)
+            # 3. Oldest checked links
+            cursor.execute("""
+                SELECT * FROM links
+                WHERE last_checked IS NULL
+                   OR last_checked < ?
+                ORDER BY
+                    CASE WHEN last_checked IS NULL THEN 0 ELSE 1 END,
+                    CASE WHEN trust_tier = 'pre-llm' THEN 0
+                         WHEN trust_tier = 'early-llm' THEN 1
+                         ELSE 2 END,
+                    last_checked ASC
+                LIMIT ?
+            """, (cutoff_date, limit))
+
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            self.logger.error(f"Failed to get links to check: {e}")
+            return []
 
     def _get_link(self, link_id: int) -> Optional[Dict]:
-        """Get link from database."""
+        """Get a single link by ID."""
         try:
             cursor = self.core.db.conn.cursor()
             cursor.execute("SELECT * FROM links WHERE id = ?", (link_id,))
             row = cursor.fetchone()
-
-            if not row:
-                return None
-
-            # Convert to dict
-            return dict(row)
+            return dict(row) if row else None
         except Exception as e:
             self.logger.error(f"Failed to get link {link_id}: {e}")
             return None
 
-    def _get_stale_links(self, max_age_days: int) -> list:
-        """Get links that haven't been checked recently."""
-        try:
-            cursor = self.core.db.conn.cursor()
-            cutoff_date = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+    def _check_link(self, link: Dict) -> Dict:
+        """Check a link's status.
 
-            cursor.execute("""
-                SELECT * FROM links
-                WHERE last_checked IS NULL OR last_checked < ?
-                LIMIT 100
-            """, (cutoff_date,))
-
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        except Exception as e:
-            self.logger.error(f"Failed to get stale links: {e}")
-            return []
-
-    def _was_recently_checked(self, link: Dict) -> bool:
-        """Check if link was checked in last 24 hours."""
-        last_checked = link.get('last_checked')
-        if not last_checked:
-            return False
-
-        try:
-            last_checked_dt = datetime.fromisoformat(last_checked)
-            age = datetime.now() - last_checked_dt
-            return age < timedelta(hours=24)
-        except (ValueError, TypeError):
-            return False
-
-    def _check_link_async(self, link_id: int, link: Dict):
-        """Check a link asynchronously."""
-        def do_check():
-            """Actually check the link (runs in background thread)."""
-            try:
-                result = self._check_link(link_id, link)
-                return result
-            except Exception as e:
-                self.logger.error(f"Link check failed for {link_id}: {e}", exc_info=True)
-                self.failed_count += 1
-                raise
-
-        def on_complete(result):
-            """Called when check completes (runs in main thread)."""
-            self.checked_count += 1
-
-            if result['is_alive']:
-                self.alive_count += 1
-            else:
-                self.dead_count += 1
-
-            self.logger.info(f"Link check complete for {link_id}: {result['status_code']} (total: {self.checked_count})")
-
-            # Note: Database update removed due to SQLite threading constraints
-            # Instead, publish event with all data - consumers can handle persistence
-            # TODO: Implement proper cross-thread database updates
-
-            # Publish completion event
-            self.publish('link.checked', {
-                'link_id': link_id,
-                'url': link.get('url'),
-                'status_code': result['status_code'],
-                'is_alive': result['is_alive'],
-                'title': result.get('title', ''),
-                'description': result.get('description', ''),
-                'stats': {
-                    'checked': self.checked_count,
-                    'alive': self.alive_count,
-                    'dead': self.dead_count,
-                    'failed': self.failed_count
-                }
-            })
-
-        def on_error(error):
-            """Called if check fails."""
-            self.logger.error(f"Background link check failed: {error}")
-            self.publish('link.check_failed', {
-                'link_id': link_id,
-                'url': link.get('url'),
-                'error': str(error)
-            })
-
-        # Run in background
-        self.run_in_background(
-            do_check,
-            callback=on_complete,
-            error_handler=on_error
-        )
-
-    def _check_link(self, link_id: int, link: Dict) -> Dict:
-        """Check a link's status and fetch metadata.
-
-        Args:
-            link_id: Link ID
-            link: Link dictionary
-
-        Returns:
-            Dict with status, metadata, etc.
+        Uses HEAD request first (faster), falls back to GET if needed.
         """
         url = link.get('url', '')
 
-        self.logger.info(f"Checking link: {url}")
-
         result = {
-            'link_id': link_id,
             'status_code': 0,
             'is_alive': False,
-            'title': '',
-            'description': '',
-            'error': None
+            'error': None,
+            'response_time_ms': 0
         }
 
+        start_time = time.time()
+
         try:
-            # Make request with timeout
-            response = self.session.get(url, timeout=10, allow_redirects=True)
+            # Try HEAD first (faster, less bandwidth)
+            response = self.session.head(
+                url,
+                timeout=self.REQUEST_TIMEOUT,
+                allow_redirects=True
+            )
+
+            # Some servers don't support HEAD, fall back to GET
+            if response.status_code == 405:
+                response = self.session.get(
+                    url,
+                    timeout=self.REQUEST_TIMEOUT,
+                    allow_redirects=True,
+                    stream=True  # Don't download full body
+                )
+                response.close()
+
             result['status_code'] = response.status_code
-
-            # Check if alive (2xx or 3xx status codes)
             result['is_alive'] = 200 <= response.status_code < 400
-
-            # If successful, extract metadata
-            if result['is_alive'] and response.headers.get('content-type', '').startswith('text/html'):
-                metadata = self._extract_metadata(response.text, url)
-                result['title'] = metadata.get('title', '')
-                result['description'] = metadata.get('description', '')
+            result['response_time_ms'] = int((time.time() - start_time) * 1000)
 
         except requests.Timeout:
             result['error'] = 'timeout'
             result['is_alive'] = False
-            self.logger.warning(f"Timeout checking {url}")
+            self.logger.debug(f"Timeout: {url}")
 
-        except requests.ConnectionError:
+        except requests.ConnectionError as e:
             result['error'] = 'connection_error'
             result['is_alive'] = False
-            self.logger.warning(f"Connection error checking {url}")
+            # Check for DNS errors specifically
+            if 'Name or service not known' in str(e) or 'getaddrinfo failed' in str(e):
+                result['error'] = 'dns_error'
+            self.logger.debug(f"Connection error: {url}")
+
+        except requests.TooManyRedirects:
+            result['error'] = 'too_many_redirects'
+            result['is_alive'] = False
+            self.logger.debug(f"Too many redirects: {url}")
 
         except Exception as e:
-            result['error'] = str(e)
+            result['error'] = str(e)[:100]
             result['is_alive'] = False
-            self.logger.error(f"Error checking {url}: {e}")
-
-        # DON'T update database here (runs in background thread)
-        # Database update happens in callback (main thread)
+            self.logger.debug(f"Error checking {url}: {e}")
 
         return result
 
-    def _extract_metadata(self, html: str, url: str) -> Dict:
-        """Extract metadata from HTML.
-
-        Args:
-            html: HTML content
-            url: URL (for logging)
-
-        Returns:
-            Dict with title, description, etc.
-        """
-        try:
-            soup = BeautifulSoup(html, 'html.parser')
-
-            metadata = {}
-
-            # Try OpenGraph title first, then regular title
-            og_title = soup.find('meta', property='og:title')
-            if og_title and og_title.get('content'):
-                metadata['title'] = og_title['content']
-            else:
-                title_tag = soup.find('title')
-                if title_tag:
-                    metadata['title'] = title_tag.string.strip() if title_tag.string else ''
-
-            # Try OpenGraph description, then meta description
-            og_desc = soup.find('meta', property='og:description')
-            if og_desc and og_desc.get('content'):
-                metadata['description'] = og_desc['content']
-            else:
-                meta_desc = soup.find('meta', attrs={'name': 'description'})
-                if meta_desc and meta_desc.get('content'):
-                    metadata['description'] = meta_desc['content']
-
-            return metadata
-
-        except Exception as e:
-            self.logger.error(f"Failed to extract metadata from {url}: {e}")
-            return {}
-
     def _update_link_status(self, link_id: int, result: Dict):
-        """Update link status in database.
-
-        Args:
-            link_id: Link ID
-            result: Check result dict
-        """
+        """Update link status in database."""
         try:
             cursor = self.core.db.conn.cursor()
             now = datetime.now().isoformat()
 
-            # Determine status based on result
+            # Determine status string
             if result['is_alive']:
                 status = 'alive'
             elif result.get('error') == 'timeout':
                 status = 'timeout'
             elif result.get('error') == 'connection_error':
                 status = 'connection_error'
+            elif result.get('error') == 'dns_error':
+                status = 'dns_error'
             elif result['status_code'] == 404:
                 status = 'not_found'
+            elif result['status_code'] == 403:
+                status = 'forbidden'
             elif result['status_code'] >= 500:
                 status = 'server_error'
             else:
                 status = 'dead'
 
-            # Update link
             cursor.execute("""
                 UPDATE links
                 SET last_checked = ?,
                     status = ?,
-                    status_code = ?,
-                    title = COALESCE(?, title),
-                    description = COALESCE(?, description)
+                    status_code = ?
                 WHERE id = ?
-            """, (
-                now,
-                status,
-                result['status_code'],
-                result.get('title') or None,
-                result.get('description') or None,
-                link_id
-            ))
+            """, (now, status, result['status_code'], link_id))
 
             self.core.db.conn.commit()
-            self.logger.debug(f"Updated link {link_id} status: {status}")
 
         except Exception as e:
             self.logger.error(f"Failed to update link {link_id}: {e}")
 
-    def on_disable(self):
-        """Disable the plugin."""
-        self.logger.info(
-            f"LinkStatusChecker disabled - Stats: {self.checked_count} checked, "
-            f"{self.alive_count} alive, {self.dead_count} dead, {self.failed_count} failed"
-        )
+    def _report_health_to_uptime_kuma(self):
+        """Report overall link health to Uptime Kuma push monitor."""
+        try:
+            # Get health stats from database
+            stats = self._get_link_health_stats()
 
-        # Close session
-        if hasattr(self, 'session'):
-            self.session.close()
+            if not stats:
+                return
+
+            # Check if Uptime Kuma link health monitor is configured
+            config = self.core.config
+            if not config.integrations.uptime_kuma_enabled:
+                return
+
+            # Look for a link health push token in config
+            link_health_token = getattr(config.integrations, 'uptime_kuma_link_health_token', None)
+            if not link_health_token:
+                return
+
+            # Calculate health percentage
+            total = stats['total']
+            alive = stats['alive']
+            health_pct = (alive / total * 100) if total > 0 else 100
+
+            # Determine status (up if > 90% healthy)
+            status = "up" if health_pct >= 90 else "down"
+            msg = f"{alive}/{total} alive ({health_pct:.1f}%)"
+
+            # Ping Uptime Kuma
+            push_url = (
+                f"{config.integrations.uptime_kuma_url}/api/push/"
+                f"{link_health_token}?status={status}&msg={msg}"
+            )
+            response = requests.get(push_url, timeout=10)
+
+            if response.json().get('ok'):
+                self.logger.debug(f"Uptime Kuma link health ping: {msg}")
+            else:
+                self.logger.warning(f"Uptime Kuma ping failed: {response.text}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to report to Uptime Kuma: {e}")
+
+    def _get_link_health_stats(self) -> Optional[Dict]:
+        """Get overall link health statistics."""
+        try:
+            cursor = self.core.db.conn.cursor()
+
+            # Total links
+            cursor.execute("SELECT COUNT(*) FROM links")
+            total = cursor.fetchone()[0]
+
+            # Checked links
+            cursor.execute("SELECT COUNT(*) FROM links WHERE last_checked IS NOT NULL")
+            checked = cursor.fetchone()[0]
+
+            # Alive links
+            cursor.execute("SELECT COUNT(*) FROM links WHERE status = 'alive'")
+            alive = cursor.fetchone()[0]
+
+            # Dead links (various statuses)
+            cursor.execute("""
+                SELECT COUNT(*) FROM links
+                WHERE status IN ('dead', 'not_found', 'connection_error', 'dns_error', 'timeout')
+            """)
+            dead = cursor.fetchone()[0]
+
+            return {
+                'total': total,
+                'checked': checked,
+                'alive': alive,
+                'dead': dead,
+                'unchecked': total - checked
+            }
+
+        except Exception as e:
+            self.logger.error(f"Failed to get health stats: {e}")
+            return None
+
+    def get_health_stats(self) -> Dict:
+        """Public method to get health stats (for CLI)."""
+        return self._get_link_health_stats() or {}

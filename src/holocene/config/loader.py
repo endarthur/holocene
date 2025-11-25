@@ -140,6 +140,7 @@ class IntegrationsConfig(BaseModel):
     uptime_kuma_username: Optional[str] = None  # For Socket.IO API (monitor creation)
     uptime_kuma_password: Optional[str] = None  # For Socket.IO API (monitor creation)
     uptime_kuma_push_token: Optional[str] = None  # For push monitor (daemon pings Uptime Kuma)
+    uptime_kuma_link_health_token: Optional[str] = None  # For link health push monitor
 
     def model_post_init(self, __context):
         """Expand paths after initialization."""
