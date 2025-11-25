@@ -150,6 +150,9 @@ class Config(BaseModel):
     data_dir: Path = Field(default_factory=lambda: Path.home() / ".holocene")
     db_path: Optional[Path] = None  # Will default to data_dir / holocene.db
 
+    # Monitoring
+    healthcheck_url: Optional[str] = None  # healthchecks.io ping URL (e.g., https://hc-ping.com/your-uuid)
+
     # Sub-configs
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -184,6 +187,9 @@ def get_config_path() -> Path:
 
 
 DEFAULT_CONFIG = """# Holocene Configuration
+
+# Monitoring (optional)
+# healthcheck_url: "https://hc-ping.com/your-uuid-here"  # healthchecks.io ping URL
 
 privacy:
   tier: external_api  # external_api or local_only

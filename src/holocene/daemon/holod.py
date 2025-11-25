@@ -13,6 +13,8 @@ import signal
 import logging
 import time
 import atexit
+import threading
+import requests
 from pathlib import Path
 from typing import Optional
 
@@ -54,6 +56,10 @@ class HoloceneDaemon:
         self.running = False
         self.pid_file = self.config.data_dir / "holod.pid"
 
+        # Healthcheck thread
+        self._healthcheck_thread: Optional[threading.Thread] = None
+        self._healthcheck_stop_event = threading.Event()
+
         # Setup signal handlers
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -85,6 +91,53 @@ class HoloceneDaemon:
                 logger.info("PID file removed")
         except Exception as e:
             logger.error(f"Failed to remove PID file: {e}")
+
+    def _healthcheck_worker(self):
+        """Background worker that pings healthchecks.io every 60 seconds."""
+        if not self.config.healthcheck_url:
+            return
+
+        logger.info(f"Healthcheck worker started (URL: {self.config.healthcheck_url})")
+
+        while not self._healthcheck_stop_event.is_set():
+            try:
+                # Ping healthchecks.io
+                response = requests.get(self.config.healthcheck_url, timeout=10)
+                if response.status_code == 200:
+                    logger.debug("Healthcheck ping successful")
+                else:
+                    logger.warning(f"Healthcheck ping returned {response.status_code}")
+            except Exception as e:
+                # Don't crash daemon if healthchecks.io is down
+                logger.error(f"Healthcheck ping failed: {e}")
+
+            # Wait 60 seconds (or until stop event is set)
+            self._healthcheck_stop_event.wait(60)
+
+        logger.info("Healthcheck worker stopped")
+
+    def _start_healthcheck(self):
+        """Start healthcheck background thread."""
+        if not self.config.healthcheck_url:
+            logger.info("No healthcheck URL configured, skipping")
+            return
+
+        self._healthcheck_stop_event.clear()
+        self._healthcheck_thread = threading.Thread(
+            target=self._healthcheck_worker,
+            daemon=True,
+            name="healthcheck"
+        )
+        self._healthcheck_thread.start()
+        logger.info("Healthcheck thread started")
+
+    def _stop_healthcheck(self):
+        """Stop healthcheck background thread."""
+        if self._healthcheck_thread and self._healthcheck_thread.is_alive():
+            logger.info("Stopping healthcheck thread...")
+            self._healthcheck_stop_event.set()
+            self._healthcheck_thread.join(timeout=5)
+            logger.info("Healthcheck thread stopped")
 
     def is_running(self) -> bool:
         """Check if daemon is running.
@@ -180,6 +233,11 @@ class HoloceneDaemon:
             # Mark as running
             self.running = True
 
+            # Start healthcheck pinger (if configured)
+            self._start_healthcheck()
+            if self.config.healthcheck_url:
+                print(f"✓ Healthcheck: {self.config.healthcheck_url}")
+
             print(f"\n✓ holod started successfully!")
             print(f"  Device: {self.device}")
             print(f"  PID: {os.getpid()}")
@@ -219,6 +277,9 @@ class HoloceneDaemon:
         print("Stopping holod daemon...")
 
         self.running = False
+
+        # Stop healthcheck
+        self._stop_healthcheck()
 
         # Stop API
         if self.api:
