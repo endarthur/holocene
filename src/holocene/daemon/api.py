@@ -1798,11 +1798,13 @@ class APIServer:
             elif response.status_code != 200:
                 return abort(response.status_code, description=f"ArchiveBox returned status {response.status_code}")
 
-            # Get HTML content with proper encoding detection
-            # Force UTF-8 if encoding is not detected
-            if response.encoding is None:
-                response.encoding = 'utf-8'
-            html_content = response.text
+            # Get HTML content - decode as UTF-8 explicitly to preserve special characters
+            # Using response.content.decode() instead of response.text to avoid encoding issues
+            try:
+                html_content = response.content.decode('utf-8')
+            except UnicodeDecodeError:
+                # Fallback to latin-1 if UTF-8 fails
+                html_content = response.content.decode('latin-1')
 
             # Create archive banner with holographic effect
             banner_html = f"""
