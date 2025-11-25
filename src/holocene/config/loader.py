@@ -125,6 +125,14 @@ class IntegrationsConfig(BaseModel):
     archivebox_user: str = "holocene"
     archivebox_data_dir: str = "/opt/archivebox/data"
 
+    # Proxmox API (for monitoring and limited control)
+    proxmox_enabled: bool = False
+    proxmox_host: str = "192.168.1.101"
+    proxmox_port: int = 8006
+    proxmox_api_token_id: Optional[str] = None  # Format: "user@realm!tokenid"
+    proxmox_api_token_secret: Optional[str] = None
+    proxmox_verify_ssl: bool = False  # Set to True if using valid SSL cert
+
     def model_post_init(self, __context):
         """Expand paths after initialization."""
         if self.journel_path:
@@ -257,6 +265,14 @@ mercadolivre:
 
   # HTML caching (recommended when using paid proxy services)
   cache_html: true  # Save fetched HTML to avoid re-fetch costs
+
+  # Proxmox API (for monitoring containers/VMs)
+  proxmox_enabled: false
+  proxmox_host: "192.168.1.101"  # Your Proxmox host IP
+  proxmox_port: 8006
+  # proxmox_api_token_id: "claude-assistant@pve!readonly"
+  # proxmox_api_token_secret: "your-secret-here"
+  proxmox_verify_ssl: false  # Set to true if using valid SSL cert
 """
 
 
