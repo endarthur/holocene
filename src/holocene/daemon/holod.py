@@ -93,23 +93,48 @@ class HoloceneDaemon:
             logger.error(f"Failed to remove PID file: {e}")
 
     def _healthcheck_worker(self):
-        """Background worker that pings healthchecks.io every 60 seconds."""
-        if not self.config.healthcheck_url:
+        """Background worker that pings healthchecks.io and Uptime Kuma every 60 seconds."""
+        has_healthcheck = bool(self.config.healthcheck_url)
+        has_uptime_kuma = (
+            self.config.integrations.uptime_kuma_enabled and
+            getattr(self.config.integrations, 'uptime_kuma_push_token', None)
+        )
+
+        if not has_healthcheck and not has_uptime_kuma:
             return
 
-        logger.info(f"Healthcheck worker started (URL: {self.config.healthcheck_url})")
+        if has_healthcheck:
+            logger.info(f"Healthcheck worker started (healthchecks.io: {self.config.healthcheck_url})")
+        if has_uptime_kuma:
+            logger.info(f"Healthcheck worker started (Uptime Kuma push token configured)")
 
         while not self._healthcheck_stop_event.is_set():
-            try:
-                # Ping healthchecks.io
-                response = requests.get(self.config.healthcheck_url, timeout=10)
-                if response.status_code == 200:
-                    logger.debug("Healthcheck ping successful")
-                else:
-                    logger.warning(f"Healthcheck ping returned {response.status_code}")
-            except Exception as e:
-                # Don't crash daemon if healthchecks.io is down
-                logger.error(f"Healthcheck ping failed: {e}")
+            # Ping healthchecks.io
+            if has_healthcheck:
+                try:
+                    response = requests.get(self.config.healthcheck_url, timeout=10)
+                    if response.status_code == 200:
+                        logger.debug("Healthchecks.io ping successful")
+                    else:
+                        logger.warning(f"Healthchecks.io ping returned {response.status_code}")
+                except Exception as e:
+                    logger.error(f"Healthchecks.io ping failed: {e}")
+
+            # Ping Uptime Kuma push monitor
+            if has_uptime_kuma:
+                try:
+                    push_url = (
+                        f"{self.config.integrations.uptime_kuma_url}/api/push/"
+                        f"{self.config.integrations.uptime_kuma_push_token}?status=up&msg=holod%20running"
+                    )
+                    response = requests.get(push_url, timeout=10)
+                    data = response.json()
+                    if data.get("ok"):
+                        logger.debug("Uptime Kuma push ping successful")
+                    else:
+                        logger.warning(f"Uptime Kuma push ping failed: {data.get('msg', 'Unknown')}")
+                except Exception as e:
+                    logger.error(f"Uptime Kuma push ping failed: {e}")
 
             # Wait 60 seconds (or until stop event is set)
             self._healthcheck_stop_event.wait(60)
@@ -118,8 +143,14 @@ class HoloceneDaemon:
 
     def _start_healthcheck(self):
         """Start healthcheck background thread."""
-        if not self.config.healthcheck_url:
-            logger.info("No healthcheck URL configured, skipping")
+        has_healthcheck = bool(self.config.healthcheck_url)
+        has_uptime_kuma = (
+            self.config.integrations.uptime_kuma_enabled and
+            getattr(self.config.integrations, 'uptime_kuma_push_token', None)
+        )
+
+        if not has_healthcheck and not has_uptime_kuma:
+            logger.info("No healthcheck URL or Uptime Kuma push token configured, skipping")
             return
 
         self._healthcheck_stop_event.clear()
@@ -237,6 +268,9 @@ class HoloceneDaemon:
             self._start_healthcheck()
             if self.config.healthcheck_url:
                 print(f"✓ Healthcheck: {self.config.healthcheck_url}")
+            if (self.config.integrations.uptime_kuma_enabled and
+                getattr(self.config.integrations, 'uptime_kuma_push_token', None)):
+                print(f"✓ Uptime Kuma: push monitor configured")
 
             print(f"\n✓ holod started successfully!")
             print(f"  Device: {self.device}")
