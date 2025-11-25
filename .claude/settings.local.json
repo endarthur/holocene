@@ -12,7 +12,13 @@
       "Bash(git commit:*)",
       "Bash(python3:*)",
       "Bash(scp:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(python:*)",
+      "WebFetch(domain:community-scripts.github.io)",
+      "WebFetch(domain:tteck.github.io)",
+      "WebFetch(domain:helper-scripts.com)",
+      "WebSearch",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []

@@ -133,6 +133,11 @@ class IntegrationsConfig(BaseModel):
     proxmox_api_token_secret: Optional[str] = None
     proxmox_verify_ssl: bool = False  # Set to True if using valid SSL cert
 
+    # Uptime Kuma (monitoring dashboard)
+    uptime_kuma_enabled: bool = False
+    uptime_kuma_url: str = "http://192.168.1.103:3001"
+    uptime_kuma_api_key: Optional[str] = None
+
     def model_post_init(self, __context):
         """Expand paths after initialization."""
         if self.journel_path:
@@ -279,6 +284,11 @@ mercadolivre:
   # proxmox_api_token_id: "claude-assistant@pve!readonly"
   # proxmox_api_token_secret: "your-secret-here"
   proxmox_verify_ssl: false  # Set to true if using valid SSL cert
+
+  # Uptime Kuma (monitoring dashboard)
+  uptime_kuma_enabled: false
+  uptime_kuma_url: "http://192.168.1.103:3001"
+  # uptime_kuma_api_key: "uk_xxxxx"  # Generate in Uptime Kuma Settings → API Keys
 """
 
 
