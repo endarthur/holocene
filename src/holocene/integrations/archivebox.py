@@ -248,6 +248,54 @@ class ArchiveBoxClient:
             "snapshot_id": snapshot_id,
         }
 
+    def get_queue_status(self) -> Dict[str, Any]:
+        """
+        Get ArchiveBox queue status (pending/failed snapshots).
+
+        Returns:
+            Dict with pending_count, failed_count, and whether it's safe to add more
+        """
+        if not self.available:
+            return {
+                "available": False,
+                "pending_count": 0,
+                "failed_count": 0,
+                "can_add_more": False,
+                "error": "ArchiveBox not available",
+            }
+
+        # Get pending count
+        pending_result = self._run_command(
+            "list --status=pending --json 2>/dev/null | wc -l",
+            timeout=15
+        )
+        pending_count = 0
+        if pending_result["returncode"] == 0:
+            try:
+                pending_count = int(pending_result["stdout"].strip())
+            except ValueError:
+                pass
+
+        # Get failed/incomplete count (might need re-archiving)
+        failed_result = self._run_command(
+            "list --status=incomplete --json 2>/dev/null | wc -l",
+            timeout=15
+        )
+        failed_count = 0
+        if failed_result["returncode"] == 0:
+            try:
+                failed_count = int(failed_result["stdout"].strip())
+            except ValueError:
+                pass
+
+        return {
+            "available": True,
+            "pending_count": pending_count,
+            "failed_count": failed_count,
+            "can_add_more": pending_count < 20,  # Threshold
+            "message": f"{pending_count} pending, {failed_count} incomplete",
+        }
+
     def get_server_info(self) -> Dict[str, Any]:
         """Get ArchiveBox server information."""
         if not self.available:

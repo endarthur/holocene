@@ -1187,26 +1187,34 @@ def auto_archive(scan: bool, limit: int, scan_period: str):
 
 
 @links.command("archive-queue")
-@click.option("--batch-size", "-n", type=int, default=10, help="Number of links to archive in this batch")
+@click.option("--batch-size", "-n", type=int, default=5, help="Number of links to archive in this batch (default: 5)")
 @click.option("--delay", "-d", type=int, default=60, help="Delay in seconds between archives (default: 60)")
 @click.option("--service", type=click.Choice(["archivebox", "local", "ia"]), default="archivebox",
               help="Which archiving service to use")
 @click.option("--source", help="Only archive links from specific source (e.g., telegram_export)")
-def archive_queue(batch_size: int, delay: int, service: str, source: str):
+@click.option("--max-queue", type=int, default=20, help="Skip if ArchiveBox has more than this many pending (default: 20)")
+@click.option("--force", is_flag=True, help="Skip queue check and process anyway")
+def archive_queue(batch_size: int, delay: int, service: str, source: str, max_queue: int, force: bool):
     """Gradually archive links from the queue (safe for cron).
 
     Processes unarchived links in small batches with delays to avoid rate limiting.
     Designed to be run periodically via cron for gradual background archiving.
 
+    For ArchiveBox: checks queue status first and skips if too many pending jobs
+    to avoid overloading the server.
+
     Examples:
-        # Archive 10 links with 60s delays (safe default)
+        # Archive 5 links with 60s delays (safe default)
         holo links archive-queue
 
-        # Faster batch: 20 links with 30s delays
-        holo links archive-queue --batch-size 20 --delay 30
+        # Larger batch with queue check
+        holo links archive-queue --batch-size 10 --max-queue 10
 
         # Only archive telegram imports
         holo links archive-queue --source telegram_export
+
+        # Skip queue check (use with caution)
+        holo links archive-queue --force
 
     Cron example (every hour):
         0 * * * * cd /home/holocene/holocene && venv/bin/holo links archive-queue
@@ -1233,6 +1241,26 @@ def archive_queue(batch_size: int, delay: int, service: str, source: str):
                 ssh_user=config.integrations.archivebox_user,
                 data_dir=config.integrations.archivebox_data_dir,
             )
+
+            # Check queue status before proceeding (unless --force)
+            if not force:
+                queue_status = archivebox_client.get_queue_status()
+                if not queue_status.get("available"):
+                    console.print(f"[red]Error:[/red] Cannot check ArchiveBox queue status")
+                    console.print("[dim]Use --force to skip this check[/dim]")
+                    db.close()
+                    return
+
+                pending = queue_status.get("pending_count", 0)
+                incomplete = queue_status.get("failed_count", 0)
+
+                console.print(f"[dim]ArchiveBox queue: {pending} pending, {incomplete} incomplete[/dim]")
+
+                if pending >= max_queue:
+                    console.print(f"[yellow]⚠[/yellow] Queue has {pending} pending items (max: {max_queue})")
+                    console.print("[dim]Skipping to avoid overloading. Use --force to override.[/dim]")
+                    db.close()
+                    return
         else:
             console.print("[red]Error:[/red] ArchiveBox not enabled in config")
             db.close()
