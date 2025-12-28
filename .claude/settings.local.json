@@ -21,7 +21,8 @@
       "Bash(findstr:*)",
       "Bash(pip show:*)",
       "WebFetch(domain:artificialanalysis.ai)",
-      "WebFetch(domain:nano-gpt.com)"
+      "WebFetch(domain:nano-gpt.com)",
+      "Bash(sqlite3:*)"
     ],
     "deny": [],
     "ask": []

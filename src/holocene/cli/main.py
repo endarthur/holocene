@@ -530,11 +530,11 @@ def list_links(limit: int, archived: bool, source: str):
     # Create table
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("ID", style="dim", width=5)
-    table.add_column("URL", max_width=40)
-    table.add_column("Source", width=10)
-    table.add_column("Archived", width=8)
-    table.add_column("Trust", width=10)
-    table.add_column("Last Seen", width=16)
+    table.add_column("Title", max_width=35)
+    table.add_column("URL", max_width=30)
+    table.add_column("Src", width=6)
+    table.add_column("Arc", width=3)
+    table.add_column("Trust", width=8)
 
     # Trust tier colors
     trust_colors = {
@@ -546,20 +546,22 @@ def list_links(limit: int, archived: bool, source: str):
 
     for link in links_list:
         archived_icon = "[green]✓[/green]" if link["archived"] else "[dim]-[/dim]"
-        last_seen = datetime.fromisoformat(link["last_seen"]).strftime("%Y-%m-%d %H:%M")
 
         # Format trust tier with color
         trust_tier = link.get("trust_tier", "unknown")
         color = trust_colors.get(trust_tier, "dim")
         trust_display = f"[{color}]{trust_tier}[/{color}]" if link["archived"] else "[dim]-[/dim]"
 
+        # Use clean_title if available, fallback to title, then URL
+        display_title = link.get("clean_title") or link.get("title") or "[dim]No title[/dim]"
+
         table.add_row(
             str(link["id"]),
+            display_title,
             link["url"],
-            link["source"],
+            link["source"][:6],
             archived_icon,
             trust_display,
-            last_seen
         )
 
     console.print(table)
@@ -1622,6 +1624,172 @@ def links_health():
 
     console.print()
     console.print("[dim]Run 'holo links check' to check more links[/dim]")
+
+    db.close()
+
+
+@links.command("clean-titles")
+@click.option("--all", "process_all", is_flag=True, help="Re-clean all titles (including already cleaned)")
+@click.option("--limit", "-n", type=int, help="Limit number of titles to process")
+@click.option("--batch-size", type=int, default=200, help="Items per LLM batch (default: 200)")
+@click.option("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
+@click.option("--dry-run", is_flag=True, help="Preview without updating database")
+@click.option("--model", type=click.Choice(["primary", "primary_alt"]), default="primary_alt",
+              help="Model to use (default: primary_alt/Kimi K2)")
+def links_clean_titles(process_all: bool, limit: int, batch_size: int, timeout: int, dry_run: bool, model: str):
+    """Clean web page titles into concise, human-readable form.
+
+    Removes:
+    - Site name suffixes (e.g., "Article Title | Site Name")
+    - SEO boilerplate and keyword stuffing
+    - Excessive punctuation
+
+    Processes in batches for efficiency (~1 LLM prompt per 200 items).
+    """
+    import json
+    from ..llm.nanogpt import NanoGPTClient
+
+    config = load_config()
+    db = Database(config.db_path)
+
+    # Get links to process
+    cursor = db.conn.cursor()
+
+    if process_all:
+        cursor.execute("""
+            SELECT id, title FROM links
+            WHERE title IS NOT NULL AND title != ''
+            ORDER BY created_at DESC
+        """)
+    else:
+        cursor.execute("""
+            SELECT id, title FROM links
+            WHERE title IS NOT NULL AND title != '' AND clean_title IS NULL
+            ORDER BY created_at DESC
+        """)
+
+    links_list = [{"id": row[0], "title": row[1]} for row in cursor.fetchall()]
+
+    # Apply limit if specified
+    if limit and limit < len(links_list):
+        links_list = links_list[:limit]
+
+    if not links_list:
+        console.print("[yellow]No titles to clean.[/yellow]")
+        if not process_all:
+            console.print("[dim]Use --all to re-clean already processed titles.[/dim]")
+        db.close()
+        return
+
+    console.print(f"\n[cyan]Found {len(links_list)} title(s) to clean[/cyan]")
+
+    # Select model
+    model_id = getattr(config.llm, model)
+    console.print(f"[dim]Using model: {model_id}[/dim]")
+
+    if dry_run:
+        console.print("[yellow]DRY RUN - no changes will be saved[/yellow]")
+
+    # Initialize LLM client
+    llm = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+
+    # System prompt for web page title cleaning
+    system_prompt = """You clean up web page titles into concise, human-readable form.
+
+Rules:
+- Remove site name suffixes (e.g., "Article Title | Site Name" → "Article Title")
+- Remove common suffixes like "- Wikipedia", "| YouTube", ":: Reddit", etc.
+- Keep the essential title content
+- Remove excessive punctuation and separators
+- If the title is already clean, return it unchanged
+- Preserve proper capitalization
+- For non-English titles, keep the original language
+
+You will receive a JSON array of titles. Return a JSON array of cleaned titles IN THE SAME ORDER.
+Return ONLY the JSON array, no explanation or markdown."""
+
+    # Process in batches
+    total_cleaned = 0
+    total_batches = (len(links_list) + batch_size - 1) // batch_size
+
+    for batch_num in range(total_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min(start_idx + batch_size, len(links_list))
+        batch = links_list[start_idx:end_idx]
+
+        console.print(f"\n[cyan]Processing batch {batch_num + 1}/{total_batches} ({len(batch)} items)...[/cyan]")
+
+        # Build prompt
+        titles_json = json.dumps([link["title"] for link in batch], ensure_ascii=False)
+        prompt = f"Clean these {len(batch)} web page titles:\n{titles_json}"
+
+        try:
+            with console.status(f"[cyan]Calling LLM (timeout: {timeout}s)...", spinner="dots"):
+                response = llm.simple_prompt(
+                    prompt=prompt,
+                    model=model_id,
+                    system=system_prompt,
+                    temperature=0.1,
+                    timeout=timeout
+                )
+
+            # Parse response
+            response_text = response.strip()
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                response_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+
+            try:
+                clean_titles_list = json.loads(response_text)
+            except json.JSONDecodeError as e:
+                console.print(f"[red]Failed to parse LLM response as JSON: {e}[/red]")
+                console.print(f"[dim]Response preview: {response_text[:200]}...[/dim]")
+                continue
+
+            if len(clean_titles_list) != len(batch):
+                console.print(f"[yellow]Warning: Got {len(clean_titles_list)} titles back, expected {len(batch)}[/yellow]")
+                clean_titles_list = clean_titles_list[:len(batch)]
+
+            # Update database
+            updated_count = 0
+            for i, link in enumerate(batch):
+                if i < len(clean_titles_list):
+                    clean_title = clean_titles_list[i]
+
+                    # Show sample of changes
+                    if updated_count < 3 or (batch_num == 0 and i < 5):
+                        original = link["title"][:60] + "..." if len(link["title"]) > 60 else link["title"]
+                        cleaned = clean_title[:60] + "..." if len(clean_title) > 60 else clean_title
+                        if original != cleaned:
+                            console.print(f"  [dim]{original}[/dim]")
+                            console.print(f"  [green]→ {cleaned}[/green]\n")
+
+                    if not dry_run:
+                        cursor.execute(
+                            "UPDATE links SET clean_title = ? WHERE id = ?",
+                            (clean_title, link["id"])
+                        )
+                    updated_count += 1
+
+            if not dry_run:
+                db.conn.commit()
+
+            total_cleaned += updated_count
+            console.print(f"[green]✓ Cleaned {updated_count} titles in batch {batch_num + 1}[/green]")
+
+        except Exception as e:
+            console.print(f"[red]Error processing batch {batch_num + 1}: {e}[/red]")
+            continue
+
+    # Summary
+    console.print(f"\n{'=' * 50}")
+    if dry_run:
+        console.print(f"[yellow]DRY RUN: Would have cleaned {total_cleaned} titles[/yellow]")
+    else:
+        console.print(f"[green]✓ Successfully cleaned {total_cleaned}/{len(links_list)} titles![/green]")
+        console.print(f"[dim]LLM prompts used: {total_batches}[/dim]")
+
+    console.print(f"\n[dim]View results: holo links list[/dim]")
 
     db.close()
 

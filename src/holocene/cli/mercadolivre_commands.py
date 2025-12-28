@@ -344,9 +344,12 @@ def list_favorites(category: str, available: bool, limit: int):
         else:
             status = "[red]✗ Unavailable[/red]"
 
+        # Use clean_title if available, fallback to title
+        display_title = fav.get('clean_title') or fav['title'] or "[dim]No title[/dim]"
+
         table.add_row(
             fav['item_id'],
-            fav['title'] or "[dim]No title[/dim]",
+            display_title,
             price_str,
             fav['category_name'] or "[dim]Unknown[/dim]",
             status,
@@ -373,9 +376,10 @@ def show(item_id: str):
         db.close()
         return
 
-    # Display details
+    # Display details - use clean_title if available
+    display_title = favorite.get('clean_title') or favorite['title'] or 'Untitled'
     console.print(Panel.fit(
-        f"[bold cyan]{favorite['title'] or 'Untitled'}[/bold cyan]",
+        f"[bold cyan]{display_title}[/bold cyan]",
         border_style="cyan"
     ))
 
@@ -385,6 +389,9 @@ def show(item_id: str):
     details.add_column("Value", style="white")
 
     details.add_row("Item ID", favorite['item_id'])
+    # Show original title if different from clean title
+    if favorite.get('clean_title') and favorite['title'] != favorite['clean_title']:
+        details.add_row("Original Title", f"[dim]{favorite['title']}[/dim]")
     if favorite['price']:
         details.add_row("Price", f"{favorite['currency']} {favorite['price']:.2f}")
     details.add_row("Category", favorite['category_name'] or "Unknown")
@@ -1067,12 +1074,13 @@ def enrich_proxy(limit: int, delay: int):
 
 @mercadolivre.command("clean-titles")
 @click.option("--all", "process_all", is_flag=True, help="Re-clean all titles (including already cleaned)")
+@click.option("--limit", "-n", type=int, help="Limit number of titles to process")
 @click.option("--batch-size", type=int, default=500, help="Items per LLM batch (default: 500)")
 @click.option("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
 @click.option("--dry-run", is_flag=True, help="Preview without updating database")
 @click.option("--model", type=click.Choice(["primary", "primary_alt"]), default="primary_alt",
               help="Model to use (default: primary_alt/Kimi K2)")
-def clean_titles(process_all: bool, batch_size: int, timeout: int, dry_run: bool, model: str):
+def clean_titles(process_all: bool, limit: int, batch_size: int, timeout: int, dry_run: bool, model: str):
     """Clean SEO-stuffed titles into human-readable form.
 
     Uses LLM to convert titles like:
@@ -1105,6 +1113,10 @@ def clean_titles(process_all: bool, batch_size: int, timeout: int, dry_run: bool
         """)
 
     favorites = [{"item_id": row[0], "title": row[1]} for row in cursor.fetchall()]
+
+    # Apply limit if specified
+    if limit and limit < len(favorites):
+        favorites = favorites[:limit]
 
     if not favorites:
         console.print("[yellow]No titles to clean.[/yellow]")
