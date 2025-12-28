@@ -1068,10 +1068,11 @@ def enrich_proxy(limit: int, delay: int):
 @mercadolivre.command("clean-titles")
 @click.option("--all", "process_all", is_flag=True, help="Re-clean all titles (including already cleaned)")
 @click.option("--batch-size", type=int, default=500, help="Items per LLM batch (default: 500)")
+@click.option("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
 @click.option("--dry-run", is_flag=True, help="Preview without updating database")
 @click.option("--model", type=click.Choice(["primary", "primary_alt"]), default="primary_alt",
               help="Model to use (default: primary_alt/Kimi K2)")
-def clean_titles(process_all: bool, batch_size: int, dry_run: bool, model: str):
+def clean_titles(process_all: bool, batch_size: int, timeout: int, dry_run: bool, model: str):
     """Clean SEO-stuffed titles into human-readable form.
 
     Uses LLM to convert titles like:
@@ -1153,12 +1154,13 @@ Return ONLY the JSON array, no explanation or markdown."""
         prompt = f"Clean these {len(batch)} titles:\n{titles_json}"
 
         try:
-            with console.status("[cyan]Calling LLM...", spinner="dots"):
+            with console.status(f"[cyan]Calling LLM (timeout: {timeout}s)...", spinner="dots"):
                 response = llm.simple_prompt(
                     prompt=prompt,
                     model=model_id,
                     system=system_prompt,
-                    temperature=0.1
+                    temperature=0.1,
+                    timeout=timeout
                 )
 
             # Parse response

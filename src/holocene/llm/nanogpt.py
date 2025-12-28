@@ -29,6 +29,7 @@ class NanoGPTClient:
         model: str = "deepseek-ai/DeepSeek-V3.1",
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        timeout: int = 60,
     ) -> Dict[str, Any]:
         """
         Call chat completion API.
@@ -38,6 +39,7 @@ class NanoGPTClient:
             model: Model ID to use
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
+            timeout: Request timeout in seconds (default: 60, use 300+ for large batches)
 
         Returns:
             API response dict
@@ -54,7 +56,7 @@ class NanoGPTClient:
         response = self.session.post(
             f"{self.base_url}/chat/completions",
             json=payload,
-            timeout=60,
+            timeout=timeout,
         )
         response.raise_for_status()
 
@@ -73,6 +75,7 @@ class NanoGPTClient:
         model: str = "deepseek-ai/DeepSeek-V3.1",
         system: Optional[str] = None,
         temperature: float = 0.7,
+        timeout: int = 60,
     ) -> str:
         """
         Simple single-turn prompt.
@@ -82,6 +85,7 @@ class NanoGPTClient:
             model: Model ID
             system: Optional system message
             temperature: Sampling temperature
+            timeout: Request timeout in seconds (default: 60, use 300+ for large batches)
 
         Returns:
             Response text
@@ -93,5 +97,5 @@ class NanoGPTClient:
 
         messages.append({"role": "user", "content": prompt})
 
-        response = self.chat_completion(messages, model=model, temperature=temperature)
+        response = self.chat_completion(messages, model=model, temperature=temperature, timeout=timeout)
         return self.get_response_text(response)
