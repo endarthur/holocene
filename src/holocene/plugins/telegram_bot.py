@@ -352,6 +352,7 @@ Available commands:
 • URLs - I'll save and archive links
 • arXiv papers - Auto-detected
 • PDFs - Saved to your library
+• JSON - Mercado Livre favorites export
 
 *Notifications:*
 You'll receive updates when:
@@ -1112,7 +1113,7 @@ This link will grant you access to:
         )
 
     async def _handle_document(self, update, context):
-        """Handle document uploads (PDFs, etc.)."""
+        """Handle document uploads (PDFs, JSON files, etc.)."""
         if not self._is_authorized(update.effective_chat.id):
             return
 
@@ -1123,9 +1124,17 @@ This link will grant you access to:
 
         self.logger.info(f"Received document: {file_name} ({file_size} bytes, {mime_type})")
 
-        # Check if it's a PDF
-        if mime_type != 'application/pdf' and not file_name.lower().endswith('.pdf'):
-            await update.message.reply_text("⚠️ Only PDF files are supported for now.")
+        # Determine file type
+        is_pdf = mime_type == 'application/pdf' or file_name.lower().endswith('.pdf')
+        is_json = mime_type == 'application/json' or file_name.lower().endswith('.json')
+
+        if not is_pdf and not is_json:
+            await update.message.reply_text(
+                "⚠️ Unsupported file type.\n\n"
+                "Supported formats:\n"
+                "• PDF files\n"
+                "• JSON files (Mercado Livre favorites export)"
+            )
             return
 
         # Check file size (limit to 20MB for now)
@@ -1133,8 +1142,6 @@ This link will grant you access to:
         if file_size > max_size:
             await update.message.reply_text(f"⚠️ File too large. Maximum size: {max_size // (1024*1024)}MB")
             return
-
-        await update.message.reply_text(f"📄 Downloading PDF: `{file_name}`...", parse_mode='Markdown')
 
         # Download the file
         try:
@@ -1147,18 +1154,29 @@ This link will grant you access to:
 
             await file.download_to_drive(str(file_path))
 
-            await update.message.reply_text(f"✅ Downloaded! Processing PDF...")
+            if is_pdf:
+                await update.message.reply_text(f"📄 Downloaded PDF: `{file_name}`\nProcessing...", parse_mode='Markdown')
 
-            # Process in background
-            self.run_in_background(
-                lambda: self._process_pdf(str(file_path), file_name, update.effective_chat.id),
-                callback=lambda result: self.logger.info(f"PDF processed: {result}"),
-                error_handler=lambda e: self.logger.error(f"Failed to process PDF: {e}")
-            )
+                # Process PDF in background
+                self.run_in_background(
+                    lambda: self._process_pdf(str(file_path), file_name, update.effective_chat.id),
+                    callback=lambda result: self.logger.info(f"PDF processed: {result}"),
+                    error_handler=lambda e: self.logger.error(f"Failed to process PDF: {e}")
+                )
+
+            elif is_json:
+                await update.message.reply_text(f"📋 Downloaded JSON: `{file_name}`\nProcessing...", parse_mode='Markdown')
+
+                # Process JSON in background
+                self.run_in_background(
+                    lambda: self._process_mercadolivre_json(str(file_path), file_name, update.effective_chat.id),
+                    callback=lambda result: self.logger.info(f"JSON processed: {result}"),
+                    error_handler=lambda e: self.logger.error(f"Failed to process JSON: {e}")
+                )
 
         except Exception as e:
-            self.logger.error(f"Failed to download PDF: {e}", exc_info=True)
-            await update.message.reply_text(f"❌ Failed to download PDF: {str(e)}")
+            self.logger.error(f"Failed to download file: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Failed to download file: {str(e)}")
 
     # Helper methods
 
@@ -1555,6 +1573,117 @@ This link will grant you access to:
         except Exception as e:
             self.logger.error(f"Failed to process PDF: {e}", exc_info=True)
             self._send_notification(f"❌ Failed to process PDF: {str(e)}", chat_id)
+            raise
+
+    def _process_mercadolivre_json(self, file_path: str, file_name: str, chat_id: int):
+        """Process uploaded Mercado Livre favorites JSON (runs in background).
+
+        Args:
+            file_path: Path to JSON file
+            file_name: Original filename
+            chat_id: Telegram chat ID for notifications
+        """
+        import json
+
+        try:
+            # Load JSON file
+            with open(file_path, 'r', encoding='utf-8') as f:
+                favorites = json.load(f)
+
+            # Validate it's a list
+            if not isinstance(favorites, list):
+                self._send_notification(
+                    f"❌ Invalid JSON format.\n\n"
+                    f"Expected a list of Mercado Livre favorites.\n"
+                    f"Got: {type(favorites).__name__}",
+                    chat_id
+                )
+                return "invalid_json_format"
+
+            if not favorites:
+                self._send_notification(
+                    f"⚠️ Empty JSON file.\n\n"
+                    f"No favorites found in `{file_name}`.",
+                    chat_id
+                )
+                return "empty_json"
+
+            # Validate structure (check first item has expected fields)
+            first_item = favorites[0]
+            if 'item_id' not in first_item:
+                self._send_notification(
+                    f"❌ Invalid JSON structure.\n\n"
+                    f"Expected Mercado Livre favorites export with 'item\\_id' field.\n"
+                    f"Found keys: {', '.join(first_item.keys())[:100]}",
+                    chat_id
+                )
+                return "invalid_json_structure"
+
+            self.logger.info(f"Importing {len(favorites)} Mercado Livre favorites from {file_name}")
+
+            new_count = 0
+            updated_count = 0
+
+            for item in favorites:
+                # Check if exists
+                existing = self.core.db.get_mercadolivre_favorite(item["item_id"])
+
+                # Build thumbnail URL if thumbnail_id is present
+                thumbnail_url = None
+                if item.get("thumbnail_id"):
+                    thumbnail_url = f"https://http2.mlstatic.com/D_NQ_NP_2X_{item['thumbnail_id']}-F.webp"
+
+                # Insert/update in database
+                self.core.db.insert_mercadolivre_favorite(
+                    item_id=item["item_id"],
+                    title=item.get("title"),
+                    price=item.get("price"),
+                    currency=item.get("currency"),
+                    url=item.get("permalink"),
+                    thumbnail_url=thumbnail_url,
+                    condition=item.get("condition"),
+                    bookmarked_date=item.get("collected_at"),
+                    is_available=True,  # Assume available since it was in their favorites
+                )
+
+                if existing:
+                    updated_count += 1
+                else:
+                    new_count += 1
+
+            self._send_notification(
+                f"✅ *Mercado Livre Import Complete*\n\n"
+                f"📋 File: `{file_name}`\n"
+                f"📦 Total: {len(favorites)} items\n"
+                f"🆕 New: {new_count}\n"
+                f"🔄 Updated: {updated_count}\n\n"
+                f"Use `holo mercadolivre list` to view imports.\n"
+                f"Use `holo mercadolivre classify --all` to classify.",
+                chat_id
+            )
+
+            self.logger.info(f"Imported {len(favorites)} ML favorites: {new_count} new, {updated_count} updated")
+
+            # Clean up temp file
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                self.logger.warning(f"Failed to remove temp file: {e}")
+
+            return f"imported_{len(favorites)}_favorites"
+
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON in {file_name}: {e}")
+            self._send_notification(
+                f"❌ Invalid JSON file.\n\n"
+                f"Could not parse `{file_name}`:\n{str(e)[:100]}",
+                chat_id
+            )
+            return "json_parse_error"
+
+        except Exception as e:
+            self.logger.error(f"Failed to process ML JSON: {e}", exc_info=True)
+            self._send_notification(f"❌ Failed to import favorites: {str(e)}", chat_id)
             raise
 
     # Event handlers for notifications
