@@ -580,79 +580,234 @@ def enrich(item_id: str, enrich_all: bool, delay: float, batch_size: int, batch_
 
 
 @mercadolivre.command()
-@click.option("--all", "classify_all", is_flag=True, help="Classify all favorites")
+@click.option("--all", "classify_all", is_flag=True, help="Re-classify all (including already classified)")
+@click.option("--limit", "-n", type=int, help="Limit number of items to process")
+@click.option("--batch-size", type=int, default=100, help="Items per LLM batch (default: 100)")
+@click.option("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
+@click.option("--dry-run", is_flag=True, help="Preview without updating database")
+@click.option("--model", type=click.Choice(["primary", "primary_alt"]), default="primary_alt",
+              help="Model to use (default: primary_alt/Kimi K2)")
 @click.argument("item_id", required=False)
-def classify(item_id: str, classify_all: bool):
-    """Classify favorites using Extended Dewey (W prefix)."""
-    from holocene.research.extended_dewey import ExtendedDeweyClassifier
+def classify(classify_all: bool, limit: int, batch_size: int, timeout: int, dry_run: bool, model: str, item_id: str):
+    """Classify favorites using Extended Dewey (W prefix).
+
+    By default, only classifies items without a dewey_class.
+    Uses batch processing for efficiency (~1 LLM prompt per 100 items).
+
+    Examples:
+        holo mercadolivre classify              # Classify unclassified items
+        holo mercadolivre classify --all        # Re-classify everything
+        holo mercadolivre classify --limit 10   # Process only 10 items
+        holo mercadolivre classify MLB123456    # Classify specific item
+    """
+    import json
+    from holocene.llm.nanogpt import NanoGPTClient
 
     config = load_config()
     db = Database(config.db_path)
-
-    classifier = ExtendedDeweyClassifier()
+    cursor = db.conn.cursor()
 
     # Get items to classify
-    if classify_all:
-        favorites = db.get_mercadolivre_favorites()
-    elif item_id:
+    if item_id:
+        # Single item mode
         fav = db.get_mercadolivre_favorite(item_id)
         favorites = [fav] if fav else []
+    elif classify_all:
+        cursor.execute("""
+            SELECT item_id, title, category_name, condition, price
+            FROM mercadolivre_favorites
+            WHERE title IS NOT NULL
+            ORDER BY first_synced DESC
+        """)
+        favorites = [{"item_id": r[0], "title": r[1], "category_name": r[2], "condition": r[3], "price": r[4]}
+                     for r in cursor.fetchall()]
     else:
-        console.print("[red]Error: Specify --all or provide an item_id[/red]")
-        db.close()
-        return
+        # Default: only unclassified
+        cursor.execute("""
+            SELECT item_id, title, category_name, condition, price
+            FROM mercadolivre_favorites
+            WHERE title IS NOT NULL AND (dewey_class IS NULL OR dewey_class = '')
+            ORDER BY first_synced DESC
+        """)
+        favorites = [{"item_id": r[0], "title": r[1], "category_name": r[2], "condition": r[3], "price": r[4]}
+                     for r in cursor.fetchall()]
+
+    # Apply limit
+    if limit and limit < len(favorites):
+        favorites = favorites[:limit]
 
     if not favorites:
         console.print("[yellow]No favorites to classify.[/yellow]")
+        if not classify_all:
+            console.print("[dim]Use --all to re-classify already processed items.[/dim]")
         db.close()
         return
 
-    console.print(f"\n[cyan]Classifying {len(favorites)} favorite(s)...[/cyan]\n")
+    console.print(f"\n[cyan]Found {len(favorites)} item(s) to classify[/cyan]")
 
-    classified_count = 0
+    # Select model
+    model_id = getattr(config.llm, model)
+    console.print(f"[dim]Using model: {model_id}[/dim]")
 
-    for fav in favorites:
-        with console.status(f"[cyan]Classifying {fav['title'][:40]}...", spinner="dots"):
-            try:
-                result = classifier.classify_marketplace_item(
-                    title=fav['title'],
-                    price=fav.get('price'),
-                    category=fav.get('category_name'),
-                    condition=fav.get('condition'),
+    if dry_run:
+        console.print("[yellow]DRY RUN - no changes will be saved[/yellow]")
+
+    # Initialize LLM client
+    llm = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+
+    # System prompt for batch classification
+    system_prompt = """You are a professional librarian expert in the Extended Dewey Decimal Classification system.
+
+Extended Dewey uses a 'W' prefix for web content (links, bookmarks, marketplace listings).
+The W prefix indicates "web content ABOUT this topic" rather than the physical item itself.
+
+Key Extended Dewey categories:
+W000 - Computer science, information & general works
+W004 - Computer hardware & devices
+W100 - Philosophy & psychology
+W200 - Religion
+W300 - Social sciences
+W380 - Commerce & trade
+  W380.1 - E-commerce & online marketplaces
+W400 - Language
+W500 - Science
+  W510 - Mathematics
+  W550 - Earth sciences & geology
+  W570 - Life sciences
+W600 - Technology & applied sciences
+  W610 - Medicine & health
+  W620 - Engineering
+  W621 - Applied physics & mechanical engineering
+    W621.9 - Tools & machining
+    W621.38 - Electronics
+  W630 - Agriculture
+  W640 - Home & family
+    W641.3 - Food
+  W650 - Management
+  W681 - Precision instruments
+  W685 - Leather goods, luggage, sporting goods
+  W688 - Other manufactured products, toys, hobbies
+W700 - Arts & recreation
+  W741.5 - Comics & graphic novels
+  W790 - Sports, games & entertainment
+W800 - Literature
+W900 - History & geography
+
+Classification guidelines:
+- Classify by the item's subject/function, not just as "commerce"
+- Electronics/sensors/microcontrollers → W621.38
+- Tools/machining → W621.9
+- 3D printing/maker supplies → W681 or W621
+- Toys/hobbies/collectibles → W688
+- Sports equipment → W790
+- Use appropriate decimal precision
+- ALWAYS include the W prefix
+
+You will receive a JSON array of marketplace items. Return a JSON array of classifications IN THE SAME ORDER.
+Return ONLY the JSON array, no explanation or markdown."""
+
+    # Process in batches
+    total_classified = 0
+    total_batches = (len(favorites) + batch_size - 1) // batch_size
+
+    for batch_num in range(total_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min(start_idx + batch_size, len(favorites))
+        batch = favorites[start_idx:end_idx]
+
+        console.print(f"\n[cyan]Processing batch {batch_num + 1}/{total_batches} ({len(batch)} items)...[/cyan]")
+
+        # Build prompt with item details
+        items_for_llm = []
+        for fav in batch:
+            item = {"title": fav["title"]}
+            if fav.get("category_name"):
+                item["category"] = fav["category_name"]
+            if fav.get("condition"):
+                item["condition"] = fav["condition"]
+            items_for_llm.append(item)
+
+        items_json = json.dumps(items_for_llm, ensure_ascii=False)
+        prompt = f"""Classify these {len(batch)} marketplace items using Extended Dewey (W prefix).
+
+Items:
+{items_json}
+
+Return a JSON array with one object per item, in the same order:
+[{{"dewey_number": "W621.38", "dewey_label": "Electronics", "confidence": "high"}}, ...]"""
+
+        try:
+            with console.status(f"[cyan]Calling LLM (timeout: {timeout}s)...", spinner="dots"):
+                response = llm.simple_prompt(
+                    prompt=prompt,
+                    model=model_id,
+                    system=system_prompt,
+                    temperature=0.1,
+                    timeout=timeout
                 )
 
-                if 'error' not in result:
-                    # Update database
-                    cursor = db.conn.cursor()
-                    cursor.execute(
-                        """
-                        UPDATE mercadolivre_favorites
-                        SET dewey_class = ?, call_number = ?
-                        WHERE item_id = ?
-                        """,
-                        (
-                            result['dewey_number'],
-                            result.get('call_number'),
-                            fav['item_id'],
-                        ),
-                    )
-                    db.conn.commit()
+            # Parse response
+            response_text = response.strip()
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                response_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
 
-                    console.print(f"[green]✓[/green] {fav['title'][:50]}")
-                    console.print(f"  [cyan]{result['dewey_number']}[/cyan] - {result['dewey_label']}")
-                    if result.get('call_number'):
-                        console.print(f"  Call Number: [yellow]{result['call_number']}[/yellow]")
-                    console.print(f"  Confidence: {result['confidence']}\n")
+            try:
+                classifications = json.loads(response_text)
+            except json.JSONDecodeError as e:
+                console.print(f"[red]Failed to parse LLM response as JSON: {e}[/red]")
+                console.print(f"[dim]Response preview: {response_text[:200]}...[/dim]")
+                continue
 
-                    classified_count += 1
-                else:
-                    console.print(f"[red]✗[/red] Failed: {fav['title'][:50]}")
-                    console.print(f"  {result['error']}\n")
+            if len(classifications) != len(batch):
+                console.print(f"[yellow]Warning: Got {len(classifications)} classifications, expected {len(batch)}[/yellow]")
+                classifications = classifications[:len(batch)]
 
-            except Exception as e:
-                console.print(f"[red]✗ Error classifying {fav['title'][:50]}: {e}[/red]\n")
+            # Update database
+            updated_count = 0
+            for i, fav in enumerate(batch):
+                if i < len(classifications):
+                    result = classifications[i]
+                    dewey_number = result.get("dewey_number", "")
+                    dewey_label = result.get("dewey_label", "")
+                    confidence = result.get("confidence", "")
 
-    console.print(f"\n[green]✓ Classified {classified_count}/{len(favorites)} favorites[/green]")
+                    # Show sample of results
+                    if updated_count < 3 or (batch_num == 0 and i < 5):
+                        title = fav["title"][:50] + "..." if len(fav["title"]) > 50 else fav["title"]
+                        console.print(f"  [dim]{title}[/dim]")
+                        console.print(f"  [green]→ {dewey_number}[/green] {dewey_label} ({confidence})\n")
+
+                    if not dry_run:
+                        cursor.execute(
+                            """
+                            UPDATE mercadolivre_favorites
+                            SET dewey_class = ?, call_number = ?
+                            WHERE item_id = ?
+                            """,
+                            (dewey_number, f"{dewey_number} - {dewey_label}", fav["item_id"]),
+                        )
+                    updated_count += 1
+
+            if not dry_run:
+                db.conn.commit()
+
+            total_classified += updated_count
+            console.print(f"[green]✓ Classified {updated_count} items in batch {batch_num + 1}[/green]")
+
+        except Exception as e:
+            console.print(f"[red]Error processing batch {batch_num + 1}: {e}[/red]")
+            continue
+
+    # Summary
+    console.print(f"\n{'=' * 50}")
+    if dry_run:
+        console.print(f"[yellow]DRY RUN: Would have classified {total_classified} items[/yellow]")
+    else:
+        console.print(f"[green]✓ Successfully classified {total_classified}/{len(favorites)} items![/green]")
+        console.print(f"[dim]LLM prompts used: {total_batches}[/dim]")
+
+    console.print(f"\n[dim]View results: holo mercadolivre list[/dim]")
 
     db.close()
 
