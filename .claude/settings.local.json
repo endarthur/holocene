@@ -19,7 +19,9 @@
       "WebFetch(domain:helper-scripts.com)",
       "WebSearch",
       "Bash(findstr:*)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "WebFetch(domain:artificialanalysis.ai)",
+      "WebFetch(domain:nano-gpt.com)"
     ],
     "deny": [],
     "ask": []

@@ -1063,3 +1063,162 @@ def enrich_proxy(limit: int, delay: int):
             console.print(f"  • {other_errors} other errors (will retry next time)")
 
     db.close()
+
+
+@mercadolivre.command("clean-titles")
+@click.option("--all", "process_all", is_flag=True, help="Re-clean all titles (including already cleaned)")
+@click.option("--batch-size", type=int, default=500, help="Items per LLM batch (default: 500)")
+@click.option("--dry-run", is_flag=True, help="Preview without updating database")
+@click.option("--model", type=click.Choice(["primary", "primary_alt"]), default="primary_alt",
+              help="Model to use (default: primary_alt/Kimi K2)")
+def clean_titles(process_all: bool, batch_size: int, dry_run: bool, model: str):
+    """Clean SEO-stuffed titles into human-readable form.
+
+    Uses LLM to convert titles like:
+      "Kit Ferramentas Profissional 150 Pecas Com Maleta Completo Chaves Alicates"
+    Into:
+      "Kit de Ferramentas Profissional 150 Peças com Maleta"
+
+    Processes all items in a single batch for efficiency (uses ~1 LLM prompt per 500 items).
+    """
+    import json
+    from holocene.llm.nanogpt import NanoGPTClient
+
+    config = load_config()
+    db = Database(config.db_path)
+
+    # Get favorites to process
+    cursor = db.conn.cursor()
+
+    if process_all:
+        cursor.execute("""
+            SELECT item_id, title FROM mercadolivre_favorites
+            WHERE title IS NOT NULL
+            ORDER BY first_synced DESC
+        """)
+    else:
+        cursor.execute("""
+            SELECT item_id, title FROM mercadolivre_favorites
+            WHERE title IS NOT NULL AND clean_title IS NULL
+            ORDER BY first_synced DESC
+        """)
+
+    favorites = [{"item_id": row[0], "title": row[1]} for row in cursor.fetchall()]
+
+    if not favorites:
+        console.print("[yellow]No titles to clean.[/yellow]")
+        if not process_all:
+            console.print("[dim]Use --all to re-clean already processed titles.[/dim]")
+        db.close()
+        return
+
+    console.print(f"\n[cyan]Found {len(favorites)} title(s) to clean[/cyan]")
+
+    # Select model
+    model_id = getattr(config.llm, model)
+    console.print(f"[dim]Using model: {model_id}[/dim]")
+
+    if dry_run:
+        console.print("[yellow]DRY RUN - no changes will be saved[/yellow]")
+
+    # Initialize LLM client
+    llm = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+
+    # System prompt for title cleaning
+    system_prompt = """You clean up SEO-stuffed product titles into concise, human-readable form.
+
+Rules:
+- Remove keyword stuffing and redundancy
+- Keep essential information (product name, key specs like quantity, size, power)
+- For Portuguese titles, keep in Portuguese but make them readable
+- Maintain proper capitalization
+- Remove excessive punctuation and separators
+
+You will receive a JSON array of titles. Return a JSON array of cleaned titles IN THE SAME ORDER.
+Return ONLY the JSON array, no explanation or markdown."""
+
+    # Process in batches
+    total_cleaned = 0
+    total_batches = (len(favorites) + batch_size - 1) // batch_size
+
+    for batch_num in range(total_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min(start_idx + batch_size, len(favorites))
+        batch = favorites[start_idx:end_idx]
+
+        console.print(f"\n[cyan]Processing batch {batch_num + 1}/{total_batches} ({len(batch)} items)...[/cyan]")
+
+        # Build prompt with numbered titles
+        titles_json = json.dumps([f["title"] for f in batch], ensure_ascii=False)
+        prompt = f"Clean these {len(batch)} titles:\n{titles_json}"
+
+        try:
+            with console.status("[cyan]Calling LLM...", spinner="dots"):
+                response = llm.simple_prompt(
+                    prompt=prompt,
+                    model=model_id,
+                    system=system_prompt,
+                    temperature=0.1
+                )
+
+            # Parse response
+            # Try to extract JSON from response (handle markdown code blocks)
+            response_text = response.strip()
+            if response_text.startswith("```"):
+                # Remove markdown code block
+                lines = response_text.split("\n")
+                response_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+
+            try:
+                clean_titles = json.loads(response_text)
+            except json.JSONDecodeError as e:
+                console.print(f"[red]Failed to parse LLM response as JSON: {e}[/red]")
+                console.print(f"[dim]Response preview: {response_text[:200]}...[/dim]")
+                continue
+
+            if len(clean_titles) != len(batch):
+                console.print(f"[yellow]Warning: Got {len(clean_titles)} titles back, expected {len(batch)}[/yellow]")
+                # Try to match what we can
+                clean_titles = clean_titles[:len(batch)]
+
+            # Update database
+            updated_count = 0
+            for i, fav in enumerate(batch):
+                if i < len(clean_titles):
+                    clean_title = clean_titles[i]
+
+                    # Show sample of changes
+                    if updated_count < 3 or (batch_num == 0 and i < 5):
+                        original = fav["title"][:60] + "..." if len(fav["title"]) > 60 else fav["title"]
+                        cleaned = clean_title[:60] + "..." if len(clean_title) > 60 else clean_title
+                        console.print(f"  [dim]{original}[/dim]")
+                        console.print(f"  [green]→ {cleaned}[/green]\n")
+
+                    if not dry_run:
+                        cursor.execute(
+                            "UPDATE mercadolivre_favorites SET clean_title = ? WHERE item_id = ?",
+                            (clean_title, fav["item_id"])
+                        )
+                    updated_count += 1
+
+            if not dry_run:
+                db.conn.commit()
+
+            total_cleaned += updated_count
+            console.print(f"[green]✓ Cleaned {updated_count} titles in batch {batch_num + 1}[/green]")
+
+        except Exception as e:
+            console.print(f"[red]Error processing batch {batch_num + 1}: {e}[/red]")
+            continue
+
+    # Summary
+    console.print(f"\n{'=' * 50}")
+    if dry_run:
+        console.print(f"[yellow]DRY RUN: Would have cleaned {total_cleaned} titles[/yellow]")
+    else:
+        console.print(f"[green]✓ Successfully cleaned {total_cleaned}/{len(favorites)} titles![/green]")
+        console.print(f"[dim]LLM prompts used: {total_batches}[/dim]")
+
+    console.print(f"\n[dim]View results: holo mercadolivre list[/dim]")
+
+    db.close()

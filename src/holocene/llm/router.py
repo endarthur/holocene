@@ -29,6 +29,7 @@ class ModelRouter:
         # Map task types to config attributes
         model_map = {
             "primary": self.config.primary,
+            "primary_alt": self.config.primary_alt,
             "primary_cheap": self.config.primary_cheap,
             "coding": self.config.coding,
             "reasoning": self.config.reasoning,

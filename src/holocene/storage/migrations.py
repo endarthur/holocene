@@ -201,6 +201,18 @@ MIGRATIONS: List[Dict] = [
             -- They will be deprecated in future versions but not removed yet
         """,
     },
+    {
+        'version': 9,
+        'name': 'add_clean_title_columns',
+        'description': 'Add clean_title column for de-SEOed titles to mercadolivre_favorites and links',
+        'up': """
+            -- Add clean_title to mercadolivre_favorites (de-SEOed product names)
+            ALTER TABLE mercadolivre_favorites ADD COLUMN clean_title TEXT;
+
+            -- Add clean_title to links (de-SEOed page titles)
+            ALTER TABLE links ADD COLUMN clean_title TEXT;
+        """,
+    },
 ]
 
 

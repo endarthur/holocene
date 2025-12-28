@@ -27,6 +27,7 @@ class LLMConfig(BaseModel):
 
     # Model routing
     primary: str = "deepseek-ai/DeepSeek-V3.1"
+    primary_alt: str = "moonshotai/kimi-k2-0905"  # Faster, larger context (262K), good for structured tasks
     primary_cheap: str = "deepseek-chat-cheaper"
     coding: str = "qwen/qwen3-coder"
     reasoning: str = "deepseek-r1"
