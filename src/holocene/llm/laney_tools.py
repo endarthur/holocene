@@ -460,6 +460,139 @@ LANEY_TOOLS = [
             }
         }
     },
+    # === URL Fetching ===
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": "Fetch and extract text content from a URL. Use this to read webpage content, articles, documentation, etc. Returns plain text extracted from the page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to fetch"
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "Maximum characters to return (default: 8000)",
+                        "default": 8000
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    # === Item Details ===
+    {
+        "type": "function",
+        "function": {
+            "name": "get_book_details",
+            "description": "Get full details of a specific book by its ID. Use after searching to get complete information about a book.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "book_id": {
+                        "type": "integer",
+                        "description": "The book's database ID"
+                    }
+                },
+                "required": ["book_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_paper_details",
+            "description": "Get full details of a specific paper by its ID. Use after searching to get complete information including abstract.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paper_id": {
+                        "type": "integer",
+                        "description": "The paper's database ID"
+                    }
+                },
+                "required": ["paper_id"]
+            }
+        }
+    },
+    # === Wikipedia ===
+    {
+        "type": "function",
+        "function": {
+            "name": "wikipedia_search",
+            "description": "Search Wikipedia for articles. Returns titles and short descriptions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results (default: 5)",
+                        "default": 5
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wikipedia_summary",
+            "description": "Get the summary/introduction of a Wikipedia article. Use after searching to get detailed info.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Wikipedia article title (e.g., 'Python (programming language)')"
+                    }
+                },
+                "required": ["title"]
+            }
+        }
+    },
+    # === User Profile (Personality Memory) ===
+    {
+        "type": "function",
+        "function": {
+            "name": "get_user_profile",
+            "description": "Read your memory of the user's preferences, interests, and personality. This helps you personalize responses. Check this when you want to tailor your response to the user.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_user_profile",
+            "description": "Update your memory of the user. Use this when you learn something important about their preferences, interests, communication style, or ongoing projects. Be selective - only record genuinely useful information.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "addition": {
+                        "type": "string",
+                        "description": "New information to add to the profile (will be appended)"
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "If true, replaces entire profile instead of appending. Use sparingly.",
+                        "default": False
+                    }
+                },
+                "required": ["addition"]
+            }
+        }
+    },
 ]
 
 # Safe math namespace for calculator
@@ -545,6 +678,17 @@ class LaneyToolHandler:
             "run_python": self.run_python,
             # Document export
             "write_document": self.write_document,
+            # URL fetching
+            "fetch_url": self.fetch_url,
+            # Item details
+            "get_book_details": self.get_book_details,
+            "get_paper_details": self.get_paper_details,
+            # Wikipedia
+            "wikipedia_search": self.wikipedia_search,
+            "wikipedia_summary": self.wikipedia_summary,
+            # User profile
+            "get_user_profile": self.get_user_profile,
+            "update_user_profile": self.update_user_profile,
         }
 
     @property
@@ -1348,6 +1492,295 @@ from itertools import combinations, permutations, product
                 "success": False,
                 "error": f"Failed to write document: {str(e)}",
             }
+
+    # === URL Fetching ===
+
+    def fetch_url(self, url: str, max_length: int = 8000) -> Dict[str, Any]:
+        """Fetch and extract text from a URL.
+
+        Args:
+            url: URL to fetch
+            max_length: Maximum characters to return
+
+        Returns:
+            Dict with extracted text or error
+        """
+        import requests
+
+        try:
+            # Fetch the page
+            headers = {
+                "User-Agent": "Mozilla/5.0 (compatible; Holocene/1.0; +https://github.com/endarthur/holocene)"
+            }
+            response = requests.get(url, headers=headers, timeout=15)
+            response.raise_for_status()
+
+            content_type = response.headers.get('content-type', '')
+
+            # Handle different content types
+            if 'text/plain' in content_type:
+                text = response.text[:max_length]
+            elif 'text/html' in content_type or 'html' in content_type:
+                # Try to extract text from HTML
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(response.text, 'html.parser')
+
+                    # Remove script and style elements
+                    for element in soup(['script', 'style', 'nav', 'footer', 'header']):
+                        element.decompose()
+
+                    # Get text
+                    text = soup.get_text(separator='\n', strip=True)
+
+                    # Clean up whitespace
+                    lines = [line.strip() for line in text.splitlines() if line.strip()]
+                    text = '\n'.join(lines)[:max_length]
+
+                except ImportError:
+                    # BeautifulSoup not available, return raw
+                    text = response.text[:max_length]
+            else:
+                return {
+                    "error": f"Unsupported content type: {content_type}",
+                    "url": url,
+                }
+
+            return {
+                "success": True,
+                "url": url,
+                "content": text,
+                "length": len(text),
+                "truncated": len(response.text) > max_length,
+            }
+
+        except requests.exceptions.Timeout:
+            return {"error": "Request timed out", "url": url}
+        except requests.exceptions.RequestException as e:
+            return {"error": f"Failed to fetch URL: {str(e)}", "url": url}
+        except Exception as e:
+            return {"error": f"Error processing URL: {str(e)}", "url": url}
+
+    # === Item Details ===
+
+    def get_book_details(self, book_id: int) -> Dict[str, Any]:
+        """Get full details of a book by ID.
+
+        Args:
+            book_id: Book database ID
+
+        Returns:
+            Complete book information
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, title, author, publication_year, publisher, isbn,
+                   dewey_decimal, call_number, subjects, description,
+                   enriched_summary, enriched_tags, source, ia_identifier,
+                   created_at, metadata
+            FROM books WHERE id = ?
+        """, (book_id,))
+
+        row = cursor.fetchone()
+        if not row:
+            return {"error": f"Book not found with ID: {book_id}"}
+
+        return {
+            "id": row[0],
+            "title": row[1],
+            "author": row[2] or "Unknown",
+            "publication_year": row[3],
+            "publisher": row[4],
+            "isbn": row[5],
+            "dewey_decimal": row[6],
+            "call_number": row[7],
+            "subjects": self._parse_json(row[8]),
+            "description": row[9],
+            "enriched_summary": row[10],
+            "enriched_tags": self._parse_json(row[11]),
+            "source": row[12],
+            "ia_identifier": row[13],
+            "created_at": row[14],
+            "metadata": self._parse_json(row[15]) if row[15] else {},
+        }
+
+    def get_paper_details(self, paper_id: int) -> Dict[str, Any]:
+        """Get full details of a paper by ID.
+
+        Args:
+            paper_id: Paper database ID
+
+        Returns:
+            Complete paper information
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, title, authors, abstract, publication_date, journal,
+                   doi, arxiv_id, url, pdf_url, is_open_access, oa_status,
+                   created_at, metadata
+            FROM papers WHERE id = ?
+        """, (paper_id,))
+
+        row = cursor.fetchone()
+        if not row:
+            return {"error": f"Paper not found with ID: {paper_id}"}
+
+        return {
+            "id": row[0],
+            "title": row[1],
+            "authors": self._parse_json(row[2]),
+            "abstract": row[3],
+            "publication_date": row[4],
+            "journal": row[5],
+            "doi": row[6],
+            "arxiv_id": row[7],
+            "url": row[8],
+            "pdf_url": row[9],
+            "is_open_access": bool(row[10]),
+            "oa_status": row[11],
+            "created_at": row[12],
+            "metadata": self._parse_json(row[13]) if row[13] else {},
+        }
+
+    # === Wikipedia ===
+
+    def wikipedia_search(self, query: str, limit: int = 5) -> Dict[str, Any]:
+        """Search Wikipedia for articles.
+
+        Args:
+            query: Search query
+            limit: Maximum results
+
+        Returns:
+            List of matching articles
+        """
+        try:
+            from ..research.wikipedia_client import WikipediaClient
+            client = WikipediaClient()
+            results = client.search(query, limit=limit)
+            return {
+                "query": query,
+                "results": results,
+                "count": len(results),
+            }
+        except Exception as e:
+            return {"error": f"Wikipedia search failed: {str(e)}"}
+
+    def wikipedia_summary(self, title: str) -> Dict[str, Any]:
+        """Get Wikipedia article summary.
+
+        Args:
+            title: Article title
+
+        Returns:
+            Article summary and metadata
+        """
+        try:
+            from ..research.wikipedia_client import WikipediaClient
+            client = WikipediaClient()
+            result = client.get_summary(title)
+            if result:
+                return {
+                    "title": result.get("title"),
+                    "summary": result.get("extract"),
+                    "description": result.get("description"),
+                    "url": result.get("url"),
+                }
+            else:
+                return {"error": f"Article not found: {title}"}
+        except Exception as e:
+            return {"error": f"Wikipedia lookup failed: {str(e)}"}
+
+    # === User Profile (Personality Memory) ===
+
+    # Reserved slug for user profile
+    USER_PROFILE_SLUG = "_laney_user_profile"
+
+    def get_user_profile(self) -> Dict[str, Any]:
+        """Get the user profile memory.
+
+        Returns:
+            User profile content or empty if not set
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT content, updated_at FROM laney_notes WHERE slug = ?
+        """, (self.USER_PROFILE_SLUG,))
+
+        row = cursor.fetchone()
+        if row:
+            return {
+                "profile": row[0],
+                "last_updated": row[1],
+            }
+        else:
+            return {
+                "profile": "(No user profile yet. Learn about the user and update this!)",
+                "last_updated": None,
+            }
+
+    def update_user_profile(
+        self,
+        addition: str,
+        replace_all: bool = False,
+    ) -> Dict[str, Any]:
+        """Update the user profile memory.
+
+        Args:
+            addition: New content to add
+            replace_all: If True, replace entire profile
+
+        Returns:
+            Update status
+        """
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+
+            # Check if profile exists
+            cursor.execute("""
+                SELECT content FROM laney_notes WHERE slug = ?
+            """, (self.USER_PROFILE_SLUG,))
+            row = cursor.fetchone()
+
+            if row:
+                # Update existing
+                if replace_all:
+                    new_content = addition
+                else:
+                    # Append with timestamp
+                    timestamp = datetime.now().strftime("%Y-%m-%d")
+                    new_content = row[0] + f"\n\n[{timestamp}] {addition}"
+
+                cursor.execute("""
+                    UPDATE laney_notes
+                    SET content = ?, updated_at = ?
+                    WHERE slug = ?
+                """, (new_content, now, self.USER_PROFILE_SLUG))
+            else:
+                # Create new profile
+                cursor.execute("""
+                    INSERT INTO laney_notes (slug, title, content, tags, note_type, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    self.USER_PROFILE_SLUG,
+                    "User Profile",
+                    addition,
+                    '["system", "user-profile"]',
+                    "reference",
+                    now,
+                    now,
+                ))
+
+            self.conn.commit()
+            return {
+                "success": True,
+                "message": "User profile updated" if row else "User profile created",
+                "replaced": replace_all,
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to update profile: {str(e)}"}
 
     def _parse_json(self, field: str) -> Any:
         """Parse JSON field, return empty list if invalid."""
