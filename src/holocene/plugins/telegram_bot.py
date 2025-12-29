@@ -1519,7 +1519,7 @@ This link will grant you access to:
         self.messages_sent += 1
 
     async def _cmd_context(self, update, context):
-        """Handle /context command - show current conversation info."""
+        """Handle /context command - show current conversation info with token estimates."""
         self.commands_received += 1
 
         if not self._is_authorized(update.effective_chat.id):
@@ -1536,6 +1536,21 @@ This link will grant you access to:
             await update.message.reply_text("📭 No active conversation")
             return
 
+        # Get actual messages for token estimation
+        messages = self.conversation_manager.get_context_messages(conv_id)
+        total_chars = sum(len(m.get('content', '')) for m in messages)
+        tokens_est = total_chars // 4  # Rough estimate
+
+        # Context health indicator
+        max_tokens = 128000
+        usage_pct = (tokens_est / max_tokens) * 100
+        if usage_pct < 30:
+            health = "🟢 Healthy"
+        elif usage_pct < 60:
+            health = "🟡 Moderate"
+        else:
+            health = "🔴 Consider /new"
+
         # Get some stats
         try:
             created = datetime.fromisoformat(info['created_at'])
@@ -1551,11 +1566,12 @@ This link will grant you access to:
         await update.message.reply_text(
             f"💬 *Current Conversation*\n\n"
             f"ID: `{info['id']}`\n"
-            f"Title: {title}\n"
-            f"Messages: {info['message_count']}\n"
-            f"Context window: last {ConversationManager.MAX_CONTEXT_MESSAGES} msgs\n"
+            f"Messages: {info['message_count']} (showing last {len(messages)})\n"
             f"Started: {created_str}\n"
             f"Last activity: {updated_str}\n\n"
+            f"*Context Usage:*\n"
+            f"Tokens: ~{tokens_est:,} / 128K ({usage_pct:.1f}%)\n"
+            f"Status: {health}\n\n"
             f"_Use `/new` to start fresh_",
             parse_mode='Markdown'
         )
