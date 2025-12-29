@@ -1724,6 +1724,7 @@ This link will grant you access to:
         """Send a query to Laney and reply with response.
 
         Uses conversation history for context - Laney remembers past messages.
+        If Laney creates documents, sends them as file attachments.
 
         Args:
             query: The question/text to send to Laney
@@ -1773,9 +1774,15 @@ This link will grant you access to:
                     max_iterations=5,
                     timeout=90
                 )
-                return {"success": True, "response": response}
+                # Capture created documents before closing
+                created_docs = list(tool_handler.created_documents)
+                return {
+                    "success": True,
+                    "response": response,
+                    "documents": created_docs,
+                }
             except Exception as e:
-                return {"success": False, "error": str(e)}
+                return {"success": False, "error": str(e), "documents": []}
             finally:
                 tool_handler.close()
 
@@ -1798,6 +1805,19 @@ This link will grant you access to:
 
             await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
             self.messages_sent += 1
+
+            # Send any created documents as file attachments
+            for doc_path in result.get('documents', []):
+                if doc_path.exists():
+                    try:
+                        await update.message.reply_document(
+                            document=open(doc_path, 'rb'),
+                            filename=doc_path.name,
+                            caption=f"📄 {doc_path.stem.replace('-', ' ').title()}"
+                        )
+                        self.messages_sent += 1
+                    except Exception as e:
+                        self.logger.error(f"Failed to send document {doc_path}: {e}")
 
         except Exception as e:
             self.logger.error(f"Laney query error: {e}", exc_info=True)
