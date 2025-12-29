@@ -1787,6 +1787,11 @@ This link will grant you access to:
             if context_tokens_est > 80000:  # ~60% of 128K
                 context_warning = f"⚠️ Context getting full (~{context_tokens_est//1000}K tokens). Consider /new for fresh conversation."
 
+            # Track tools called for verbose output
+            tools_called = []
+            def on_tool(name, iteration):
+                tools_called.append(name)
+
             try:
                 response = client.run_with_tools(
                     messages=messages,
@@ -1795,18 +1800,20 @@ This link will grant you access to:
                     model=config.llm.primary,
                     temperature=0.3,
                     max_iterations=20,
-                    timeout=120
+                    timeout=120,
+                    on_tool_call=on_tool,
                 )
                 # Capture created documents before closing
                 created_docs = list(tool_handler.created_documents)
                 return {
                     "success": True,
                     "response": response,
+                    "tools_called": tools_called,
                     "documents": created_docs,
                     "context_warning": context_warning,
                 }
             except Exception as e:
-                return {"success": False, "error": str(e), "documents": [], "context_warning": context_warning}
+                return {"success": False, "error": str(e), "documents": [], "context_warning": context_warning, "tools_called": tools_called}
             finally:
                 tool_handler.close()
 
@@ -1819,13 +1826,27 @@ This link will grant you access to:
                 # Save assistant response to conversation
                 self.conversation_manager.add_message(conversation_id, "assistant", response_text)
 
-                # Truncate if too long for Telegram (4096 char limit)
-                if len(response_text) > 3900:
-                    response_text = response_text[:3900] + "\n\n_(truncated)_"
+                # Build tools summary if any were called
+                tools_called = result.get('tools_called', [])
+                tools_summary = ""
+                if tools_called:
+                    # Compact format: unique tools with counts
+                    from collections import Counter
+                    tool_counts = Counter(tools_called)
+                    tool_parts = [f"{name}" if count == 1 else f"{name}×{count}"
+                                  for name, count in tool_counts.items()]
+                    tools_summary = f"\n\n`🔧 {' → '.join(tool_parts)}`"
 
-                msg = f"🔮 *Laney*\n\n{response_text}"
+                # Truncate if too long for Telegram (4096 char limit)
+                max_response = 3900 - len(tools_summary)
+                if len(response_text) > max_response:
+                    response_text = response_text[:max_response] + "\n\n_(truncated)_"
+
+                msg = f"🔮 *Laney*\n\n{response_text}{tools_summary}"
             else:
-                msg = f"❌ *Laney Error*\n\n{result.get('error', 'Unknown error')[:500]}"
+                tools_called = result.get('tools_called', [])
+                tools_info = f" (after {len(tools_called)} tool calls)" if tools_called else ""
+                msg = f"❌ *Laney Error*{tools_info}\n\n{result.get('error', 'Unknown error')[:500]}"
 
             await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
             self.messages_sent += 1

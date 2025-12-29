@@ -101,6 +101,7 @@ class NanoGPTClient:
         temperature: float = 0.7,
         max_iterations: int = 10,
         timeout: int = 60,
+        on_tool_call: Optional[Callable[[str, int], None]] = None,
     ) -> str:
         """
         Run a conversation with tool calling support.
@@ -115,6 +116,7 @@ class NanoGPTClient:
             temperature: Sampling temperature
             max_iterations: Maximum tool call iterations (safety limit)
             timeout: Request timeout per API call
+            on_tool_call: Optional callback(tool_name, iteration) for progress updates
 
         Returns:
             Final response text after all tool calls are resolved
@@ -146,6 +148,13 @@ class NanoGPTClient:
             for tool_call in tool_calls:
                 tool_name = tool_call["function"]["name"]
                 tool_id = tool_call["id"]
+
+                # Notify callback if provided
+                if on_tool_call:
+                    try:
+                        on_tool_call(tool_name, iteration + 1)
+                    except Exception:
+                        pass  # Don't let callback errors break the loop
 
                 # Parse arguments
                 try:
