@@ -108,6 +108,10 @@ class IntegrationsConfig(BaseModel):
     apify_enabled: bool = False
     apify_api_key: Optional[str] = None
 
+    # Brave Search API (free tier: 2,000/month)
+    brave_search_enabled: bool = False
+    brave_api_key: Optional[str] = None
+
     brightdata_enabled: bool = False
     brightdata_username: Optional[str] = None
     brightdata_password: Optional[str] = None
@@ -189,6 +193,9 @@ class Config(BaseModel):
 
         if self.integrations.apify_api_key is None:
             self.integrations.apify_api_key = os.getenv("APIFY_API_KEY")
+
+        if self.integrations.brave_api_key is None:
+            self.integrations.brave_api_key = os.getenv("BRAVE_API_KEY")
 
 
 def get_config_path() -> Path:

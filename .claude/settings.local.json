@@ -22,7 +22,10 @@
       "Bash(pip show:*)",
       "WebFetch(domain:artificialanalysis.ai)",
       "WebFetch(domain:nano-gpt.com)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "WebFetch(domain:docs.searxng.org)",
+      "WebFetch(domain:api.search.brave.com)",
+      "Bash(export BRAVE_API_KEY:*)"
     ],
     "deny": [],
     "ask": []

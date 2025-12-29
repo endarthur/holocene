@@ -28,6 +28,7 @@ Your capabilities:
 - Find connections between disparate items
 - Provide collection statistics and insights
 - Help the user discover what they've forgotten they saved
+- Search the web (via Brave Search) when the collection doesn't have the answer or for current information
 
 When responding:
 - Reference specific items with enough detail to identify them
@@ -64,11 +65,18 @@ def laney(query: str, model: str, verbose: bool):
 
         if verbose:
             console.print(f"[dim]Using model: {model_id}[/dim]")
-            console.print(f"[dim]Query: {query}[/dim]\n")
+            console.print(f"[dim]Query: {query}[/dim]")
+            if config.integrations.brave_api_key:
+                console.print(f"[dim]Web search: enabled[/dim]\n")
+            else:
+                console.print(f"[dim]Web search: disabled (no Brave API key)[/dim]\n")
 
         # Initialize clients
         client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
-        tool_handler = LaneyToolHandler(config.db_path)
+        tool_handler = LaneyToolHandler(
+            db_path=config.db_path,
+            brave_api_key=config.integrations.brave_api_key,
+        )
 
         # Build messages
         messages = [

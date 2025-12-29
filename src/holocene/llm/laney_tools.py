@@ -156,21 +156,51 @@ LANEY_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web using Brave Search. Use this when the user's collection doesn't have the answer, or to find current/recent information.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Number of results (default: 5, max: 10)",
+                        "default": 5
+                    },
+                    "freshness": {
+                        "type": "string",
+                        "enum": ["pd", "pw", "pm", "py"],
+                        "description": "Filter by freshness: pd=past day, pw=past week, pm=past month, py=past year"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
 ]
 
 
 class LaneyToolHandler:
     """Handler for Laney's tools - executes queries against the database."""
 
-    def __init__(self, db_path: Union[str, Path]):
+    def __init__(self, db_path: Union[str, Path], brave_api_key: Optional[str] = None):
         """
         Initialize tool handler.
 
         Args:
             db_path: Path to SQLite database
+            brave_api_key: Optional Brave Search API key for web search
         """
         self.conn = sqlite3.connect(str(db_path))
         self.conn.row_factory = sqlite3.Row
+        self.brave_api_key = brave_api_key
+        self._brave_client = None
 
         # Map tool names to handler methods
         self.handlers = {
@@ -181,7 +211,16 @@ class LaneyToolHandler:
             "search_mercadolivre": self.search_mercadolivre,
             "search_all": self.search_all,
             "get_recent_items": self.get_recent_items,
+            "web_search": self.web_search,
         }
+
+    @property
+    def brave_client(self):
+        """Lazy-load Brave Search client."""
+        if self._brave_client is None and self.brave_api_key:
+            from ..integrations.brave_search import BraveSearchClient
+            self._brave_client = BraveSearchClient(self.brave_api_key)
+        return self._brave_client
 
     def close(self):
         """Close the database connection."""
@@ -383,6 +422,42 @@ class LaneyToolHandler:
                      "dewey": r[5]} for r in cursor.fetchall()]
 
         return []
+
+    def web_search(
+        self,
+        query: str,
+        count: int = 5,
+        freshness: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Search the web using Brave Search.
+
+        Args:
+            query: Search query
+            count: Number of results (max 10)
+            freshness: Filter by freshness (pd, pw, pm, py)
+
+        Returns:
+            Dict with 'results' list and 'query' info
+        """
+        if not self.brave_client:
+            return {
+                "error": "Web search not available - Brave API key not configured",
+                "hint": "Add brave_api_key to config or set BRAVE_API_KEY env var"
+            }
+
+        try:
+            results = self.brave_client.search_simple(
+                query=query,
+                count=min(count, 10),
+                freshness=freshness,
+            )
+            return {
+                "query": query,
+                "results": results,
+                "count": len(results),
+            }
+        except Exception as e:
+            return {"error": f"Web search failed: {str(e)}"}
 
     def _parse_json(self, field: str) -> Any:
         """Parse JSON field, return empty list if invalid."""
