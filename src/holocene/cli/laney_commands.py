@@ -102,8 +102,8 @@ def laney(query: str, model: str, verbose: bool):
                 tool_handlers=tool_handler.handlers,
                 model=model_id,
                 temperature=0.3,
-                max_iterations=5,
-                timeout=90
+                max_iterations=20,
+                timeout=120
             )
 
         tool_handler.close()

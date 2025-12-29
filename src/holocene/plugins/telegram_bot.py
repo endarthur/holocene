@@ -1764,6 +1764,13 @@ This link will grant you access to:
             messages = [{"role": "system", "content": LANEY_SYSTEM_PROMPT}]
             messages.extend(history)
 
+            # Estimate context usage (rough: 4 chars per token)
+            context_chars = sum(len(m.get('content', '')) for m in messages)
+            context_tokens_est = context_chars // 4
+            context_warning = None
+            if context_tokens_est > 80000:  # ~60% of 128K
+                context_warning = f"⚠️ Context getting full (~{context_tokens_est//1000}K tokens). Consider /new for fresh conversation."
+
             try:
                 response = client.run_with_tools(
                     messages=messages,
@@ -1771,8 +1778,8 @@ This link will grant you access to:
                     tool_handlers=tool_handler.handlers,
                     model=config.llm.primary,
                     temperature=0.3,
-                    max_iterations=5,
-                    timeout=90
+                    max_iterations=20,
+                    timeout=120
                 )
                 # Capture created documents before closing
                 created_docs = list(tool_handler.created_documents)
@@ -1780,9 +1787,10 @@ This link will grant you access to:
                     "success": True,
                     "response": response,
                     "documents": created_docs,
+                    "context_warning": context_warning,
                 }
             except Exception as e:
-                return {"success": False, "error": str(e), "documents": []}
+                return {"success": False, "error": str(e), "documents": [], "context_warning": context_warning}
             finally:
                 tool_handler.close()
 
@@ -1818,6 +1826,10 @@ This link will grant you access to:
                         self.messages_sent += 1
                     except Exception as e:
                         self.logger.error(f"Failed to send document {doc_path}: {e}")
+
+            # Send context warning if needed
+            if result.get('context_warning'):
+                await update.message.reply_text(result['context_warning'])
 
         except Exception as e:
             self.logger.error(f"Laney query error: {e}", exc_info=True)
