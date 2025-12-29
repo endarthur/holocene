@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Laney - Holocene</title>
+
+    <!-- Telegram Web App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        // Telegram theme colors (will be overridden by SDK)
+                        tg: {
+                            bg: 'var(--tg-theme-bg-color, #ffffff)',
+                            text: 'var(--tg-theme-text-color, #000000)',
+                            hint: 'var(--tg-theme-hint-color, #999999)',
+                            link: 'var(--tg-theme-link-color, #2481cc)',
+                            button: 'var(--tg-theme-button-color, #2481cc)',
+                            buttonText: 'var(--tg-theme-button-text-color, #ffffff)',
+                            secondary: 'var(--tg-theme-secondary-bg-color, #f0f0f0)',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        :root {
+            --tg-theme-bg-color: #ffffff;
+            --tg-theme-text-color: #000000;
+            --tg-theme-hint-color: #999999;
+            --tg-theme-link-color: #2481cc;
+            --tg-theme-button-color: #2481cc;
+            --tg-theme-button-text-color: #ffffff;
+            --tg-theme-secondary-bg-color: #f0f0f0;
+        }
+
+        body {
+            background-color: var(--tg-theme-bg-color);
+            color: var(--tg-theme-text-color);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+
+        /* Tab styles */
+        .tab-btn {
+            transition: all 0.2s ease;
+        }
+        .tab-btn.active {
+            border-bottom: 2px solid var(--tg-theme-button-color);
+            color: var(--tg-theme-button-color);
+        }
+
+        /* Card styles */
+        .card {
+            background: var(--tg-theme-secondary-bg-color);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        /* Progress bar */
+        .progress-bar {
+            height: 8px;
+            border-radius: 4px;
+            background: var(--tg-theme-secondary-bg-color);
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        /* Stat card */
+        .stat-card {
+            background: var(--tg-theme-secondary-bg-color);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--tg-theme-button-color);
+        }
+        .stat-label {
+            font-size: 12px;
+            color: var(--tg-theme-hint-color);
+            margin-top: 4px;
+        }
+
+        /* Collection item */
+        .collection-item {
+            background: var(--tg-theme-secondary-bg-color);
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: transform 0.1s ease, opacity 0.1s ease;
+        }
+        .collection-item:active {
+            transform: scale(0.98);
+            opacity: 0.8;
+        }
+
+        /* Loading spinner */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--tg-theme-secondary-bg-color);
+            border-top-color: var(--tg-theme-button-color);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        /* Health indicator */
+        .health-good { color: #22c55e; }
+        .health-warning { color: #eab308; }
+        .health-danger { color: #ef4444; }
+    </style>
+</head>
+<body>
+    <div id="app" class="flex flex-col min-h-screen">
+        <!-- Header -->
+        <header class="px-4 py-3 border-b" style="border-color: var(--tg-theme-hint-color); opacity: 0.2;">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <span class="text-2xl">🔮</span>
+                    <div>
+                        <h1 class="font-bold text-lg">Laney</h1>
+                        <p class="text-xs" style="color: var(--tg-theme-hint-color);">Pattern Recognition AI</p>
+                    </div>
+                </div>
+                <div id="connection-status" class="flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                    <span class="text-xs" style="color: var(--tg-theme-hint-color);">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Tabs -->
+        <nav class="flex border-b" style="border-color: var(--tg-theme-hint-color); opacity: 0.2;">
+            <button class="tab-btn flex-1 py-3 text-sm font-medium active" data-tab="dashboard">
+                Dashboard
+            </button>
+            <button class="tab-btn flex-1 py-3 text-sm font-medium" data-tab="collection">
+                Collection
+            </button>
+            <button class="tab-btn flex-1 py-3 text-sm font-medium" data-tab="conversations">
+                Conversations
+            </button>
+        </nav>
+
+        <!-- Tab Content -->
+        <main class="flex-1 overflow-y-auto p-4">
+            <!-- Dashboard Tab -->
+            <div id="tab-dashboard" class="tab-content">
+                <!-- Context Usage -->
+                <div class="card">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-medium">Context Usage</span>
+                        <span id="context-health" class="text-lg">🟢</span>
+                    </div>
+                    <div class="progress-bar mb-2">
+                        <div id="context-bar" class="progress-fill bg-green-500" style="width: 0%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs" style="color: var(--tg-theme-hint-color);">
+                        <span id="context-used">0 tokens</span>
+                        <span id="context-max">/ 128K</span>
+                    </div>
+                </div>
+
+                <!-- Stats Grid -->
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-books">-</div>
+                        <div class="stat-label">Books</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-papers">-</div>
+                        <div class="stat-label">Papers</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-links">-</div>
+                        <div class="stat-label">Links</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-conversations">-</div>
+                        <div class="stat-label">Conversations</div>
+                    </div>
+                </div>
+
+                <!-- API Usage -->
+                <div class="card">
+                    <h3 class="font-medium mb-3">API Usage Today</h3>
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm" style="color: var(--tg-theme-hint-color);">NanoGPT Prompts</span>
+                        <span id="api-usage" class="font-medium">- / 2000</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div id="api-bar" class="progress-fill" style="width: 0%; background: var(--tg-theme-button-color);"></div>
+                    </div>
+                </div>
+
+                <!-- Active Conversation -->
+                <div class="card">
+                    <h3 class="font-medium mb-2">Active Conversation</h3>
+                    <div id="active-conv" class="text-sm" style="color: var(--tg-theme-hint-color);">
+                        No active conversation
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="card">
+                    <h3 class="font-medium mb-3">Recent Activity</h3>
+                    <div id="recent-activity" class="space-y-2">
+                        <div class="text-sm text-center py-4" style="color: var(--tg-theme-hint-color);">
+                            Loading...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Collection Tab -->
+            <div id="tab-collection" class="tab-content hidden">
+                <!-- Search -->
+                <div class="mb-4">
+                    <input
+                        type="text"
+                        id="collection-search"
+                        placeholder="Search collection..."
+                        class="w-full px-4 py-3 rounded-xl text-sm"
+                        style="background: var(--tg-theme-secondary-bg-color); border: none; outline: none;"
+                    >
+                </div>
+
+                <!-- Filter Tabs -->
+                <div class="flex gap-2 mb-4 overflow-x-auto">
+                    <button class="filter-btn px-3 py-1.5 rounded-full text-xs font-medium active" data-filter="all" style="background: var(--tg-theme-button-color); color: var(--tg-theme-button-text-color);">
+                        All
+                    </button>
+                    <button class="filter-btn px-3 py-1.5 rounded-full text-xs font-medium" data-filter="books" style="background: var(--tg-theme-secondary-bg-color);">
+                        📚 Books
+                    </button>
+                    <button class="filter-btn px-3 py-1.5 rounded-full text-xs font-medium" data-filter="papers" style="background: var(--tg-theme-secondary-bg-color);">
+                        📄 Papers
+                    </button>
+                    <button class="filter-btn px-3 py-1.5 rounded-full text-xs font-medium" data-filter="links" style="background: var(--tg-theme-secondary-bg-color);">
+                        🔗 Links
+                    </button>
+                </div>
+
+                <!-- Collection Items -->
+                <div id="collection-list">
+                    <div class="flex justify-center py-8">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Conversations Tab -->
+            <div id="tab-conversations" class="tab-content hidden">
+                <div id="conversations-list">
+                    <div class="flex justify-center py-8">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Initialize Telegram WebApp
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        // Apply Telegram theme
+        document.body.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#ffffff');
+        document.body.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#000000');
+        document.body.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#999999');
+        document.body.style.setProperty('--tg-theme-link-color', tg.themeParams.link_color || '#2481cc');
+        document.body.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#2481cc');
+        document.body.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
+        document.body.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#f0f0f0');
+
+        // API base URL - auto-detect based on environment
+        const API_BASE = window.location.origin;
+
+        // State
+        let currentTab = 'dashboard';
+        let currentFilter = 'all';
+        let collectionData = { books: [], papers: [], links: [] };
+        let conversationsData = [];
+
+        // Auth header using Telegram init data
+        function getAuthHeaders() {
+            return {
+                'Content-Type': 'application/json',
+                'X-Telegram-Init-Data': tg.initData
+            };
+        }
+
+        // API call helper
+        async function api(endpoint, options = {}) {
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    ...options,
+                    headers: {
+                        ...getAuthHeaders(),
+                        ...options.headers
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.error(`API error (${endpoint}):`, error);
+                throw error;
+            }
+        }
+
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tab = btn.dataset.tab;
+                switchTab(tab);
+            });
+        });
+
+        function switchTab(tab) {
+            currentTab = tab;
+
+            // Update tab buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+
+            // Update content visibility
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.toggle('hidden', content.id !== `tab-${tab}`);
+            });
+
+            // Load tab-specific data
+            if (tab === 'collection' && collectionData.books.length === 0) {
+                loadCollection();
+            } else if (tab === 'conversations' && conversationsData.length === 0) {
+                loadConversations();
+            }
+        }
+
+        // Filter buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentFilter = btn.dataset.filter;
+
+                document.querySelectorAll('.filter-btn').forEach(b => {
+                    if (b.dataset.filter === currentFilter) {
+                        b.style.background = 'var(--tg-theme-button-color)';
+                        b.style.color = 'var(--tg-theme-button-text-color)';
+                    } else {
+                        b.style.background = 'var(--tg-theme-secondary-bg-color)';
+                        b.style.color = 'var(--tg-theme-text-color)';
+                    }
+                });
+
+                renderCollection();
+            });
+        });
+
+        // Search
+        document.getElementById('collection-search').addEventListener('input', (e) => {
+            renderCollection(e.target.value);
+        });
+
+        // Load dashboard data
+        async function loadDashboard() {
+            try {
+                // Try to load stats
+                const statsResponse = await api('/webapp/stats');
+
+                document.getElementById('stat-books').textContent = statsResponse.books || 0;
+                document.getElementById('stat-papers').textContent = statsResponse.papers || 0;
+                document.getElementById('stat-links').textContent = statsResponse.links || 0;
+                document.getElementById('stat-conversations').textContent = statsResponse.conversations || 0;
+
+                // Context usage
+                if (statsResponse.context) {
+                    const ctx = statsResponse.context;
+                    const percent = Math.round((ctx.used / ctx.max) * 100);
+                    document.getElementById('context-bar').style.width = `${percent}%`;
+                    document.getElementById('context-used').textContent = `${(ctx.used / 1000).toFixed(1)}K tokens`;
+
+                    // Health indicator
+                    let health = '🟢';
+                    let barColor = '#22c55e';
+                    if (percent > 80) {
+                        health = '🔴';
+                        barColor = '#ef4444';
+                    } else if (percent > 60) {
+                        health = '🟡';
+                        barColor = '#eab308';
+                    }
+                    document.getElementById('context-health').textContent = health;
+                    document.getElementById('context-bar').style.backgroundColor = barColor;
+                }
+
+                // API usage
+                if (statsResponse.api_usage) {
+                    const usage = statsResponse.api_usage;
+                    document.getElementById('api-usage').textContent = `${usage.used} / ${usage.limit}`;
+                    const apiPercent = Math.round((usage.used / usage.limit) * 100);
+                    document.getElementById('api-bar').style.width = `${apiPercent}%`;
+                }
+
+                // Active conversation
+                if (statsResponse.active_conversation) {
+                    const conv = statsResponse.active_conversation;
+                    document.getElementById('active-conv').innerHTML = `
+                        <div class="font-medium">${conv.title || 'Untitled'}</div>
+                        <div class="text-xs mt-1">${conv.message_count} messages</div>
+                    `;
+                }
+
+                // Recent activity
+                if (statsResponse.recent_activity && statsResponse.recent_activity.length > 0) {
+                    document.getElementById('recent-activity').innerHTML = statsResponse.recent_activity.map(item => `
+                        <div class="flex items-center gap-2 text-sm">
+                            <span>${item.icon}</span>
+                            <span class="flex-1">${item.text}</span>
+                            <span class="text-xs" style="color: var(--tg-theme-hint-color);">${item.time}</span>
+                        </div>
+                    `).join('');
+                }
+
+                // Update connection status
+                setConnected(true);
+
+            } catch (error) {
+                console.error('Failed to load dashboard:', error);
+                setConnected(false);
+
+                // Show error state
+                document.getElementById('recent-activity').innerHTML = `
+                    <div class="text-sm text-center py-4" style="color: var(--tg-theme-hint-color);">
+                        Failed to load data. Tap to retry.
+                    </div>
+                `;
+            }
+        }
+
+        // Load collection data
+        async function loadCollection() {
+            try {
+                const [books, papers, links] = await Promise.all([
+                    api('/books?limit=50'),
+                    api('/webapp/papers?limit=50').catch(() => ({ papers: [] })),
+                    api('/links?limit=50')
+                ]);
+
+                collectionData.books = books.books || [];
+                collectionData.papers = papers.papers || [];
+                collectionData.links = links.links || [];
+
+                renderCollection();
+            } catch (error) {
+                console.error('Failed to load collection:', error);
+                document.getElementById('collection-list').innerHTML = `
+                    <div class="text-sm text-center py-8" style="color: var(--tg-theme-hint-color);">
+                        Failed to load collection
+                    </div>
+                `;
+            }
+        }
+
+        // Render collection items
+        function renderCollection(search = '') {
+            const searchLower = search.toLowerCase();
+            let items = [];
+
+            // Collect items based on filter
+            if (currentFilter === 'all' || currentFilter === 'books') {
+                items.push(...collectionData.books.map(b => ({
+                    type: 'book',
+                    icon: '📚',
+                    title: b.title || 'Untitled',
+                    subtitle: b.author || 'Unknown author',
+                    id: b.id
+                })));
+            }
+            if (currentFilter === 'all' || currentFilter === 'papers') {
+                items.push(...collectionData.papers.map(p => ({
+                    type: 'paper',
+                    icon: '📄',
+                    title: p.title || 'Untitled',
+                    subtitle: p.authors?.join(', ') || 'Unknown authors',
+                    id: p.id
+                })));
+            }
+            if (currentFilter === 'all' || currentFilter === 'links') {
+                items.push(...collectionData.links.map(l => ({
+                    type: 'link',
+                    icon: '🔗',
+                    title: l.title || l.url,
+                    subtitle: new URL(l.url).hostname,
+                    id: l.id,
+                    url: l.url
+                })));
+            }
+
+            // Filter by search
+            if (searchLower) {
+                items = items.filter(item =>
+                    item.title.toLowerCase().includes(searchLower) ||
+                    item.subtitle.toLowerCase().includes(searchLower)
+                );
+            }
+
+            // Render
+            if (items.length === 0) {
+                document.getElementById('collection-list').innerHTML = `
+                    <div class="text-sm text-center py-8" style="color: var(--tg-theme-hint-color);">
+                        ${search ? 'No results found' : 'No items in collection'}
+                    </div>
+                `;
+                return;
+            }
+
+            document.getElementById('collection-list').innerHTML = items.slice(0, 50).map(item => `
+                <div class="collection-item" onclick="openItem('${item.type}', ${item.id})">
+                    <div class="flex items-start gap-3">
+                        <span class="text-xl">${item.icon}</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-medium text-sm truncate">${escapeHtml(item.title)}</div>
+                            <div class="text-xs truncate" style="color: var(--tg-theme-hint-color);">${escapeHtml(item.subtitle)}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Load conversations
+        async function loadConversations() {
+            try {
+                const response = await api('/webapp/conversations');
+                conversationsData = response.conversations || [];
+                renderConversations();
+            } catch (error) {
+                console.error('Failed to load conversations:', error);
+                document.getElementById('conversations-list').innerHTML = `
+                    <div class="text-sm text-center py-8" style="color: var(--tg-theme-hint-color);">
+                        Failed to load conversations
+                    </div>
+                `;
+            }
+        }
+
+        // Render conversations
+        function renderConversations() {
+            if (conversationsData.length === 0) {
+                document.getElementById('conversations-list').innerHTML = `
+                    <div class="text-sm text-center py-8" style="color: var(--tg-theme-hint-color);">
+                        No conversations yet. Start chatting with Laney!
+                    </div>
+                `;
+                return;
+            }
+
+            document.getElementById('conversations-list').innerHTML = conversationsData.map(conv => `
+                <div class="collection-item" onclick="openConversation(${conv.id})">
+                    <div class="flex items-start gap-3">
+                        <span class="text-xl">💬</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-medium text-sm">${escapeHtml(conv.title || 'Untitled conversation')}</div>
+                            <div class="text-xs mt-1" style="color: var(--tg-theme-hint-color);">
+                                ${conv.message_count} messages • ${formatDate(conv.updated_at)}
+                            </div>
+                        </div>
+                        ${conv.is_active ? '<span class="w-2 h-2 rounded-full bg-green-500"></span>' : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Open item detail
+        function openItem(type, id) {
+            // For now, just haptic feedback
+            tg.HapticFeedback.impactOccurred('light');
+
+            // Could open a detail view or send to bot
+            console.log(`Open ${type} ${id}`);
+        }
+
+        // Open conversation
+        function openConversation(id) {
+            tg.HapticFeedback.impactOccurred('light');
+
+            // Send command to resume conversation
+            tg.sendData(JSON.stringify({
+                action: 'resume_conversation',
+                conversation_id: id
+            }));
+        }
+
+        // Connection status
+        function setConnected(connected) {
+            const status = document.getElementById('connection-status');
+            if (connected) {
+                status.innerHTML = `
+                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                    <span class="text-xs" style="color: var(--tg-theme-hint-color);">Connected</span>
+                `;
+            } else {
+                status.innerHTML = `
+                    <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                    <span class="text-xs" style="color: var(--tg-theme-hint-color);">Disconnected</span>
+                `;
+            }
+        }
+
+        // Utility functions
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diff = now - date;
+
+            if (diff < 60000) return 'Just now';
+            if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+            if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+            if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+
+            return date.toLocaleDateString();
+        }
+
+        // Initial load
+        loadDashboard();
+
+        // Refresh dashboard periodically
+        setInterval(() => {
+            if (currentTab === 'dashboard') {
+                loadDashboard();
+            }
+        }, 30000); // Every 30 seconds
+    </script>
+</body>
+</html>

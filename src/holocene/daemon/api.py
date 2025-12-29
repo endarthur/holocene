@@ -246,6 +246,13 @@ class APIServer:
         # ArchiveBox proxy endpoints
         self.app.route("/box/<snapshot_id>", methods=["GET"])(self._box_snapshot)
 
+        # Telegram Mini App endpoints
+        self.app.route("/webapp", methods=["GET"])(self._webapp_index)
+        self.app.route("/webapp/", methods=["GET"])(self._webapp_index)
+        self.app.route("/webapp/stats", methods=["GET"])(self._webapp_stats)
+        self.app.route("/webapp/conversations", methods=["GET"])(self._webapp_conversations)
+        self.app.route("/webapp/papers", methods=["GET"])(self._webapp_papers)
+
         # Error handlers
         self.app.errorhandler(404)(self._not_found)
         self.app.errorhandler(500)(self._internal_error)
@@ -323,6 +330,7 @@ class APIServer:
 
         <h3>Quick Links:</h3>
         <ul class="links">
+            <li><a href="/webapp">🔮 Laney Mini App</a></li>
             <li><a href="/term">Web Terminal</a></li>
             <li><a href="/health">Health Check</a></li>
             <li><a href="/status">API Status</a></li>
@@ -2089,6 +2097,250 @@ class APIServer:
         except Exception as e:
             logger.error(f"Error serving archive file {file_path}: {e}", exc_info=True)
             return abort(500, description=str(e))
+
+    # Telegram Mini App endpoints
+
+    def _validate_telegram_init_data(self) -> Optional[dict]:
+        """Validate Telegram WebApp init data.
+
+        Returns user data dict if valid, None otherwise.
+        For now, we trust the init data since it's signed by Telegram.
+        In production, should verify the hash using bot token.
+        """
+        init_data = request.headers.get('X-Telegram-Init-Data', '')
+        if not init_data:
+            return None
+
+        # Parse init data (URL-encoded)
+        from urllib.parse import parse_qs
+        try:
+            params = parse_qs(init_data)
+
+            # Extract user data
+            user_data = params.get('user', [None])[0]
+            if user_data:
+                import json
+                return json.loads(user_data)
+        except Exception as e:
+            logger.warning(f"Failed to parse Telegram init data: {e}")
+
+        return None
+
+    def _webapp_index(self):
+        """GET /webapp - Serve the Mini App HTML."""
+        from pathlib import Path
+
+        # Serve index.html from webapp directory
+        webapp_dir = Path(__file__).parent / 'webapp'
+        index_path = webapp_dir / 'index.html'
+
+        if not index_path.exists():
+            return jsonify({"error": "WebApp not found"}), 404
+
+        return send_file(index_path, mimetype='text/html')
+
+    def _webapp_stats(self):
+        """GET /webapp/stats - Dashboard stats for Mini App."""
+        try:
+            # Validate Telegram auth (optional for now, can be enforced later)
+            tg_user = self._validate_telegram_init_data()
+
+            cursor = self.core.db.cursor()
+
+            # Get collection counts
+            cursor.execute("SELECT COUNT(*) FROM books")
+            books_count = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM papers")
+            papers_count = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM links")
+            links_count = cursor.fetchone()[0]
+
+            # Get conversation count (if table exists)
+            conversations_count = 0
+            try:
+                cursor.execute("SELECT COUNT(*) FROM laney_conversations")
+                conversations_count = cursor.fetchone()[0]
+            except Exception:
+                pass
+
+            # Get active conversation for this user
+            active_conversation = None
+            if tg_user:
+                try:
+                    cursor.execute("""
+                        SELECT id, title, message_count, updated_at
+                        FROM laney_conversations
+                        WHERE chat_id = ? AND is_active = 1
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                    """, (tg_user.get('id'),))
+                    row = cursor.fetchone()
+                    if row:
+                        active_conversation = {
+                            'id': row[0],
+                            'title': row[1],
+                            'message_count': row[2],
+                            'updated_at': row[3]
+                        }
+                except Exception:
+                    pass
+
+            # Context usage estimate (simplified)
+            # In reality, would need to track actual token usage
+            context_estimate = {
+                'used': 0,
+                'max': 128000
+            }
+            if active_conversation:
+                # Rough estimate: 50 tokens per message
+                context_estimate['used'] = active_conversation['message_count'] * 50 + 3500  # Base overhead
+
+            # Recent activity (last 5 items added)
+            recent_activity = []
+            try:
+                cursor.execute("""
+                    SELECT 'book' as type, title, created_at FROM books
+                    UNION ALL
+                    SELECT 'link' as type, title, created_at FROM links
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                """)
+                for row in cursor.fetchall():
+                    item_type, title, created_at = row
+                    icon = '📚' if item_type == 'book' else '🔗'
+                    recent_activity.append({
+                        'icon': icon,
+                        'text': title[:40] + ('...' if len(title) > 40 else '') if title else 'Untitled',
+                        'time': self._format_relative_time(created_at)
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to get recent activity: {e}")
+
+            return jsonify({
+                'books': books_count,
+                'papers': papers_count,
+                'links': links_count,
+                'conversations': conversations_count,
+                'context': context_estimate,
+                'active_conversation': active_conversation,
+                'recent_activity': recent_activity,
+                'api_usage': {
+                    'used': 0,  # TODO: Track actual usage
+                    'limit': 2000
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/stats: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _webapp_conversations(self):
+        """GET /webapp/conversations - List Laney conversations."""
+        try:
+            tg_user = self._validate_telegram_init_data()
+            chat_id = tg_user.get('id') if tg_user else None
+
+            cursor = self.core.db.cursor()
+
+            # Build query based on whether we have a chat_id
+            if chat_id:
+                cursor.execute("""
+                    SELECT id, title, message_count, created_at, updated_at, is_active
+                    FROM laney_conversations
+                    WHERE chat_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 50
+                """, (chat_id,))
+            else:
+                cursor.execute("""
+                    SELECT id, title, message_count, created_at, updated_at, is_active
+                    FROM laney_conversations
+                    ORDER BY updated_at DESC
+                    LIMIT 50
+                """)
+
+            conversations = []
+            for row in cursor.fetchall():
+                conversations.append({
+                    'id': row[0],
+                    'title': row[1],
+                    'message_count': row[2],
+                    'created_at': row[3],
+                    'updated_at': row[4],
+                    'is_active': bool(row[5])
+                })
+
+            return jsonify({'conversations': conversations})
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/conversations: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _webapp_papers(self):
+        """GET /webapp/papers - List papers."""
+        try:
+            cursor = self.core.db.cursor()
+
+            limit = request.args.get('limit', 50, type=int)
+            offset = request.args.get('offset', 0, type=int)
+
+            cursor.execute("""
+                SELECT id, title, authors, year, doi, arxiv_id, url, created_at
+                FROM papers
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
+
+            papers = []
+            for row in cursor.fetchall():
+                papers.append({
+                    'id': row[0],
+                    'title': row[1],
+                    'authors': row[2].split(', ') if row[2] else [],
+                    'year': row[3],
+                    'doi': row[4],
+                    'arxiv_id': row[5],
+                    'url': row[6],
+                    'created_at': row[7]
+                })
+
+            return jsonify({
+                'papers': papers,
+                'count': len(papers),
+                'limit': limit,
+                'offset': offset
+            })
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/papers: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _format_relative_time(self, datetime_str: str) -> str:
+        """Format datetime string as relative time (e.g., '2h ago')."""
+        if not datetime_str:
+            return ''
+
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(datetime_str.replace('Z', '+00:00'))
+            now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+            diff = now - dt
+
+            seconds = diff.total_seconds()
+            if seconds < 60:
+                return 'Just now'
+            elif seconds < 3600:
+                return f'{int(seconds // 60)}m ago'
+            elif seconds < 86400:
+                return f'{int(seconds // 3600)}h ago'
+            elif seconds < 604800:
+                return f'{int(seconds // 86400)}d ago'
+            else:
+                return dt.strftime('%b %d')
+        except Exception:
+            return ''
 
     # Error handlers
 
