@@ -2229,11 +2229,14 @@ class APIServer:
                     client = NanoGPTClient(config.llm.api_key)
                     usage_data = client.get_subscription_usage()
                     if 'error' not in usage_data:
-                        # Extract usage from response (structure TBD based on actual API)
+                        # Extract daily usage from NanoGPT response
+                        daily = usage_data.get('daily', {})
+                        limits = usage_data.get('limits', {})
                         api_usage = {
-                            'used': usage_data.get('prompts_used', usage_data.get('used', 0)),
-                            'limit': usage_data.get('prompts_limit', usage_data.get('limit', 2000)),
-                            'raw': usage_data  # Include raw data for debugging
+                            'used': daily.get('used', 0),
+                            'limit': limits.get('daily', 2000),
+                            'remaining': daily.get('remaining', 0),
+                            'percent': daily.get('percentUsed', 0) * 100,
                         }
             except Exception as e:
                 logger.warning(f"Failed to get NanoGPT usage: {e}")
