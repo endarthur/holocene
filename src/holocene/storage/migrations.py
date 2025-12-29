@@ -236,6 +236,42 @@ MIGRATIONS: List[Dict] = [
             CREATE INDEX IF NOT EXISTS idx_laney_notes_updated ON laney_notes(updated_at DESC);
         """,
     },
+    {
+        'version': 11,
+        'name': 'add_laney_conversations_table',
+        'description': 'Create tables for Laney conversation memory (chat history)',
+        'up': """
+            -- Laney conversations - tracks chat sessions
+            CREATE TABLE IF NOT EXISTS laney_conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                title TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                message_count INTEGER DEFAULT 0
+            );
+
+            -- Laney messages - stores all messages in conversations
+            CREATE TABLE IF NOT EXISTS laney_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tool_calls TEXT,
+                tool_results TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES laney_conversations(id) ON DELETE CASCADE
+            );
+
+            -- Indexes for efficient queries
+            CREATE INDEX IF NOT EXISTS idx_laney_conv_chat ON laney_conversations(chat_id);
+            CREATE INDEX IF NOT EXISTS idx_laney_conv_active ON laney_conversations(chat_id, is_active);
+            CREATE INDEX IF NOT EXISTS idx_laney_conv_updated ON laney_conversations(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_laney_msg_conv ON laney_messages(conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_laney_msg_created ON laney_messages(created_at);
+        """,
+    },
 ]
 
 

@@ -12,8 +12,10 @@ import asyncio
 import threading
 import re
 import os
+import json
 import secrets
-from typing import Optional
+import sqlite3
+from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -35,6 +37,331 @@ except ImportError:
     filters = None
     ContextTypes = None
     Application = None
+
+
+class ConversationManager:
+    """Manages Laney conversation history for Telegram chats.
+
+    Stores all messages to database, but only loads last N for context.
+    Each chat can have one active conversation at a time, with ability
+    to view and resume past conversations.
+    """
+
+    # Max messages to include in context (with 128K tokens, can be generous)
+    MAX_CONTEXT_MESSAGES = 40
+
+    def __init__(self, db_path: str):
+        """Initialize conversation manager.
+
+        Args:
+            db_path: Path to SQLite database
+        """
+        self.db_path = db_path
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """Get database connection."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def get_or_create_conversation(self, chat_id: int) -> int:
+        """Get active conversation for chat, or create new one.
+
+        Args:
+            chat_id: Telegram chat ID
+
+        Returns:
+            Conversation ID
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+
+            # Look for active conversation
+            cursor.execute("""
+                SELECT id FROM laney_conversations
+                WHERE chat_id = ? AND is_active = 1
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """, (chat_id,))
+            row = cursor.fetchone()
+
+            if row:
+                return row['id']
+
+            # Create new conversation
+            now = datetime.now().isoformat()
+            cursor.execute("""
+                INSERT INTO laney_conversations (chat_id, created_at, updated_at, is_active)
+                VALUES (?, ?, ?, 1)
+            """, (chat_id, now, now))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def start_new_conversation(self, chat_id: int) -> int:
+        """Start a new conversation, deactivating any existing ones.
+
+        Args:
+            chat_id: Telegram chat ID
+
+        Returns:
+            New conversation ID
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+
+            # Deactivate all existing conversations for this chat
+            cursor.execute("""
+                UPDATE laney_conversations
+                SET is_active = 0
+                WHERE chat_id = ? AND is_active = 1
+            """, (chat_id,))
+
+            # Create new conversation
+            now = datetime.now().isoformat()
+            cursor.execute("""
+                INSERT INTO laney_conversations (chat_id, created_at, updated_at, is_active)
+                VALUES (?, ?, ?, 1)
+            """, (chat_id, now, now))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def add_message(self, conversation_id: int, role: str, content: str,
+                    tool_calls: Optional[str] = None, tool_results: Optional[str] = None):
+        """Add a message to conversation.
+
+        Args:
+            conversation_id: Conversation ID
+            role: Message role ('user', 'assistant', 'tool')
+            content: Message content
+            tool_calls: JSON string of tool calls (optional)
+            tool_results: JSON string of tool results (optional)
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+
+            cursor.execute("""
+                INSERT INTO laney_messages (conversation_id, role, content, tool_calls, tool_results, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (conversation_id, role, content, tool_calls, tool_results, now))
+
+            # Update conversation timestamp and message count
+            cursor.execute("""
+                UPDATE laney_conversations
+                SET updated_at = ?, message_count = message_count + 1
+                WHERE id = ?
+            """, (now, conversation_id))
+
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_messages(self, conversation_id: int, limit: Optional[int] = None) -> List[Dict]:
+        """Get messages from conversation.
+
+        Args:
+            conversation_id: Conversation ID
+            limit: Max messages to return (None = all)
+
+        Returns:
+            List of message dicts with role, content
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+
+            if limit:
+                # Get last N messages
+                cursor.execute("""
+                    SELECT role, content, tool_calls, tool_results FROM laney_messages
+                    WHERE conversation_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (conversation_id, limit))
+                rows = list(reversed(cursor.fetchall()))  # Reverse to get chronological order
+            else:
+                cursor.execute("""
+                    SELECT role, content, tool_calls, tool_results FROM laney_messages
+                    WHERE conversation_id = ?
+                    ORDER BY created_at ASC
+                """, (conversation_id,))
+                rows = cursor.fetchall()
+
+            messages = []
+            for row in rows:
+                msg = {"role": row['role'], "content": row['content']}
+                if row['tool_calls']:
+                    msg['tool_calls'] = row['tool_calls']
+                messages.append(msg)
+
+            return messages
+        finally:
+            conn.close()
+
+    def get_context_messages(self, conversation_id: int) -> List[Dict]:
+        """Get messages formatted for LLM context.
+
+        Returns last N messages suitable for sending to the model.
+
+        Args:
+            conversation_id: Conversation ID
+
+        Returns:
+            List of message dicts for LLM
+        """
+        return self.get_messages(conversation_id, limit=self.MAX_CONTEXT_MESSAGES)
+
+    def list_conversations(self, chat_id: int, limit: int = 10) -> List[Dict]:
+        """List conversations for a chat.
+
+        Args:
+            chat_id: Telegram chat ID
+            limit: Max conversations to return
+
+        Returns:
+            List of conversation summaries
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, title, created_at, updated_at, is_active, message_count
+                FROM laney_conversations
+                WHERE chat_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+            """, (chat_id, limit))
+
+            conversations = []
+            for row in cursor.fetchall():
+                # Get first user message as preview if no title
+                title = row['title']
+                if not title:
+                    cursor.execute("""
+                        SELECT content FROM laney_messages
+                        WHERE conversation_id = ? AND role = 'user'
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                    """, (row['id'],))
+                    first_msg = cursor.fetchone()
+                    if first_msg:
+                        title = first_msg['content'][:50] + ('...' if len(first_msg['content']) > 50 else '')
+                    else:
+                        title = "(empty conversation)"
+
+                conversations.append({
+                    'id': row['id'],
+                    'title': title,
+                    'created_at': row['created_at'],
+                    'updated_at': row['updated_at'],
+                    'is_active': bool(row['is_active']),
+                    'message_count': row['message_count']
+                })
+
+            return conversations
+        finally:
+            conn.close()
+
+    def resume_conversation(self, chat_id: int, conversation_id: int) -> bool:
+        """Resume a past conversation.
+
+        Args:
+            chat_id: Telegram chat ID (for verification)
+            conversation_id: Conversation ID to resume
+
+        Returns:
+            True if successful, False if conversation not found or unauthorized
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+
+            # Verify conversation belongs to this chat
+            cursor.execute("""
+                SELECT id FROM laney_conversations
+                WHERE id = ? AND chat_id = ?
+            """, (conversation_id, chat_id))
+            if not cursor.fetchone():
+                return False
+
+            # Deactivate all conversations for this chat
+            cursor.execute("""
+                UPDATE laney_conversations
+                SET is_active = 0
+                WHERE chat_id = ?
+            """, (chat_id,))
+
+            # Activate the requested conversation
+            now = datetime.now().isoformat()
+            cursor.execute("""
+                UPDATE laney_conversations
+                SET is_active = 1, updated_at = ?
+                WHERE id = ?
+            """, (now, conversation_id))
+
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def get_conversation_info(self, conversation_id: int) -> Optional[Dict]:
+        """Get info about a conversation.
+
+        Args:
+            conversation_id: Conversation ID
+
+        Returns:
+            Conversation info dict or None
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, chat_id, title, created_at, updated_at, is_active, message_count
+                FROM laney_conversations
+                WHERE id = ?
+            """, (conversation_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            return {
+                'id': row['id'],
+                'chat_id': row['chat_id'],
+                'title': row['title'],
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at'],
+                'is_active': bool(row['is_active']),
+                'message_count': row['message_count']
+            }
+        finally:
+            conn.close()
+
+    def set_title(self, conversation_id: int, title: str):
+        """Set conversation title.
+
+        Args:
+            conversation_id: Conversation ID
+            title: New title
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE laney_conversations
+                SET title = ?
+                WHERE id = ?
+            """, (title, conversation_id))
+            conn.commit()
+        finally:
+            conn.close()
 
 
 class TelegramBotPlugin(Plugin):
@@ -67,6 +394,9 @@ class TelegramBotPlugin(Plugin):
 
         # Initialize archiving service (local + IA)
         self._init_archiving_service()
+
+        # Initialize conversation manager for Laney memory
+        self.conversation_manager = ConversationManager(self.core.config.db_path)
 
         if not TELEGRAM_AVAILABLE:
             self.logger.warning("python-telegram-bot not installed - bot will be disabled")
@@ -125,6 +455,12 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("box", self._cmd_box))
         self.application.add_handler(CommandHandler("ask", self._cmd_ask))
         self.application.add_handler(CommandHandler("laney", self._cmd_ask))  # Alias
+
+        # Conversation management commands
+        self.application.add_handler(CommandHandler("new", self._cmd_new_conversation))
+        self.application.add_handler(CommandHandler("conversations", self._cmd_list_conversations))
+        self.application.add_handler(CommandHandler("resume", self._cmd_resume_conversation))
+        self.application.add_handler(CommandHandler("context", self._cmd_context))
 
         # Register message handlers for content (text, PDFs, etc.)
         self.application.add_handler(MessageHandler(
@@ -337,32 +673,30 @@ Available commands:
 
         help_msg = """📚 *Holocene Commands*
 
-/start - Initialize bot
-/help - Show this help
-/ask <question> - Ask Laney about your collection
-/login - Get magic link for web access
+*Laney AI (with memory!):*
+Just send any text to chat with Laney
+/new - Start fresh conversation
+/conversations - List past conversations
+/resume <id> - Resume old conversation
+/context - Current conversation info
+
+*Other Commands:*
+/login - Magic link for web access
 /stats - View statistics
 /status - System status
-/plugins - List active plugins
 /recent - Show recently added items
-/search <query> - Search books and papers
-/classify <topic> - Get Dewey classification
-/spn <url> - Force new archive snapshot (Save Page Now)
-/mono <url> - Update local monolith archive
-/box <url> - Archive with ArchiveBox (full JS rendering)
+/search <query> - Search books/papers
+/classify <topic> - Get Dewey class
+/spn <url> - Internet Archive snapshot
+/mono <url> - Local monolith archive
+/box <url> - ArchiveBox (JS render)
 
 *Send me:*
-• DOIs - I'll fetch paper metadata
-• URLs - I'll save and archive links
-• arXiv papers - Auto-detected
-• PDFs - Saved to your library
-• JSON - Mercado Livre favorites export
-
-*Notifications:*
-You'll receive updates when:
-• Books are enriched with AI summaries
-• Books are classified (Dewey)
-• Links are checked for health
+• Text - Chat with Laney (remembers context!)
+• DOIs - Fetch paper metadata
+• URLs - Save and archive links
+• PDFs - Saved to library
+• JSON - MercadoLivre import
 """
         await update.message.reply_text(help_msg, parse_mode='Markdown')
         self.messages_sent += 1
@@ -1073,86 +1407,159 @@ This link will grant you access to:
         if not query:
             await update.message.reply_text(
                 "Usage: `/ask <question>`\n\n"
-                "Ask Laney anything about your collection:\n"
-                "• Search books, papers, links, favorites\n"
-                "• Find patterns and connections\n"
-                "• Web search for current information\n"
-                "• Run calculations\n\n"
-                "Examples:\n"
-                "• `/ask What books do I have about geology?`\n"
-                "• `/ask Find connections between my links and books`\n"
-                "• `/ask How many items are in my collection?`",
+                "Laney remembers your conversation!\n"
+                "Just send text directly to chat.\n\n"
+                "Commands:\n"
+                "• `/new` - Start fresh conversation\n"
+                "• `/conversations` - List past chats\n"
+                "• `/context` - Current conversation info",
                 parse_mode='Markdown'
             )
             return
 
-        # Send initial "thinking" message
-        status_msg = await update.message.reply_text(
-            f"🔮 *Laney is thinking...*\n\n`{query[:100]}{'...' if len(query) > 100 else ''}`",
+        # Use _ask_laney which handles conversation history
+        await self._ask_laney(query, update)
+
+    async def _cmd_new_conversation(self, update, context):
+        """Handle /new command - start a fresh conversation."""
+        self.commands_received += 1
+
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        chat_id = update.effective_chat.id
+        conv_id = self.conversation_manager.start_new_conversation(chat_id)
+
+        await update.message.reply_text(
+            f"🆕 *New conversation started!*\n\n"
+            f"Conversation ID: `{conv_id}`\n"
+            f"Laney's memory has been cleared.\n"
+            f"Send any message to start chatting!",
             parse_mode='Markdown'
         )
+        self.messages_sent += 1
 
-        # Run Laney query in background
-        def run_laney():
-            from ..llm.nanogpt import NanoGPTClient
-            from ..llm.laney_tools import LANEY_TOOLS, LaneyToolHandler
-            from ..cli.laney_commands import LANEY_SYSTEM_PROMPT
+    async def _cmd_list_conversations(self, update, context):
+        """Handle /conversations command - list past conversations."""
+        self.commands_received += 1
 
-            config = self.core.config
-            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
-            tool_handler = LaneyToolHandler(
-                db_path=config.db_path,
-                brave_api_key=getattr(config.integrations, 'brave_api_key', None),
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        chat_id = update.effective_chat.id
+        conversations = self.conversation_manager.list_conversations(chat_id, limit=10)
+
+        if not conversations:
+            await update.message.reply_text(
+                "📭 No conversations yet.\nJust send a message to start one!",
+                parse_mode='Markdown'
             )
+            return
 
-            messages = [
-                {"role": "system", "content": LANEY_SYSTEM_PROMPT},
-                {"role": "user", "content": query}
-            ]
-
+        lines = ["📚 *Your Conversations*\n"]
+        for conv in conversations:
+            active = "→ " if conv['is_active'] else "  "
+            # Parse date for display
             try:
-                response = client.run_with_tools(
-                    messages=messages,
-                    tools=LANEY_TOOLS,
-                    tool_handlers=tool_handler.handlers,
-                    model=config.llm.primary,
-                    temperature=0.3,
-                    max_iterations=5,
-                    timeout=90
-                )
-                return {"success": True, "response": response}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
-            finally:
-                tool_handler.close()
+                updated = datetime.fromisoformat(conv['updated_at'])
+                date_str = updated.strftime("%m/%d %H:%M")
+            except:
+                date_str = "?"
+
+            title = conv['title'] or "(untitled)"
+            # Escape markdown in title
+            title = title.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`')
+            lines.append(f"{active}`{conv['id']}` {title[:30]} ({conv['message_count']} msgs, {date_str})")
+
+        lines.append("\n_Use `/resume <id>` to continue a conversation_")
+
+        await update.message.reply_text("\n".join(lines), parse_mode='Markdown')
+        self.messages_sent += 1
+
+    async def _cmd_resume_conversation(self, update, context):
+        """Handle /resume command - resume a past conversation."""
+        self.commands_received += 1
+
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        # Get conversation ID from args
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: `/resume <id>`\n\n"
+                "Use `/conversations` to see available IDs.",
+                parse_mode='Markdown'
+            )
+            return
 
         try:
-            result = await asyncio.get_event_loop().run_in_executor(None, run_laney)
+            conv_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid conversation ID")
+            return
 
-            if result.get('success'):
-                response_text = result['response']
-                # Truncate if too long for Telegram (4096 char limit)
-                if len(response_text) > 3900:
-                    response_text = response_text[:3900] + "\n\n_(truncated)_"
+        chat_id = update.effective_chat.id
+        success = self.conversation_manager.resume_conversation(chat_id, conv_id)
 
-                # Escape markdown special characters that might break formatting
-                # but keep basic formatting intact
-                msg = f"🔮 *Laney*\n\n{response_text}"
-            else:
-                msg = f"❌ *Laney Error*\n\n{result.get('error', 'Unknown error')[:500]}"
+        if success:
+            info = self.conversation_manager.get_conversation_info(conv_id)
+            msg_count = info['message_count'] if info else 0
+            await update.message.reply_text(
+                f"▶️ *Resumed conversation {conv_id}*\n\n"
+                f"Messages: {msg_count}\n"
+                f"Laney remembers your previous chat!",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text("❌ Conversation not found")
 
-            await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
-            self.messages_sent += 1
+        self.messages_sent += 1
 
-        except Exception as e:
-            self.logger.error(f"Laney command error: {e}", exc_info=True)
-            try:
-                await status_msg.edit_text(
-                    f"❌ *Error*\n\n{str(e)[:200]}",
-                    parse_mode='Markdown'
-                )
-            except:
-                await update.message.reply_text("❌ Laney query failed")
+    async def _cmd_context(self, update, context):
+        """Handle /context command - show current conversation info."""
+        self.commands_received += 1
+
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        chat_id = update.effective_chat.id
+
+        # Get active conversation
+        conv_id = self.conversation_manager.get_or_create_conversation(chat_id)
+        info = self.conversation_manager.get_conversation_info(conv_id)
+
+        if not info:
+            await update.message.reply_text("📭 No active conversation")
+            return
+
+        # Get some stats
+        try:
+            created = datetime.fromisoformat(info['created_at'])
+            updated = datetime.fromisoformat(info['updated_at'])
+            created_str = created.strftime("%Y-%m-%d %H:%M")
+            updated_str = updated.strftime("%Y-%m-%d %H:%M")
+        except:
+            created_str = info['created_at']
+            updated_str = info['updated_at']
+
+        title = info['title'] or "(no title)"
+
+        await update.message.reply_text(
+            f"💬 *Current Conversation*\n\n"
+            f"ID: `{info['id']}`\n"
+            f"Title: {title}\n"
+            f"Messages: {info['message_count']}\n"
+            f"Context window: last {ConversationManager.MAX_CONTEXT_MESSAGES} msgs\n"
+            f"Started: {created_str}\n"
+            f"Last activity: {updated_str}\n\n"
+            f"_Use `/new` to start fresh_",
+            parse_mode='Markdown'
+        )
+        self.messages_sent += 1
 
     # Message and document handlers
 
@@ -1316,11 +1723,19 @@ This link will grant you access to:
     async def _ask_laney(self, query: str, update):
         """Send a query to Laney and reply with response.
 
+        Uses conversation history for context - Laney remembers past messages.
+
         Args:
             query: The question/text to send to Laney
             update: Telegram update object
         """
         chat_id = update.effective_chat.id
+
+        # Get or create conversation
+        conversation_id = self.conversation_manager.get_or_create_conversation(chat_id)
+
+        # Save user message to conversation (before sending to LLM)
+        self.conversation_manager.add_message(conversation_id, "user", query)
 
         # Send initial "thinking" message
         status_msg = await update.message.reply_text(
@@ -1328,7 +1743,7 @@ This link will grant you access to:
             parse_mode='Markdown'
         )
 
-        # Run Laney query in background
+        # Run Laney query in background with conversation history
         def run_laney():
             from ..llm.nanogpt import NanoGPTClient
             from ..llm.laney_tools import LANEY_TOOLS, LaneyToolHandler
@@ -1341,10 +1756,12 @@ This link will grant you access to:
                 brave_api_key=getattr(config.integrations, 'brave_api_key', None),
             )
 
-            messages = [
-                {"role": "system", "content": LANEY_SYSTEM_PROMPT},
-                {"role": "user", "content": query}
-            ]
+            # Load conversation history (last N messages)
+            history = self.conversation_manager.get_context_messages(conversation_id)
+
+            # Build messages with system prompt + history
+            messages = [{"role": "system", "content": LANEY_SYSTEM_PROMPT}]
+            messages.extend(history)
 
             try:
                 response = client.run_with_tools(
@@ -1367,6 +1784,10 @@ This link will grant you access to:
 
             if result.get('success'):
                 response_text = result['response']
+
+                # Save assistant response to conversation
+                self.conversation_manager.add_message(conversation_id, "assistant", response_text)
+
                 # Truncate if too long for Telegram (4096 char limit)
                 if len(response_text) > 3900:
                     response_text = response_text[:3900] + "\n\n_(truncated)_"
