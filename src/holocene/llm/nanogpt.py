@@ -219,3 +219,20 @@ class NanoGPTClient:
 
         response = self.chat_completion(messages, model=model, temperature=temperature, timeout=timeout)
         return self.get_response_text(response)
+
+    def get_subscription_usage(self) -> Dict[str, Any]:
+        """Get subscription usage information.
+
+        Returns:
+            Dict with usage data (prompts used, limit, etc.)
+        """
+        try:
+            # NanoGPT uses a different base URL for subscription endpoints
+            response = self.session.get(
+                "https://nano-gpt.com/api/subscription/v1/usage",
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            return {"error": str(e)}

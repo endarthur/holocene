@@ -252,6 +252,8 @@ class APIServer:
         self.app.route("/webapp/stats", methods=["GET"])(self._webapp_stats)
         self.app.route("/webapp/conversations", methods=["GET"])(self._webapp_conversations)
         self.app.route("/webapp/papers", methods=["GET"])(self._webapp_papers)
+        self.app.route("/webapp/books", methods=["GET"])(self._webapp_books)
+        self.app.route("/webapp/links", methods=["GET"])(self._webapp_links)
 
         # Error handlers
         self.app.errorhandler(404)(self._not_found)
@@ -2218,6 +2220,24 @@ class APIServer:
             except Exception as e:
                 logger.warning(f"Failed to get recent activity: {e}")
 
+            # Get NanoGPT subscription usage
+            api_usage = {'used': 0, 'limit': 2000}
+            try:
+                from ..llm.nanogpt import NanoGPTClient
+                config = self.core.config
+                if hasattr(config, 'llm') and config.llm.api_key:
+                    client = NanoGPTClient(config.llm.api_key)
+                    usage_data = client.get_subscription_usage()
+                    if 'error' not in usage_data:
+                        # Extract usage from response (structure TBD based on actual API)
+                        api_usage = {
+                            'used': usage_data.get('prompts_used', usage_data.get('used', 0)),
+                            'limit': usage_data.get('prompts_limit', usage_data.get('limit', 2000)),
+                            'raw': usage_data  # Include raw data for debugging
+                        }
+            except Exception as e:
+                logger.warning(f"Failed to get NanoGPT usage: {e}")
+
             return jsonify({
                 'books': books_count,
                 'papers': papers_count,
@@ -2226,10 +2246,7 @@ class APIServer:
                 'context': context_estimate,
                 'active_conversation': active_conversation,
                 'recent_activity': recent_activity,
-                'api_usage': {
-                    'used': 0,  # TODO: Track actual usage
-                    'limit': 2000
-                }
+                'api_usage': api_usage
             })
 
         except Exception as e:
@@ -2315,6 +2332,83 @@ class APIServer:
 
         except Exception as e:
             logger.error(f"Error in /webapp/papers: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _webapp_books(self):
+        """GET /webapp/books - List books for Mini App."""
+        try:
+            cursor = self.core.db.cursor()
+
+            limit = request.args.get('limit', 50, type=int)
+            offset = request.args.get('offset', 0, type=int)
+
+            cursor.execute("""
+                SELECT id, title, author, publication_year, isbn, source, created_at
+                FROM books
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
+
+            books = []
+            for row in cursor.fetchall():
+                books.append({
+                    'id': row[0],
+                    'title': row[1],
+                    'author': row[2],
+                    'year': row[3],
+                    'isbn': row[4],
+                    'source': row[5],
+                    'created_at': row[6]
+                })
+
+            return jsonify({
+                'books': books,
+                'count': len(books),
+                'limit': limit,
+                'offset': offset
+            })
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/books: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _webapp_links(self):
+        """GET /webapp/links - List links for Mini App."""
+        try:
+            cursor = self.core.db.cursor()
+
+            limit = request.args.get('limit', 50, type=int)
+            offset = request.args.get('offset', 0, type=int)
+
+            cursor.execute("""
+                SELECT id, url, title, source, archived, first_seen, trust_tier, created_at
+                FROM links
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
+
+            links = []
+            for row in cursor.fetchall():
+                links.append({
+                    'id': row[0],
+                    'url': row[1],
+                    'title': row[2],
+                    'source': row[3],
+                    'archived': bool(row[4]),
+                    'first_seen': row[5],
+                    'trust_tier': row[6],
+                    'created_at': row[7]
+                })
+
+            return jsonify({
+                'links': links,
+                'count': len(links),
+                'limit': limit,
+                'offset': offset
+            })
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/links: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
     def _format_relative_time(self, datetime_str: str) -> str:
