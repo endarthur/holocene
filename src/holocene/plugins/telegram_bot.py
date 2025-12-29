@@ -123,6 +123,8 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("spn", self._cmd_spn))
         self.application.add_handler(CommandHandler("mono", self._cmd_mono))
         self.application.add_handler(CommandHandler("box", self._cmd_box))
+        self.application.add_handler(CommandHandler("ask", self._cmd_ask))
+        self.application.add_handler(CommandHandler("laney", self._cmd_ask))  # Alias
 
         # Register message handlers for content (text, PDFs, etc.)
         self.application.add_handler(MessageHandler(
@@ -219,6 +221,7 @@ class TelegramBotPlugin(Plugin):
                 commands = [
                     BotCommand("start", "Initialize and authorize bot"),
                     BotCommand("help", "Show available commands"),
+                    BotCommand("ask", "Ask Laney anything about your collection"),
                     BotCommand("login", "Generate web login magic link"),
                     BotCommand("stats", "View bot statistics"),
                     BotCommand("status", "View system status"),
@@ -336,6 +339,7 @@ Available commands:
 
 /start - Initialize bot
 /help - Show this help
+/ask <question> - Ask Laney about your collection
 /login - Get magic link for web access
 /stats - View statistics
 /status - System status
@@ -1054,6 +1058,101 @@ This link will grant you access to:
                 )
             except:
                 await update.message.reply_text("❌ Archive failed")
+
+    async def _cmd_ask(self, update, context):
+        """Handle /ask and /laney commands - ask Laney a question."""
+        self.commands_received += 1
+
+        # Check authorization
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        # Get query from command args
+        query = ' '.join(context.args) if context.args else None
+        if not query:
+            await update.message.reply_text(
+                "Usage: `/ask <question>`\n\n"
+                "Ask Laney anything about your collection:\n"
+                "• Search books, papers, links, favorites\n"
+                "• Find patterns and connections\n"
+                "• Web search for current information\n"
+                "• Run calculations\n\n"
+                "Examples:\n"
+                "• `/ask What books do I have about geology?`\n"
+                "• `/ask Find connections between my links and books`\n"
+                "• `/ask How many items are in my collection?`",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Send initial "thinking" message
+        status_msg = await update.message.reply_text(
+            f"🔮 *Laney is thinking...*\n\n`{query[:100]}{'...' if len(query) > 100 else ''}`",
+            parse_mode='Markdown'
+        )
+
+        # Run Laney query in background
+        def run_laney():
+            from ..llm.nanogpt import NanoGPTClient
+            from ..llm.laney_tools import LANEY_TOOLS, LaneyToolHandler
+            from ..cli.laney_commands import LANEY_SYSTEM_PROMPT
+
+            config = self.core.config
+            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+            tool_handler = LaneyToolHandler(
+                db_path=config.db_path,
+                brave_api_key=getattr(config.integrations, 'brave_api_key', None),
+            )
+
+            messages = [
+                {"role": "system", "content": LANEY_SYSTEM_PROMPT},
+                {"role": "user", "content": query}
+            ]
+
+            try:
+                response = client.run_with_tools(
+                    messages=messages,
+                    tools=LANEY_TOOLS,
+                    tool_handlers=tool_handler.handlers,
+                    model=config.llm.primary,
+                    temperature=0.3,
+                    max_iterations=5,
+                    timeout=90
+                )
+                return {"success": True, "response": response}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+            finally:
+                tool_handler.close()
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(None, run_laney)
+
+            if result.get('success'):
+                response_text = result['response']
+                # Truncate if too long for Telegram (4096 char limit)
+                if len(response_text) > 3900:
+                    response_text = response_text[:3900] + "\n\n_(truncated)_"
+
+                # Escape markdown special characters that might break formatting
+                # but keep basic formatting intact
+                msg = f"🔮 *Laney*\n\n{response_text}"
+            else:
+                msg = f"❌ *Laney Error*\n\n{result.get('error', 'Unknown error')[:500]}"
+
+            await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
+            self.messages_sent += 1
+
+        except Exception as e:
+            self.logger.error(f"Laney command error: {e}", exc_info=True)
+            try:
+                await status_msg.edit_text(
+                    f"❌ *Error*\n\n{str(e)[:200]}",
+                    parse_mode='Markdown'
+                )
+            except:
+                await update.message.reply_text("❌ Laney query failed")
 
     # Message and document handlers
 
