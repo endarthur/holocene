@@ -22,6 +22,7 @@ from .daemon_commands import daemon
 from .ask_commands import ask_shortcut
 from .auth_commands import auth
 from .monitor_commands import monitor
+from .laney_commands import laney
 
 # Optional: MercadoLivre (requires beautifulsoup4)
 try:
@@ -56,6 +57,7 @@ cli.add_command(inventory)
 cli.add_command(ml_inventory)
 cli.add_command(daemon)
 cli.add_command(ask_shortcut, name="ask")
+cli.add_command(laney)
 
 
 @cli.command()

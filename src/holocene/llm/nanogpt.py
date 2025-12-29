@@ -1,11 +1,12 @@
-"""NanoGPT API client."""
+"""NanoGPT API client with tool/function calling support."""
 
+import json
 import requests
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 
 
 class NanoGPTClient:
-    """Client for NanoGPT API (OpenAI-compatible)."""
+    """Client for NanoGPT API (OpenAI-compatible) with tool support."""
 
     def __init__(self, api_key: str, base_url: str = "https://nano-gpt.com/api/v1"):
         """
@@ -25,11 +26,13 @@ class NanoGPTClient:
 
     def chat_completion(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str = "deepseek-ai/DeepSeek-V3.1",
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         timeout: int = 60,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Call chat completion API.
@@ -40,6 +43,8 @@ class NanoGPTClient:
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
             timeout: Request timeout in seconds (default: 60, use 300+ for large batches)
+            tools: List of tool definitions (OpenAI format)
+            tool_choice: "auto", "none", or {"type": "function", "function": {"name": "..."}}
 
         Returns:
             API response dict
@@ -53,6 +58,12 @@ class NanoGPTClient:
         if max_tokens:
             payload["max_tokens"] = max_tokens
 
+        if tools:
+            payload["tools"] = tools
+
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
+
         response = self.session.post(
             f"{self.base_url}/chat/completions",
             json=payload,
@@ -61,6 +72,106 @@ class NanoGPTClient:
         response.raise_for_status()
 
         return response.json()
+
+    def has_tool_calls(self, response: Dict[str, Any]) -> bool:
+        """Check if response contains tool calls."""
+        try:
+            message = response["choices"][0]["message"]
+            return "tool_calls" in message and message["tool_calls"]
+        except (KeyError, IndexError):
+            return False
+
+    def get_tool_calls(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract tool calls from response.
+
+        Returns:
+            List of tool call dicts with 'id', 'function.name', 'function.arguments'
+        """
+        try:
+            return response["choices"][0]["message"].get("tool_calls", [])
+        except (KeyError, IndexError):
+            return []
+
+    def run_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        tool_handlers: Dict[str, Callable],
+        model: str = "deepseek-ai/DeepSeek-V3.1",
+        temperature: float = 0.7,
+        max_iterations: int = 10,
+        timeout: int = 60,
+    ) -> str:
+        """
+        Run a conversation with tool calling support.
+
+        Handles the agent loop: LLM → tool calls → execute → LLM → ... → final response.
+
+        Args:
+            messages: Initial messages (system + user)
+            tools: Tool definitions in OpenAI format
+            tool_handlers: Dict mapping tool names to handler functions
+            model: Model ID to use
+            temperature: Sampling temperature
+            max_iterations: Maximum tool call iterations (safety limit)
+            timeout: Request timeout per API call
+
+        Returns:
+            Final response text after all tool calls are resolved
+        """
+        conversation = list(messages)  # Copy to avoid mutating original
+
+        for iteration in range(max_iterations):
+            # Call LLM
+            response = self.chat_completion(
+                messages=conversation,
+                model=model,
+                temperature=temperature,
+                tools=tools,
+                tool_choice="auto",
+                timeout=timeout,
+            )
+
+            # Check if we have tool calls
+            if not self.has_tool_calls(response):
+                # No tool calls = final response
+                return self.get_response_text(response)
+
+            # Process tool calls
+            assistant_message = response["choices"][0]["message"]
+            conversation.append(assistant_message)
+
+            tool_calls = self.get_tool_calls(response)
+
+            for tool_call in tool_calls:
+                tool_name = tool_call["function"]["name"]
+                tool_id = tool_call["id"]
+
+                # Parse arguments
+                try:
+                    args = json.loads(tool_call["function"]["arguments"])
+                except json.JSONDecodeError:
+                    args = {}
+
+                # Execute tool
+                if tool_name in tool_handlers:
+                    try:
+                        result = tool_handlers[tool_name](**args)
+                        result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
+                    except Exception as e:
+                        result_str = json.dumps({"error": str(e)})
+                else:
+                    result_str = json.dumps({"error": f"Unknown tool: {tool_name}"})
+
+                # Add tool result to conversation
+                conversation.append({
+                    "role": "tool",
+                    "tool_call_id": tool_id,
+                    "content": result_str,
+                })
+
+        # Max iterations reached
+        return "I've reached the maximum number of tool calls. Please try a simpler query."
 
     def get_response_text(self, response: Dict[str, Any]) -> str:
         """Extract response text from API response."""
