@@ -34,6 +34,11 @@ class ArxivClient:
     def extract_arxiv_id(self, text: str) -> Optional[str]:
         """Extract arXiv ID from text (URL or plain ID).
 
+        Only matches in these cases (to avoid false positives):
+        1. arxiv.org URLs
+        2. Text starting with "arXiv:" prefix
+        3. Text that is ONLY an arXiv ID (nothing else)
+
         Args:
             text: Text containing arXiv ID or URL
 
@@ -45,18 +50,42 @@ class ArxivClient:
             "https://arxiv.org/pdf/2103.12345.pdf" -> "2103.12345"
             "arXiv:2103.12345" -> "2103.12345"
             "2103.12345" -> "2103.12345"
+            "https://example.com/2024.12345" -> None (not arxiv.org)
         """
-        # Pattern for new arXiv IDs (YYMM.NNNNN or YYMM.NNNNNV)
-        new_pattern = r'(\d{4}\.\d{4,5}(?:v\d+)?)'
+        text = text.strip()
 
+        # Pattern for new arXiv IDs (YYMM.NNNNN or YYMM.NNNNNVN)
+        new_id_pattern = r'\d{4}\.\d{4,5}(?:v\d+)?'
         # Pattern for old arXiv IDs (archive/YYMMNNN)
-        old_pattern = r'([a-z\-]+/\d{7})'
+        old_id_pattern = r'[a-z\-]+/\d{7}'
 
-        match = re.search(new_pattern, text)
+        # Case 1: arxiv.org URL
+        if 'arxiv.org' in text.lower():
+            # Extract from URL path
+            match = re.search(rf'/(?:abs|pdf)/({new_id_pattern})', text)
+            if match:
+                return match.group(1).split('v')[0]
+            match = re.search(rf'/(?:abs|pdf)/({old_id_pattern})', text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+            return None
+
+        # Case 2: arXiv: prefix
+        if text.lower().startswith('arxiv:'):
+            remainder = text[6:].strip()
+            match = re.match(rf'^({new_id_pattern})$', remainder)
+            if match:
+                return match.group(1).split('v')[0]
+            match = re.match(rf'^({old_id_pattern})$', remainder, re.IGNORECASE)
+            if match:
+                return match.group(1)
+            return None
+
+        # Case 3: Text is ONLY an arXiv ID (nothing else)
+        match = re.match(rf'^({new_id_pattern})$', text)
         if match:
-            return match.group(1).split('v')[0]  # Remove version suffix
-
-        match = re.search(old_pattern, text, re.IGNORECASE)
+            return match.group(1).split('v')[0]
+        match = re.match(rf'^({old_id_pattern})$', text, re.IGNORECASE)
         if match:
             return match.group(1)
 

@@ -1157,11 +1157,11 @@ This link will grant you access to:
     # Message and document handlers
 
     async def _handle_message(self, update, context):
-        """Handle text messages - detect DOIs and URLs."""
+        """Handle text messages - detect DOIs, URLs, or send to Laney."""
         if not self._is_authorized(update.effective_chat.id):
             return
 
-        text = update.message.text
+        text = update.message.text.strip()
         self.logger.info(f"Received message: {text[:50]}...")
 
         # Check for DOI
@@ -1175,7 +1175,7 @@ This link will grant you access to:
             )
             return
 
-        # Check for arXiv ID/URL (before generic URL check)
+        # Check for arXiv ID/URL
         arxiv_id = self._detect_arxiv(text)
         if arxiv_id:
             await update.message.reply_text(f"📄 Detected arXiv paper: `{arxiv_id}`\nProcessing...", parse_mode='Markdown')
@@ -1186,10 +1186,10 @@ This link will grant you access to:
             )
             return
 
-        # Check for URL (generic links)
+        # Check if message is ONLY a URL (no other text)
         url = self._detect_url(text)
-        if url:
-            # Send initial "Processing..." message and keep reference for editing
+        if url and self._is_only_url(text):
+            # Pure URL - process as link
             processing_msg = await update.message.reply_text(
                 f"🔗 Detected URL\n`{url}`\n\n⏳ Processing...",
                 parse_mode='Markdown'
@@ -1201,15 +1201,8 @@ This link will grant you access to:
             )
             return
 
-        # No DOI, arXiv, or URL found
-        await update.message.reply_text(
-            "ℹ️ I can process:\n"
-            "• DOIs (e.g., 10.1234/example)\n"
-            "• arXiv papers (e.g., 2103.12345 or arxiv.org/abs/...)\n"
-            "• URLs (http/https links)\n"
-            "• PDFs (send as document)\n\n"
-            "Use /help for available commands."
-        )
+        # Default: Send everything else to Laney
+        await self._ask_laney(text, update)
 
     async def _handle_document(self, update, context):
         """Handle document uploads (PDFs, JSON files, etc.)."""
@@ -1306,6 +1299,94 @@ This link will grant you access to:
         url_pattern = r'https?://[^\s]+'
         match = re.search(url_pattern, text)
         return match.group(0) if match else None
+
+    def _is_only_url(self, text: str) -> bool:
+        """Check if text is ONLY a URL (no other content).
+
+        Args:
+            text: Input text
+
+        Returns:
+            True if text is just a URL, False if it contains other text
+        """
+        text = text.strip()
+        url_pattern = r'^https?://[^\s]+$'
+        return bool(re.match(url_pattern, text))
+
+    async def _ask_laney(self, query: str, update):
+        """Send a query to Laney and reply with response.
+
+        Args:
+            query: The question/text to send to Laney
+            update: Telegram update object
+        """
+        chat_id = update.effective_chat.id
+
+        # Send initial "thinking" message
+        status_msg = await update.message.reply_text(
+            f"🔮 *Laney is thinking...*",
+            parse_mode='Markdown'
+        )
+
+        # Run Laney query in background
+        def run_laney():
+            from ..llm.nanogpt import NanoGPTClient
+            from ..llm.laney_tools import LANEY_TOOLS, LaneyToolHandler
+            from ..cli.laney_commands import LANEY_SYSTEM_PROMPT
+
+            config = self.core.config
+            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+            tool_handler = LaneyToolHandler(
+                db_path=config.db_path,
+                brave_api_key=getattr(config.integrations, 'brave_api_key', None),
+            )
+
+            messages = [
+                {"role": "system", "content": LANEY_SYSTEM_PROMPT},
+                {"role": "user", "content": query}
+            ]
+
+            try:
+                response = client.run_with_tools(
+                    messages=messages,
+                    tools=LANEY_TOOLS,
+                    tool_handlers=tool_handler.handlers,
+                    model=config.llm.primary,
+                    temperature=0.3,
+                    max_iterations=5,
+                    timeout=90
+                )
+                return {"success": True, "response": response}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+            finally:
+                tool_handler.close()
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(None, run_laney)
+
+            if result.get('success'):
+                response_text = result['response']
+                # Truncate if too long for Telegram (4096 char limit)
+                if len(response_text) > 3900:
+                    response_text = response_text[:3900] + "\n\n_(truncated)_"
+
+                msg = f"🔮 *Laney*\n\n{response_text}"
+            else:
+                msg = f"❌ *Laney Error*\n\n{result.get('error', 'Unknown error')[:500]}"
+
+            await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
+            self.messages_sent += 1
+
+        except Exception as e:
+            self.logger.error(f"Laney query error: {e}", exc_info=True)
+            try:
+                await status_msg.edit_text(
+                    f"❌ *Error*\n\n{str(e)[:200]}",
+                    parse_mode='Markdown'
+                )
+            except:
+                await update.message.reply_text("❌ Laney query failed")
 
     def _detect_arxiv(self, text: str) -> Optional[str]:
         """Detect arXiv ID in text.
