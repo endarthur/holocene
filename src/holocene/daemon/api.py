@@ -2307,19 +2307,22 @@ class APIServer:
             offset = request.args.get('offset', 0, type=int)
 
             cursor.execute("""
-                SELECT id, title, authors, year, doi, arxiv_id, url, created_at
+                SELECT id, title, authors, publication_date, doi, arxiv_id, url, added_at
                 FROM papers
-                ORDER BY created_at DESC
+                ORDER BY added_at DESC
                 LIMIT ? OFFSET ?
             """, (limit, offset))
 
             papers = []
             for row in cursor.fetchall():
+                # Extract year from publication_date if available
+                pub_date = row[3]
+                year = pub_date[:4] if pub_date and len(pub_date) >= 4 else None
                 papers.append({
                     'id': row[0],
                     'title': row[1],
                     'authors': row[2].split(', ') if row[2] else [],
-                    'year': row[3],
+                    'year': year,
                     'doi': row[4],
                     'arxiv_id': row[5],
                     'url': row[6],
