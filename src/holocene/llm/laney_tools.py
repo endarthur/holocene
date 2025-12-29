@@ -593,6 +593,23 @@ LANEY_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_conversation_title",
+            "description": "Set or update the title of the current conversation. Use this proactively after the first exchange to give the conversation a descriptive title based on its topic. Update if the conversation topic shifts significantly.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short, descriptive title for the conversation (max 60 chars). Should capture the main topic or question."
+                    }
+                },
+                "required": ["title"]
+            }
+        }
+    },
 ]
 
 # Safe math namespace for calculator
@@ -627,6 +644,7 @@ class LaneyToolHandler:
         db_path: Union[str, Path],
         brave_api_key: Optional[str] = None,
         documents_dir: Optional[Union[str, Path]] = None,
+        conversation_id: Optional[int] = None,
     ):
         """
         Initialize tool handler.
@@ -635,11 +653,14 @@ class LaneyToolHandler:
             db_path: Path to SQLite database
             brave_api_key: Optional Brave Search API key for web search
             documents_dir: Directory for document exports (default: ~/.holocene/documents)
+            conversation_id: Current conversation ID (for title setting)
         """
-        self.conn = sqlite3.connect(str(db_path))
+        self.db_path = str(db_path)
+        self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         self.brave_api_key = brave_api_key
         self._brave_client = None
+        self.conversation_id = conversation_id
 
         # Documents directory
         if documents_dir:
@@ -689,6 +710,8 @@ class LaneyToolHandler:
             # User profile
             "get_user_profile": self.get_user_profile,
             "update_user_profile": self.update_user_profile,
+            # Conversation management
+            "set_conversation_title": self.set_conversation_title,
         }
 
     @property
@@ -1781,6 +1804,44 @@ from itertools import combinations, permutations, product
 
         except Exception as e:
             return {"error": f"Failed to update profile: {str(e)}"}
+
+    def set_conversation_title(self, title: str) -> Dict[str, Any]:
+        """Set the title of the current conversation.
+
+        Use this proactively to name conversations based on their topic.
+
+        Args:
+            title: Short, descriptive title (max 60 chars)
+
+        Returns:
+            Success status
+        """
+        if not self.conversation_id:
+            return {"error": "No active conversation to title"}
+
+        # Truncate if too long
+        if len(title) > 60:
+            title = title[:57] + "..."
+
+        try:
+            # Use a separate connection to update laney_conversations table
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE laney_conversations
+                SET title = ?
+                WHERE id = ?
+            """, (title, self.conversation_id))
+            conn.commit()
+            conn.close()
+
+            return {
+                "success": True,
+                "title": title,
+                "conversation_id": self.conversation_id,
+            }
+        except Exception as e:
+            return {"error": f"Failed to set title: {str(e)}"}
 
     def _parse_json(self, field: str) -> Any:
         """Parse JSON field, return empty list if invalid."""

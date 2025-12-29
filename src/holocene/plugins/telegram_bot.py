@@ -461,6 +461,7 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("conversations", self._cmd_list_conversations))
         self.application.add_handler(CommandHandler("resume", self._cmd_resume_conversation))
         self.application.add_handler(CommandHandler("context", self._cmd_context))
+        self.application.add_handler(CommandHandler("title", self._cmd_title))
 
         # Register message handlers for content (text, PDFs, etc.)
         self.application.add_handler(MessageHandler(
@@ -679,6 +680,7 @@ Just send any text to chat with Laney
 /conversations - List past conversations
 /resume <id> - Resume old conversation
 /context - Current conversation info
+/title <name> - Rename conversation
 
 *Other Commands:*
 /login - Magic link for web access
@@ -1572,7 +1574,37 @@ This link will grant you access to:
             f"*Context Usage:*\n"
             f"Tokens: ~{tokens_est:,} / 128K ({usage_pct:.1f}%)\n"
             f"Status: {health}\n\n"
-            f"_Use `/new` to start fresh_",
+            f"_Use `/new` to start fresh, `/title <name>` to rename_",
+            parse_mode='Markdown'
+        )
+        self.messages_sent += 1
+
+    async def _cmd_title(self, update, context):
+        """Handle /title command - set conversation title."""
+        self.commands_received += 1
+
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("Unauthorized")
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: `/title <new title>`\n\n"
+                "Example: `/title Research on geostatistics`",
+                parse_mode='Markdown'
+            )
+            return
+
+        new_title = " ".join(context.args)
+        if len(new_title) > 100:
+            new_title = new_title[:100]
+
+        chat_id = update.effective_chat.id
+        conv_id = self.conversation_manager.get_or_create_conversation(chat_id)
+        self.conversation_manager.set_title(conv_id, new_title)
+
+        await update.message.reply_text(
+            f"Conversation renamed to: *{new_title}*",
             parse_mode='Markdown'
         )
         self.messages_sent += 1
@@ -1774,6 +1806,7 @@ This link will grant you access to:
             tool_handler = LaneyToolHandler(
                 db_path=config.db_path,
                 brave_api_key=getattr(config.integrations, 'brave_api_key', None),
+                conversation_id=conversation_id,
             )
 
             # Load conversation history (last N messages)
