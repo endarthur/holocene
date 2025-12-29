@@ -249,7 +249,7 @@ When done, provide a clear summary of what you found and what actions you took."
                 model=model,
                 temperature=0.3,
                 max_iterations=15,
-                timeout=300,  # 5 minutes for complex tasks
+                timeout=900,  # 15 minutes for complex research tasks
             )
 
             items_added = getattr(tool_handler, '_items_added', [])

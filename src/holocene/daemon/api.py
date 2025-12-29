@@ -254,6 +254,7 @@ class APIServer:
         self.app.route("/webapp/papers", methods=["GET"])(self._webapp_papers)
         self.app.route("/webapp/books", methods=["GET"])(self._webapp_books)
         self.app.route("/webapp/links", methods=["GET"])(self._webapp_links)
+        self.app.route("/webapp/tasks", methods=["GET"])(self._webapp_tasks)
 
         # Error handlers
         self.app.errorhandler(404)(self._not_found)
@@ -2415,6 +2416,118 @@ class APIServer:
 
         except Exception as e:
             logger.error(f"Error in /webapp/links: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _webapp_tasks(self):
+        """GET /webapp/tasks - List Laney tasks for Mini App."""
+        try:
+            import json
+            cursor = self.core.db.cursor()
+
+            # Get active/pending tasks
+            cursor.execute("""
+                SELECT id, title, description, task_type, status, priority,
+                       model, created_at, started_at, completed_at, error,
+                       output_data, items_added
+                FROM laney_tasks
+                WHERE status IN ('pending', 'running')
+                ORDER BY priority ASC, created_at ASC
+                LIMIT 20
+            """)
+
+            active_tasks = []
+            for row in cursor.fetchall():
+                task = {
+                    'id': row[0],
+                    'title': row[1],
+                    'description': row[2],
+                    'task_type': row[3],
+                    'status': row[4],
+                    'priority': row[5],
+                    'model': row[6],
+                    'created_at': row[7],
+                    'started_at': row[8],
+                    'completed_at': row[9],
+                    'error': row[10],
+                }
+                active_tasks.append(task)
+
+            # Get recent completed/failed tasks
+            cursor.execute("""
+                SELECT id, title, description, task_type, status, priority,
+                       model, created_at, started_at, completed_at, error,
+                       output_data, items_added
+                FROM laney_tasks
+                WHERE status IN ('completed', 'failed')
+                ORDER BY completed_at DESC
+                LIMIT 20
+            """)
+
+            completed_tasks = []
+            for row in cursor.fetchall():
+                task = {
+                    'id': row[0],
+                    'title': row[1],
+                    'description': row[2],
+                    'task_type': row[3],
+                    'status': row[4],
+                    'priority': row[5],
+                    'model': row[6],
+                    'created_at': row[7],
+                    'started_at': row[8],
+                    'completed_at': row[9],
+                    'error': row[10],
+                }
+                # Parse items added
+                if row[12]:
+                    try:
+                        task['items_added'] = json.loads(row[12])
+                    except:
+                        task['items_added'] = []
+                else:
+                    task['items_added'] = []
+
+                # Parse output summary (truncated)
+                if row[11]:
+                    try:
+                        output = json.loads(row[11])
+                        if isinstance(output, str) and len(output) > 200:
+                            task['summary'] = output[:200] + '...'
+                        else:
+                            task['summary'] = output
+                    except:
+                        task['summary'] = row[11][:200] if row[11] else None
+
+                completed_tasks.append(task)
+
+            # Get task stats (SQLite doesn't support FILTER, use individual queries)
+            cursor.execute("SELECT COUNT(*) FROM laney_tasks WHERE status = 'pending'")
+            pending = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM laney_tasks WHERE status = 'running'")
+            running = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM laney_tasks WHERE status = 'completed'")
+            completed = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM laney_tasks WHERE status = 'failed'")
+            failed = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM laney_tasks WHERE status = 'completed' AND date(completed_at) = date('now')")
+            completed_today = cursor.fetchone()[0]
+
+            stats = {
+                'pending': pending,
+                'running': running,
+                'completed': completed,
+                'failed': failed,
+                'completed_today': completed_today
+            }
+
+            return jsonify({
+                'active': active_tasks,
+                'completed': completed_tasks,
+                'stats': stats
+            })
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/tasks: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
     def _format_relative_time(self, datetime_str: str) -> str:
