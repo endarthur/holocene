@@ -1756,9 +1756,12 @@ This link will grant you access to:
 
         # Send initial "thinking" message
         status_msg = await update.message.reply_text(
-            f"🔮 *Laney is thinking...*",
+            "🔮 *Laney is thinking...*",
             parse_mode='Markdown'
         )
+
+        # Shared state for progress updates (thread-safe via GIL for simple ops)
+        progress_state = {"tools": [], "done": False}
 
         # Run Laney query in background with conversation history
         def run_laney():
@@ -1787,10 +1790,11 @@ This link will grant you access to:
             if context_tokens_est > 80000:  # ~60% of 128K
                 context_warning = f"⚠️ Context getting full (~{context_tokens_est//1000}K tokens). Consider /new for fresh conversation."
 
-            # Track tools called for verbose output
+            # Track tools called for verbose output (also updates shared state)
             tools_called = []
             def on_tool(name, iteration):
                 tools_called.append(name)
+                progress_state["tools"] = list(tools_called)  # Update shared state
 
             try:
                 response = client.run_with_tools(
@@ -1817,8 +1821,45 @@ This link will grant you access to:
             finally:
                 tool_handler.close()
 
+        # Progress updater task
+        async def update_progress():
+            """Periodically update status message while Laney works."""
+            import time
+            start_time = time.time()
+            spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            tick = 0
+            last_tools = []
+
+            while not progress_state["done"]:
+                await asyncio.sleep(2)  # Update every 2 seconds
+                if progress_state["done"]:
+                    break
+
+                tick += 1
+                elapsed = int(time.time() - start_time)
+                spin = spinner[tick % len(spinner)]
+
+                tools = progress_state["tools"]
+                if tools and tools != last_tools:
+                    # Show latest tool
+                    latest = tools[-1].replace("_", " ")
+                    msg = f"🔮 *Laney* {spin} `{latest}` ({elapsed}s)"
+                    last_tools = list(tools)
+                else:
+                    msg = f"🔮 *Laney is working...* {spin} ({elapsed}s)"
+
+                try:
+                    await status_msg.edit_text(msg, parse_mode='Markdown')
+                except Exception:
+                    pass  # Ignore edit errors (rate limits, etc.)
+
+        # Start progress updater
+        progress_task = asyncio.create_task(update_progress())
+
         try:
             result = await asyncio.get_event_loop().run_in_executor(None, run_laney)
+            progress_state["done"] = True  # Signal updater to stop
+            progress_task.cancel()  # Cancel the updater
 
             if result.get('success'):
                 response_text = result['response']
@@ -1869,6 +1910,8 @@ This link will grant you access to:
                 await update.message.reply_text(result['context_warning'])
 
         except Exception as e:
+            progress_state["done"] = True
+            progress_task.cancel()
             self.logger.error(f"Laney query error: {e}", exc_info=True)
             try:
                 await status_msg.edit_text(
