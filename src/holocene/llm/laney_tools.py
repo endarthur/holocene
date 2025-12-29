@@ -610,6 +610,153 @@ LANEY_TOOLS = [
             }
         }
     },
+    # === Task Management Tools ===
+    {
+        "type": "function",
+        "function": {
+            "name": "create_task",
+            "description": "Create a background task for yourself to work on later. Use this for research, analysis, or discovery tasks that don't need immediate results. The task will be processed by the daemon and you'll be notified when complete.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short title for the task (max 80 chars)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Detailed description of what to do, including any specific instructions or constraints"
+                    },
+                    "task_type": {
+                        "type": "string",
+                        "enum": ["research", "discovery", "enrichment", "analysis", "maintenance"],
+                        "description": "Type of task: research (find information), discovery (find new items), enrichment (improve existing items), analysis (generate insights), maintenance (cleanup/checks)"
+                    },
+                    "priority": {
+                        "type": "integer",
+                        "description": "Priority 1-10 (1=urgent, 5=normal, 10=whenever). Default: 5",
+                        "default": 5
+                    },
+                    "model": {
+                        "type": "string",
+                        "enum": ["primary", "reasoning", "fast"],
+                        "description": "Model to use: primary (default), reasoning (complex analysis), fast (simple tasks)",
+                        "default": "primary"
+                    },
+                    "deadline": {
+                        "type": "string",
+                        "description": "Optional deadline as ISO datetime (e.g., '2025-01-15T12:00:00')"
+                    }
+                },
+                "required": ["title", "description", "task_type"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_my_tasks",
+            "description": "List your pending, running, and recently completed tasks. Use to check on background work status.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["all", "pending", "running", "completed", "failed"],
+                        "description": "Filter by status. Default: all",
+                        "default": "all"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of tasks to return. Default: 10",
+                        "default": 10
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_task_result",
+            "description": "Get the detailed result of a completed task, including any items added to the collection.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "integer",
+                        "description": "ID of the task to retrieve"
+                    }
+                },
+                "required": ["task_id"]
+            }
+        }
+    },
+    # === Collection Addition Tools ===
+    {
+        "type": "function",
+        "function": {
+            "name": "add_link",
+            "description": "Add a link/URL to the user's collection. Use when you discover useful resources during research. The link will be archived automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to add"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Title/description of the link"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional notes about why this link is relevant"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional tags for categorization"
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_paper",
+            "description": "Add an academic paper to the collection. Provide DOI or arXiv ID and metadata will be fetched automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doi": {
+                        "type": "string",
+                        "description": "DOI of the paper (e.g., '10.1000/xyz123')"
+                    },
+                    "arxiv_id": {
+                        "type": "string",
+                        "description": "arXiv ID (e.g., '2103.12345')"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Paper title (used if DOI/arXiv lookup fails)"
+                    },
+                    "authors": {
+                        "type": "string",
+                        "description": "Authors (used if DOI/arXiv lookup fails)"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional notes about relevance"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
 ]
 
 # Safe math namespace for calculator
@@ -712,6 +859,13 @@ class LaneyToolHandler:
             "update_user_profile": self.update_user_profile,
             # Conversation management
             "set_conversation_title": self.set_conversation_title,
+            # Task management
+            "create_task": self.create_task,
+            "list_my_tasks": self.list_my_tasks,
+            "get_task_result": self.get_task_result,
+            # Collection addition
+            "add_link": self.add_link,
+            "add_paper": self.add_paper,
         }
 
     @property
@@ -1842,6 +1996,393 @@ from itertools import combinations, permutations, product
             }
         except Exception as e:
             return {"error": f"Failed to set title: {str(e)}"}
+
+    # === Task Management Methods ===
+
+    def create_task(
+        self,
+        title: str,
+        description: str,
+        task_type: str,
+        priority: int = 5,
+        model: str = "primary",
+        deadline: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a background task for later processing.
+
+        Args:
+            title: Short task title
+            description: Detailed instructions
+            task_type: research|discovery|enrichment|analysis|maintenance
+            priority: 1-10 (1=urgent)
+            model: primary|reasoning|fast
+            deadline: Optional ISO datetime
+
+        Returns:
+            Task creation status with ID
+        """
+        try:
+            now = datetime.now().isoformat()
+
+            # Validate task_type
+            valid_types = ["research", "discovery", "enrichment", "analysis", "maintenance"]
+            if task_type not in valid_types:
+                return {"error": f"Invalid task_type. Must be one of: {valid_types}"}
+
+            # Validate priority
+            priority = max(1, min(10, priority))
+
+            # Get chat_id from conversation if available
+            chat_id = None
+            if self.conversation_id:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "SELECT chat_id FROM laney_conversations WHERE id = ?",
+                    (self.conversation_id,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    chat_id = row[0]
+
+            # Create task
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO laney_tasks (
+                    chat_id, title, description, task_type, status,
+                    priority, model, deadline, created_at
+                ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+            """, (
+                chat_id, title[:80], description, task_type,
+                priority, model, deadline, now
+            ))
+            task_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+
+            return {
+                "success": True,
+                "task_id": task_id,
+                "title": title[:80],
+                "task_type": task_type,
+                "priority": priority,
+                "status": "pending",
+                "message": f"Task #{task_id} queued. Will be processed by daemon.",
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to create task: {str(e)}"}
+
+    def list_my_tasks(
+        self,
+        status: str = "all",
+        limit: int = 10,
+    ) -> Dict[str, Any]:
+        """List tasks by status.
+
+        Args:
+            status: all|pending|running|completed|failed
+            limit: Max results
+
+        Returns:
+            List of tasks
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            if status == "all":
+                cursor.execute("""
+                    SELECT id, title, task_type, status, priority, model,
+                           created_at, started_at, completed_at, error
+                    FROM laney_tasks
+                    ORDER BY
+                        CASE status
+                            WHEN 'running' THEN 1
+                            WHEN 'pending' THEN 2
+                            ELSE 3
+                        END,
+                        priority ASC, created_at DESC
+                    LIMIT ?
+                """, (limit,))
+            else:
+                cursor.execute("""
+                    SELECT id, title, task_type, status, priority, model,
+                           created_at, started_at, completed_at, error
+                    FROM laney_tasks
+                    WHERE status = ?
+                    ORDER BY priority ASC, created_at DESC
+                    LIMIT ?
+                """, (status, limit))
+
+            tasks = []
+            for row in cursor.fetchall():
+                tasks.append({
+                    "id": row["id"],
+                    "title": row["title"],
+                    "type": row["task_type"],
+                    "status": row["status"],
+                    "priority": row["priority"],
+                    "model": row["model"],
+                    "created": row["created_at"],
+                    "started": row["started_at"],
+                    "completed": row["completed_at"],
+                    "error": row["error"],
+                })
+
+            conn.close()
+
+            # Summary counts
+            conn2 = sqlite3.connect(self.db_path)
+            cursor2 = conn2.cursor()
+            cursor2.execute("""
+                SELECT status, COUNT(*) FROM laney_tasks GROUP BY status
+            """)
+            counts = {row[0]: row[1] for row in cursor2.fetchall()}
+            conn2.close()
+
+            return {
+                "tasks": tasks,
+                "counts": counts,
+                "total": sum(counts.values()),
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to list tasks: {str(e)}"}
+
+    def get_task_result(self, task_id: int) -> Dict[str, Any]:
+        """Get detailed result of a task.
+
+        Args:
+            task_id: Task ID to retrieve
+
+        Returns:
+            Task details including output and items added
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT * FROM laney_tasks WHERE id = ?
+            """, (task_id,))
+
+            row = cursor.fetchone()
+            conn.close()
+
+            if not row:
+                return {"error": f"Task #{task_id} not found"}
+
+            return {
+                "id": row["id"],
+                "title": row["title"],
+                "description": row["description"],
+                "type": row["task_type"],
+                "status": row["status"],
+                "priority": row["priority"],
+                "model": row["model"],
+                "created": row["created_at"],
+                "started": row["started_at"],
+                "completed": row["completed_at"],
+                "output": json.loads(row["output_data"]) if row["output_data"] else None,
+                "items_added": json.loads(row["items_added"]) if row["items_added"] else [],
+                "error": row["error"],
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to get task: {str(e)}"}
+
+    # === Collection Addition Methods ===
+
+    def add_link(
+        self,
+        url: str,
+        title: Optional[str] = None,
+        notes: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Add a link to the user's collection.
+
+        Args:
+            url: URL to add
+            title: Optional title
+            notes: Optional notes
+            tags: Optional tags list
+
+        Returns:
+            Link creation status
+        """
+        try:
+            now = datetime.now().isoformat()
+
+            # Check if link already exists
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT id, title FROM links WHERE url = ?", (url,))
+            existing = cursor.fetchone()
+
+            if existing:
+                return {
+                    "already_exists": True,
+                    "id": existing[0],
+                    "title": existing[1],
+                    "message": f"Link already in collection (ID: {existing[0]})",
+                }
+
+            # Insert new link
+            metadata = {}
+            if notes:
+                metadata["laney_notes"] = notes
+            if tags:
+                metadata["tags"] = tags
+
+            cursor.execute("""
+                INSERT INTO links (url, title, source, first_seen, created_at, metadata)
+                VALUES (?, ?, 'laney', ?, ?, ?)
+            """, (
+                url,
+                title,
+                now,
+                now,
+                json.dumps(metadata) if metadata else None,
+            ))
+            link_id = cursor.lastrowid
+            self.conn.commit()
+
+            # Track for task items_added
+            if hasattr(self, '_items_added'):
+                self._items_added.append({"type": "link", "id": link_id})
+
+            return {
+                "success": True,
+                "id": link_id,
+                "url": url,
+                "title": title,
+                "source": "laney",
+                "message": f"Link added to collection (ID: {link_id})",
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to add link: {str(e)}"}
+
+    def add_paper(
+        self,
+        doi: Optional[str] = None,
+        arxiv_id: Optional[str] = None,
+        title: Optional[str] = None,
+        authors: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Add a paper to the collection.
+
+        Fetches metadata from DOI or arXiv if provided.
+
+        Args:
+            doi: DOI identifier
+            arxiv_id: arXiv ID
+            title: Paper title (fallback)
+            authors: Authors (fallback)
+            notes: Optional notes
+
+        Returns:
+            Paper creation status
+        """
+        try:
+            now = datetime.now().isoformat()
+            cursor = self.conn.cursor()
+
+            # Check if already exists
+            if doi:
+                cursor.execute("SELECT id, title FROM papers WHERE doi = ?", (doi,))
+                existing = cursor.fetchone()
+                if existing:
+                    return {
+                        "already_exists": True,
+                        "id": existing[0],
+                        "title": existing[1],
+                        "message": f"Paper already in collection (ID: {existing[0]})",
+                    }
+
+            if arxiv_id:
+                cursor.execute("SELECT id, title FROM papers WHERE arxiv_id = ?", (arxiv_id,))
+                existing = cursor.fetchone()
+                if existing:
+                    return {
+                        "already_exists": True,
+                        "id": existing[0],
+                        "title": existing[1],
+                        "message": f"Paper already in collection (ID: {existing[0]})",
+                    }
+
+            # Try to fetch metadata
+            paper_data = {"title": title, "authors": authors}
+
+            if arxiv_id:
+                try:
+                    from ..research.arxiv_client import ArxivClient
+                    client = ArxivClient()
+                    fetched = client.get_paper(arxiv_id)
+                    if fetched:
+                        paper_data = fetched
+                except Exception:
+                    pass
+
+            if doi and not paper_data.get("abstract"):
+                try:
+                    from ..research.crossref import CrossrefClient
+                    client = CrossrefClient()
+                    fetched = client.get_paper_by_doi(doi)
+                    if fetched:
+                        paper_data.update(fetched)
+                except Exception:
+                    pass
+
+            # Must have at least title
+            if not paper_data.get("title"):
+                return {"error": "Could not fetch paper metadata. Provide title manually."}
+
+            # Insert paper
+            authors_str = paper_data.get("authors", authors)
+            if isinstance(authors_str, list):
+                authors_str = ", ".join(authors_str)
+
+            cursor.execute("""
+                INSERT INTO papers (
+                    doi, arxiv_id, title, authors, abstract,
+                    publication_date, url, added_at, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                doi,
+                arxiv_id,
+                paper_data.get("title"),
+                authors_str,
+                paper_data.get("abstract"),
+                paper_data.get("published_date"),
+                paper_data.get("url"),
+                now,
+                notes,
+            ))
+            paper_id = cursor.lastrowid
+            self.conn.commit()
+
+            # Track for task items_added
+            if hasattr(self, '_items_added'):
+                self._items_added.append({"type": "paper", "id": paper_id})
+
+            return {
+                "success": True,
+                "id": paper_id,
+                "title": paper_data.get("title"),
+                "authors": authors_str,
+                "doi": doi,
+                "arxiv_id": arxiv_id,
+                "source": "laney",
+                "message": f"Paper added to collection (ID: {paper_id})",
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to add paper: {str(e)}"}
 
     def _parse_json(self, field: str) -> Any:
         """Parse JSON field, return empty list if invalid."""

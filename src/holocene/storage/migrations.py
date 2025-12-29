@@ -272,6 +272,42 @@ MIGRATIONS: List[Dict] = [
             CREATE INDEX IF NOT EXISTS idx_laney_msg_created ON laney_messages(created_at);
         """,
     },
+    {
+        'version': 12,
+        'name': 'add_laney_tasks_table',
+        'description': 'Create task queue for Laney autonomous background work',
+        'up': """
+            -- Laney tasks - persistent task queue for background processing
+            CREATE TABLE IF NOT EXISTS laney_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER,
+                title TEXT NOT NULL,
+                description TEXT,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                priority INTEGER DEFAULT 5,
+                deadline TEXT,
+                model TEXT DEFAULT 'primary',
+                input_data TEXT,
+                output_data TEXT,
+                items_added TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                recurring TEXT,
+                parent_task_id INTEGER,
+                FOREIGN KEY (parent_task_id) REFERENCES laney_tasks(id) ON DELETE SET NULL
+            );
+
+            -- Indexes for efficient task queries
+            CREATE INDEX IF NOT EXISTS idx_laney_tasks_status ON laney_tasks(status);
+            CREATE INDEX IF NOT EXISTS idx_laney_tasks_priority ON laney_tasks(priority, created_at);
+            CREATE INDEX IF NOT EXISTS idx_laney_tasks_chat ON laney_tasks(chat_id);
+            CREATE INDEX IF NOT EXISTS idx_laney_tasks_type ON laney_tasks(task_type);
+            CREATE INDEX IF NOT EXISTS idx_laney_tasks_pending ON laney_tasks(status, priority) WHERE status = 'pending';
+        """,
+    },
 ]
 
 
