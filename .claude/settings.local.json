@@ -25,7 +25,8 @@
       "Bash(sqlite3:*)",
       "WebFetch(domain:docs.searxng.org)",
       "WebFetch(domain:api.search.brave.com)",
-      "Bash(export BRAVE_API_KEY:*)"
+      "Bash(export BRAVE_API_KEY:*)",
+      "Bash(holo laney:*)"
     ],
     "deny": [],
     "ask": []

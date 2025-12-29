@@ -213,6 +213,29 @@ MIGRATIONS: List[Dict] = [
             ALTER TABLE links ADD COLUMN clean_title TEXT;
         """,
     },
+    {
+        'version': 10,
+        'name': 'add_laney_notes_table',
+        'description': 'Create laney_notes table for Laney AI assistant memory/notebook',
+        'up': """
+            -- Laney's notebook - persistent memory for the AI assistant
+            CREATE TABLE IF NOT EXISTS laney_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                slug TEXT UNIQUE NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tags TEXT DEFAULT '[]',
+                note_type TEXT DEFAULT 'note',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            -- Indexes for efficient search
+            CREATE INDEX IF NOT EXISTS idx_laney_notes_slug ON laney_notes(slug);
+            CREATE INDEX IF NOT EXISTS idx_laney_notes_type ON laney_notes(note_type);
+            CREATE INDEX IF NOT EXISTS idx_laney_notes_updated ON laney_notes(updated_at DESC);
+        """,
+    },
 ]
 
 
