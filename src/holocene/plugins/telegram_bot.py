@@ -477,6 +477,8 @@ class TelegramBotPlugin(Plugin):
         self.subscribe('enrichment.complete', self._on_enrichment_complete)
         self.subscribe('classification.complete', self._on_classification_complete)
         self.subscribe('link.checked', self._on_link_checked)
+        self.subscribe('telegram.send', self._on_telegram_send)
+        self.subscribe('task.completed', self._on_task_completed)
 
         # Start bot in dedicated thread (not ThreadPoolExecutor - bot is long-lived)
         self.bot_thread = threading.Thread(
@@ -2485,6 +2487,56 @@ URL: {url[:50]}...
 """
 
         self._send_notification(notification)
+
+    def _on_telegram_send(self, msg: Message):
+        """Handle telegram.send event - send a message via Telegram."""
+        chat_id = msg.data.get('chat_id')
+        text = msg.data.get('text', '')
+        parse_mode = msg.data.get('parse_mode', 'Markdown')
+
+        if not chat_id or not text:
+            return
+
+        self._send_notification(text, chat_id=chat_id)
+
+    def _on_task_completed(self, msg: Message):
+        """Handle task.completed event - notify user about completed task."""
+        task_id = msg.data.get('task_id')
+        title = msg.data.get('title', 'Task')
+        chat_id = msg.data.get('chat_id')
+        items_added = msg.data.get('items_added', [])
+        summary = msg.data.get('summary', '')
+
+        if not chat_id:
+            return
+
+        # Build items message
+        items_msg = ""
+        if items_added:
+            links = sum(1 for i in items_added if i.get('type') == 'link')
+            papers = sum(1 for i in items_added if i.get('type') == 'paper')
+            parts = []
+            if links:
+                parts.append(f"{links} link{'s' if links > 1 else ''}")
+            if papers:
+                parts.append(f"{papers} paper{'s' if papers > 1 else ''}")
+            if parts:
+                items_msg = f"\n📦 Added: {', '.join(parts)}"
+
+        # Truncate summary
+        if len(summary) > 300:
+            summary = summary[:300] + "..."
+
+        notification = f"""✅ *Task Completed*
+
+*{title}*{items_msg}
+
+{summary}
+
+_Task #{task_id} - ask Laney for details_
+"""
+
+        self._send_notification(notification, chat_id=chat_id)
 
     def _send_notification(self, message: str, chat_id: Optional[int] = None):
         """Send a notification to the user.
