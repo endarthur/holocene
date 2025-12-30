@@ -119,6 +119,7 @@ class EmailHandlerPlugin(Plugin):
     def _check_emails(self):
         """Check IMAP for new emails and process them."""
         self.stats["last_check"] = datetime.now().isoformat()
+        print(f"[EMAIL] Checking for new emails...", flush=True)
 
         try:
             # Connect to IMAP
@@ -138,10 +139,11 @@ class EmailHandlerPlugin(Plugin):
 
             email_ids = messages[0].split()
             if not email_ids:
+                print(f"[EMAIL] No new emails", flush=True)
                 mail.logout()
                 return
 
-            self.logger.info(f"Found {len(email_ids)} new emails")
+            print(f"[EMAIL] Found {len(email_ids)} new emails!", flush=True)
 
             for email_id in email_ids:
                 try:
@@ -153,7 +155,10 @@ class EmailHandlerPlugin(Plugin):
             mail.logout()
 
         except imaplib.IMAP4.error as e:
-            self.logger.error(f"IMAP error: {e}")
+            print(f"[EMAIL] IMAP error: {e}", flush=True)
+            self.stats["errors"] += 1
+        except Exception as e:
+            print(f"[EMAIL] Error checking emails: {e}", flush=True)
             self.stats["errors"] += 1
 
     def _process_email(self, mail: imaplib.IMAP4_SSL, email_id: bytes):
@@ -174,7 +179,7 @@ class EmailHandlerPlugin(Plugin):
         date = msg['Date']
         message_id = msg['Message-ID']
 
-        self.logger.info(f"Processing email from {from_addr}: {subject}")
+        print(f"[EMAIL] Processing email from {from_addr}: {subject}", flush=True)
 
         # Check if sender is allowed
         if self.email_config.allowed_senders:
