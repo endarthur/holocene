@@ -40,17 +40,20 @@ class EmailHandlerPlugin(Plugin):
 
     def on_load(self):
         """Initialize the plugin."""
-        self.logger.info("EmailHandler plugin loaded")
+        print("[EMAIL] EmailHandler plugin loading...", flush=True)
 
         # Get email config
         email_config = getattr(self.core.config, 'email', None)
+        print(f"[EMAIL] Config found: {email_config is not None}, enabled: {getattr(email_config, 'enabled', False) if email_config else False}", flush=True)
+
         if not email_config or not email_config.enabled:
-            self.logger.info("Email not enabled in config")
+            print("[EMAIL] Email not enabled in config", flush=True)
             self.enabled = False
             return
 
         self.email_config = email_config
         self.enabled = True
+        print(f"[EMAIL] Configured for {email_config.address}", flush=True)
 
         # Stats
         self.stats = {
