@@ -434,10 +434,29 @@ class TelegramBotPlugin(Plugin):
         # Load authorized groups from database
         self._db_authorized_groups: set = self._load_db_authorized_groups()
 
-        # Create bot application
+        # Create bot application with increased timeouts for stability
         try:
-            self.application = Application.builder().token(self.bot_token).build()
-            self.logger.info("Telegram bot application created")
+            from telegram.request import HTTPXRequest
+            # Configure request with longer timeouts and connection pool
+            request = HTTPXRequest(
+                connect_timeout=20.0,  # Connection timeout (default 5.0)
+                read_timeout=30.0,     # Read timeout (default 5.0)
+                write_timeout=30.0,    # Write timeout (default 5.0)
+                pool_timeout=10.0,     # Pool timeout (default 1.0)
+            )
+            self.application = (
+                Application.builder()
+                .token(self.bot_token)
+                .request(request)
+                .get_updates_request(HTTPXRequest(
+                    connect_timeout=20.0,
+                    read_timeout=60.0,  # Long polling needs longer read timeout
+                    write_timeout=30.0,
+                    pool_timeout=10.0,
+                ))
+                .build()
+            )
+            self.logger.info("Telegram bot application created with extended timeouts")
         except Exception as e:
             self.logger.error(f"Failed to create bot application: {e}")
             self.application = None
@@ -680,6 +699,36 @@ class TelegramBotPlugin(Plugin):
         except Exception as e:
             self.logger.error(f"Failed to remove authorized group: {e}")
             return False
+
+    async def _retry_telegram_call(self, coro_func, *args, max_retries=3, base_delay=1.0, **kwargs):
+        """Retry a Telegram API call with exponential backoff.
+
+        Args:
+            coro_func: Async function to call
+            max_retries: Maximum number of retries
+            base_delay: Base delay in seconds (doubles each retry)
+            *args, **kwargs: Arguments to pass to coro_func
+
+        Returns:
+            Result of the coroutine, or None if all retries failed
+        """
+        from telegram.error import TimedOut, NetworkError
+        import asyncio
+
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                return await coro_func(*args, **kwargs)
+            except (TimedOut, NetworkError) as e:
+                last_error = e
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"[TELEGRAM] Retry {attempt + 1}/{max_retries} after {delay}s: {e}", flush=True)
+                    await asyncio.sleep(delay)
+                else:
+                    print(f"[TELEGRAM] All {max_retries} retries failed: {e}", flush=True)
+
+        return None
 
     def _is_authorized(self, chat_id: int, chat_type: str = "private") -> bool:
         """Check if user/group is authorized to use bot.
@@ -1610,21 +1659,13 @@ This link will grant you access to:
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id
 
-        # Debug logging for group authorization (using print to ensure it shows in journald)
-        print(f"[LANEY] _cmd_ask: chat_type={chat_type}, chat_id={chat_id}, user_id={user_id}, owner_chat_id={self.chat_id}", flush=True)
-
         if not self._is_authorized(chat_id, chat_type):
             if self._is_group_chat(update):
                 # Check if the owner is trying to use /laney in an unauthorized group
-                is_owner = self._is_owner(user_id)
-                print(f"[LANEY] Group auth check: is_owner={is_owner} (user_id={user_id} vs chat_id={self.chat_id})", flush=True)
-                if is_owner:
+                if self._is_owner(user_id):
                     # Owner found! Send them a DM to authorize this group
                     chat_title = update.effective_chat.title or "Unknown Group"
-                    print(f"[LANEY] Requesting authorization for group: {chat_title} ({chat_id})", flush=True)
                     await self._request_group_authorization(chat_id, chat_title, update)
-                else:
-                    print(f"[LANEY] Not owner, ignoring group message", flush=True)
                 # Silently ignore other users
                 return
             await update.message.reply_text("❌ Unauthorized")
@@ -2027,11 +2068,19 @@ This link will grant you access to:
         # Save user message to conversation (before sending to LLM)
         self.conversation_manager.add_message(conversation_id, "user", query)
 
-        # Send initial "thinking" message
-        status_msg = await update.message.reply_text(
+        # Send initial "thinking" message (with retry for network issues)
+        status_msg = await self._retry_telegram_call(
+            update.message.reply_text,
             "🔮 *Laney is thinking...*",
             parse_mode='Markdown'
         )
+        if not status_msg:
+            # All retries failed - try one more time without markdown
+            try:
+                status_msg = await update.message.reply_text("🔮 Laney is thinking...")
+            except Exception as e:
+                print(f"[TELEGRAM] Failed to send thinking message: {e}", flush=True)
+                return  # Can't communicate with user
 
         # Shared state for progress updates (thread-safe via GIL for simple ops)
         progress_state = {"tools": [], "done": False, "pending_updates": []}
