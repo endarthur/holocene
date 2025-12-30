@@ -55,6 +55,7 @@ class TelegramConfig(BaseModel):
     enabled: bool = False
     bot_token: Optional[str] = None
     chat_id: Optional[int] = None  # Telegram chat ID for notifications
+    authorized_groups: List[int] = []  # Group chat IDs where /laney is allowed
 
 
 class MercadoLivreConfig(BaseModel):

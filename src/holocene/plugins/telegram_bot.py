@@ -421,9 +421,11 @@ class TelegramBotPlugin(Plugin):
 
         # Get chat ID (user to send notifications to)
         self.chat_id = None
+        self.authorized_groups: List[int] = []
         telegram_config = getattr(self.core.config, 'telegram', None)
         if telegram_config:
             self.chat_id = getattr(telegram_config, 'chat_id', None)
+            self.authorized_groups = getattr(telegram_config, 'authorized_groups', []) or []
 
         # Create bot application
         try:
@@ -611,21 +613,31 @@ class TelegramBotPlugin(Plugin):
             except:
                 pass
 
-    def _is_authorized(self, chat_id: int) -> bool:
-        """Check if user is authorized to use bot.
+    def _is_authorized(self, chat_id: int, chat_type: str = "private") -> bool:
+        """Check if user/group is authorized to use bot.
 
         Args:
             chat_id: Telegram chat ID
+            chat_type: Chat type ('private', 'group', 'supergroup', 'channel')
 
         Returns:
             True if authorized, False otherwise
         """
-        # If no chat_id configured yet, first user becomes authorized
+        # Group chats check against authorized_groups list
+        if chat_type in ("group", "supergroup"):
+            return chat_id in self.authorized_groups
+
+        # Private chats: if no chat_id configured yet, first user becomes authorized
         if not self.chat_id:
             return True
 
         # Otherwise, only configured chat_id is authorized
         return chat_id == self.chat_id
+
+    def _is_group_chat(self, update) -> bool:
+        """Check if message is from a group chat."""
+        chat_type = update.effective_chat.type
+        return chat_type in ("group", "supergroup")
 
     async def _cmd_start(self, update, context):
         """Handle /start command."""
@@ -670,12 +682,31 @@ Available commands:
         """Handle /help command."""
         self.commands_received += 1
 
-        # Check authorization
-        if not self._is_authorized(update.effective_chat.id):
+        # Check authorization (works in groups too)
+        chat_type = update.effective_chat.type
+        if not self._is_authorized(update.effective_chat.id, chat_type):
+            if self._is_group_chat(update):
+                return  # Silently ignore in unauthorized groups
             await update.message.reply_text("❌ Unauthorized")
             return
 
-        help_msg = """📚 *Holocene Commands*
+        # Different help for groups vs private
+        if self._is_group_chat(update):
+            help_msg = """🌍 *Laney in Group Chat*
+
+Use `/laney <question>` to ask me anything!
+
+I have access to Arthur's collection of books, papers, and links. I can also search the web.
+
+Each group has its own conversation memory.
+
+Examples:
+• `/laney What do you know about geostatistics?`
+• `/laney Find papers about kriging`
+• `/laney What's the latest on ESP32?`
+"""
+        else:
+            help_msg = """📚 *Holocene Commands*
 
 *Laney AI (with memory!):*
 Just send any text to chat with Laney
@@ -1399,27 +1430,42 @@ This link will grant you access to:
                 await update.message.reply_text("❌ Archive failed")
 
     async def _cmd_ask(self, update, context):
-        """Handle /ask and /laney commands - ask Laney a question."""
+        """Handle /ask and /laney commands - ask Laney a question.
+
+        Works in both private chats and authorized group chats.
+        """
         self.commands_received += 1
 
-        # Check authorization
-        if not self._is_authorized(update.effective_chat.id):
+        # Check authorization (pass chat_type for group support)
+        chat_type = update.effective_chat.type
+        if not self._is_authorized(update.effective_chat.id, chat_type):
+            if self._is_group_chat(update):
+                # Don't spam groups with "Unauthorized" - just ignore
+                return
             await update.message.reply_text("❌ Unauthorized")
             return
 
         # Get query from command args
         query = ' '.join(context.args) if context.args else None
         if not query:
-            await update.message.reply_text(
-                "Usage: `/ask <question>`\n\n"
-                "Laney remembers your conversation!\n"
-                "Just send text directly to chat.\n\n"
-                "Commands:\n"
-                "• `/new` - Start fresh conversation\n"
-                "• `/conversations` - List past chats\n"
-                "• `/context` - Current conversation info",
-                parse_mode='Markdown'
-            )
+            # Different help text for groups vs private
+            if self._is_group_chat(update):
+                await update.message.reply_text(
+                    "Usage: `/laney <question>`\n\n"
+                    "Each group has its own conversation history.",
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    "Usage: `/ask <question>`\n\n"
+                    "Laney remembers your conversation!\n"
+                    "Just send text directly to chat.\n\n"
+                    "Commands:\n"
+                    "• `/new` - Start fresh conversation\n"
+                    "• `/conversations` - List past chats\n"
+                    "• `/context` - Current conversation info",
+                    parse_mode='Markdown'
+                )
             return
 
         # Use _ask_laney which handles conversation history
@@ -1615,7 +1661,14 @@ This link will grant you access to:
     # Message and document handlers
 
     async def _handle_message(self, update, context):
-        """Handle text messages - detect DOIs, URLs, or send to Laney."""
+        """Handle text messages - detect DOIs, URLs, or send to Laney.
+
+        In group chats, only /laney command works - regular messages are ignored.
+        """
+        # Skip group chats - they should use /laney command
+        if self._is_group_chat(update):
+            return
+
         if not self._is_authorized(update.effective_chat.id):
             return
 
