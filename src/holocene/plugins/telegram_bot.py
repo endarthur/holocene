@@ -48,7 +48,8 @@ class ConversationManager:
     """
 
     # Max messages to include in context (with 128K tokens, can be generous)
-    MAX_CONTEXT_MESSAGES = 40
+    # At ~500 tokens/message avg, 100 messages ≈ 50K tokens, leaving room for tools
+    MAX_CONTEXT_MESSAGES = 100
 
     def __init__(self, db_path: str):
         """Initialize conversation manager.
@@ -1822,8 +1823,8 @@ This link will grant you access to:
             context_chars = sum(len(m.get('content', '')) for m in messages)
             context_tokens_est = context_chars // 4
             context_warning = None
-            if context_tokens_est > 80000:  # ~60% of 128K
-                context_warning = f"⚠️ Context getting full (~{context_tokens_est//1000}K tokens). Consider /new for fresh conversation."
+            if context_tokens_est > 64000:  # ~50% of 128K
+                context_warning = f"⚠️ Context at ~{context_tokens_est//1000}K tokens ({context_tokens_est*100//128000}%). Consider /new if responses degrade."
 
             # Track tools called for verbose output (also updates shared state)
             tools_called = []
@@ -1839,7 +1840,7 @@ This link will grant you access to:
                     model=config.llm.primary,
                     temperature=0.3,
                     max_iterations=20,
-                    timeout=300,  # 5 minutes for complex queries
+                    timeout=900,  # 15 minutes for complex queries with many tool calls
                     on_tool_call=on_tool,
                 )
                 # Capture created documents before closing
