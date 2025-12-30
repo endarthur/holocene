@@ -927,9 +927,45 @@ holo books search "machine learning" --include-calibre
 - Test small web discovery for research quality improvements
 - Explore Kagi's translation features for international sources
 
+### Local Inference & The Laney Council (Phase 7+)
+
+**Vision:** Run Laney locally on M4 Mac Mini with intelligent cloud escalation.
+
+**Architecture:**
+1. **Local Model** (Llama 3.3 70B / Qwen 2.5 72B)
+   - Fast, free, private
+   - Handles routine queries, collection searches, simple summaries
+   - All data stays on local network
+
+2. **Cloud Escalation** (NanoGPT - DeepSeek V3, Kimi K2)
+   - Complex reasoning, long documents, research synthesis
+   - Only when local model recognizes it needs help
+   - Sanitized data only - sensitive info never leaves
+
+3. **The Laney Council** (Multi-Agent Routing)
+   - Lightweight "inner council" that votes before main task execution
+   - Multiple specialized Laney perspectives with different system prompts:
+     - 🔒 **Privacy Laney** - Evaluates data safety for cloud escalation
+     - 🧠 **Complexity Laney** - Decides if task needs more powerful model
+     - 📚 **Archivist Laney** - Checks collection first before external search
+     - ⚡ **Efficiency Laney** - Prevents overthinking simple lookups
+   - Fast local inference (~500ms) routes the main request appropriately
+   - Disagreement = uncertainty signal → ask the human
+
+**Why "Council" not true MoE:**
+- Same base weights, different prompts → correlated blind spots
+- But: consensus = high confidence, disagreement = interesting edge case
+- Cheap uncertainty detection with anime-style charm (萌え)
+- "Not as strong as actual MoE, but still moe in both senses"
+
+**Implementation Notes:**
+- Current fallback chain (DeepSeek → Kimi → Hermes) is stepping stone
+- Council adds privacy/complexity triage layer before model selection
+- GCU aesthetic: technically sound self-aware AI deciding its own limits
+
 ---
 
-*Last Updated: 2025-11-23*
+*Last Updated: 2025-12-30*
 *Current Phase: 4.1-4.6 (70% Complete - Free APIs, Infrastructure, Authentication, Library Experience)*
 
 ## Recent Wins 🎉
