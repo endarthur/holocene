@@ -21,6 +21,13 @@ from typing import Optional
 from ..core import HoloceneCore, PluginRegistry
 from ..config import load_config
 
+# Configure logging to stdout so journald captures it
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(name)s] %(levelname)s: %(message)s',
+    stream=sys.stdout
+)
+
 logger = logging.getLogger(__name__)
 
 

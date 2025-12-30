@@ -15,12 +15,17 @@ import smtplib
 import email
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
+from email import encoders
 from email.header import decode_header
+import mimetypes
 import re
 import threading
 import time
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple, Union
 from html import unescape
 
 from holocene.core import Plugin
@@ -40,20 +45,19 @@ class EmailHandlerPlugin(Plugin):
 
     def on_load(self):
         """Initialize the plugin."""
-        print("[EMAIL] EmailHandler plugin loading...", flush=True)
+        self.logger.info("EmailHandler plugin loading...")
 
         # Get email config
         email_config = getattr(self.core.config, 'email', None)
-        print(f"[EMAIL] Config found: {email_config is not None}, enabled: {getattr(email_config, 'enabled', False) if email_config else False}", flush=True)
 
         if not email_config or not email_config.enabled:
-            print("[EMAIL] Email not enabled in config", flush=True)
+            self.logger.info("Email not enabled in config")
             self._email_configured = False
             return
 
         self.email_config = email_config
         self._email_configured = True
-        print(f"[EMAIL] Configured for {email_config.address}", flush=True)
+        self.logger.info(f"Configured for {email_config.address}")
 
         # Stats
         self.stats = {
@@ -73,12 +77,11 @@ class EmailHandlerPlugin(Plugin):
 
     def on_enable(self):
         """Enable the plugin and start email checking."""
-        print("[EMAIL] on_enable called", flush=True)
         if not getattr(self, '_email_configured', False):
-            print("[EMAIL] Email handler not enabled (missing config)", flush=True)
+            self.logger.warning("Email handler not enabled (missing config)")
             return
 
-        print(f"[EMAIL] Starting email checker for {self.email_config.address}", flush=True)
+        self.logger.info(f"Starting email checker for {self.email_config.address}")
 
         # Start background email checker
         self._start_email_checker()
@@ -123,7 +126,7 @@ class EmailHandlerPlugin(Plugin):
     def _check_emails(self):
         """Check IMAP for new emails and process them."""
         self.stats["last_check"] = datetime.now().isoformat()
-        print(f"[EMAIL] Checking for new emails...", flush=True)
+        self.logger.debug("Checking for new emails...")
 
         try:
             # Connect to IMAP
@@ -143,11 +146,11 @@ class EmailHandlerPlugin(Plugin):
 
             email_ids = messages[0].split()
             if not email_ids:
-                print(f"[EMAIL] No new emails", flush=True)
+                self.logger.debug("No new emails")
                 mail.logout()
                 return
 
-            print(f"[EMAIL] Found {len(email_ids)} new emails!", flush=True)
+            self.logger.info(f"Found {len(email_ids)} new email(s)")
 
             for email_id in email_ids:
                 try:
@@ -159,10 +162,10 @@ class EmailHandlerPlugin(Plugin):
             mail.logout()
 
         except imaplib.IMAP4.error as e:
-            print(f"[EMAIL] IMAP error: {e}", flush=True)
+            self.logger.error(f"IMAP error: {e}")
             self.stats["errors"] += 1
         except Exception as e:
-            print(f"[EMAIL] Error checking emails: {e}", flush=True)
+            self.logger.error(f"Error checking emails: {e}")
             self.stats["errors"] += 1
 
     def _process_email(self, mail: imaplib.IMAP4_SSL, email_id: bytes):
@@ -183,7 +186,7 @@ class EmailHandlerPlugin(Plugin):
         date = msg['Date']
         message_id = msg['Message-ID']
 
-        print(f"[EMAIL] Processing email from {from_addr}: {subject}", flush=True)
+        self.logger.info(f"Processing email from {from_addr}: {subject}")
 
         # Check if sender is allowed
         if self.email_config.allowed_senders:
@@ -203,9 +206,11 @@ class EmailHandlerPlugin(Plugin):
 
         if is_urls_only:
             # Archive the URLs
+            self.logger.info(f"URL-only email with {len(urls)} URLs - archiving")
             self._handle_url_email(from_addr, subject, urls, message_id, msg)
         else:
             # Send to Laney for a response
+            self.logger.info("Question email - sending to Laney...")
             self._handle_question_email(from_addr, subject, body, message_id, msg)
 
         self.stats["emails_processed"] += 1
@@ -337,10 +342,38 @@ class EmailHandlerPlugin(Plugin):
             self.logger.error(f"Failed to add link: {e}")
             return False
 
-    def _send_reply(self, to_addr: str, subject: str, body: str, in_reply_to: str = None):
-        """Send an email reply via SMTP."""
+    def _send_reply(self, to_addr: str, subject: str, body: str,
+                    in_reply_to: str = None,
+                    attachments: Optional[List[Tuple[str, bytes, str]]] = None):
+        """Send an email reply via SMTP.
+
+        Args:
+            to_addr: Recipient email address
+            subject: Email subject
+            body: Email body (markdown-ish text)
+            in_reply_to: Message-ID for threading
+            attachments: List of (filename, content_bytes, mime_type) tuples
+        """
         try:
-            msg = MIMEMultipart('alternative')
+            # Use mixed for attachments, alternative for text/html only
+            if attachments:
+                msg = MIMEMultipart('mixed')
+                # Create alternative part for text/html body
+                alt_part = MIMEMultipart('alternative')
+                text_part = MIMEText(body, 'plain', 'utf-8')
+                alt_part.attach(text_part)
+                html_body = self._markdown_to_html(body)
+                html_part = MIMEText(html_body, 'html', 'utf-8')
+                alt_part.attach(html_part)
+                msg.attach(alt_part)
+            else:
+                msg = MIMEMultipart('alternative')
+                text_part = MIMEText(body, 'plain', 'utf-8')
+                msg.attach(text_part)
+                html_body = self._markdown_to_html(body)
+                html_part = MIMEText(html_body, 'html', 'utf-8')
+                msg.attach(html_part)
+
             msg['From'] = self.email_config.address
             msg['To'] = to_addr
             msg['Subject'] = subject
@@ -349,14 +382,21 @@ class EmailHandlerPlugin(Plugin):
                 msg['In-Reply-To'] = in_reply_to
                 msg['References'] = in_reply_to
 
-            # Create plain text and HTML versions
-            text_part = MIMEText(body, 'plain')
-            msg.attach(text_part)
+            # Add attachments
+            if attachments:
+                for filename, content, mime_type in attachments:
+                    maintype, subtype = mime_type.split('/', 1)
 
-            # Convert markdown-ish to basic HTML
-            html_body = self._markdown_to_html(body)
-            html_part = MIMEText(html_body, 'html')
-            msg.attach(html_part)
+                    if maintype == 'image':
+                        part = MIMEImage(content, _subtype=subtype)
+                    else:
+                        part = MIMEBase(maintype, subtype)
+                        part.set_payload(content)
+                        encoders.encode_base64(part)
+
+                    part.add_header('Content-Disposition', 'attachment', filename=filename)
+                    msg.attach(part)
+                    self.logger.info(f"Attached: {filename} ({mime_type})")
 
             # Send via SMTP
             with smtplib.SMTP(self.email_config.smtp_server, self.email_config.smtp_port) as server:
@@ -364,11 +404,39 @@ class EmailHandlerPlugin(Plugin):
                 server.login(self.email_config.username, self.email_config.password)
                 server.send_message(msg)
 
-            self.logger.info(f"Sent reply to {to_addr}: {subject}")
+            attachment_info = f" with {len(attachments)} attachment(s)" if attachments else ""
+            self.logger.info(f"Sent reply to {to_addr}: {subject}{attachment_info}")
 
         except Exception as e:
             self.logger.error(f"Failed to send email: {e}")
             raise
+
+    def _attach_file(self, filepath: Union[str, Path]) -> Optional[Tuple[str, bytes, str]]:
+        """Read a file and prepare it for attachment.
+
+        Args:
+            filepath: Path to file
+
+        Returns:
+            Tuple of (filename, content, mime_type) or None if failed
+        """
+        try:
+            path = Path(filepath)
+            if not path.exists():
+                self.logger.error(f"Attachment file not found: {filepath}")
+                return None
+
+            # Guess mime type
+            mime_type, _ = mimetypes.guess_type(str(path))
+            if mime_type is None:
+                mime_type = 'application/octet-stream'
+
+            content = path.read_bytes()
+            return (path.name, content, mime_type)
+
+        except Exception as e:
+            self.logger.error(f"Failed to read attachment {filepath}: {e}")
+            return None
 
     def _decode_header(self, header: str) -> str:
         """Decode email header value."""
