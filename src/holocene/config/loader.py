@@ -58,6 +58,21 @@ class TelegramConfig(BaseModel):
     authorized_groups: List[int] = []  # Group chat IDs where /laney is allowed
 
 
+class EmailConfig(BaseModel):
+    """Email configuration for Laney."""
+
+    enabled: bool = False
+    address: Optional[str] = None  # laney@gentropic.org
+    imap_server: Optional[str] = None
+    imap_port: int = 993
+    smtp_server: Optional[str] = None
+    smtp_port: int = 587
+    username: Optional[str] = None
+    password: Optional[str] = None
+    check_interval_seconds: int = 60  # How often to check for new emails
+    allowed_senders: List[str] = []  # Empty = allow all, or list of allowed email addresses
+
+
 class MercadoLivreConfig(BaseModel):
     """Mercado Livre integration configuration."""
 
@@ -174,6 +189,7 @@ class Config(BaseModel):
     classification: ClassificationConfig = Field(default_factory=ClassificationConfig)
     integrations: IntegrationsConfig = Field(default_factory=IntegrationsConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    email: EmailConfig = Field(default_factory=EmailConfig)
     mercadolivre: MercadoLivreConfig = Field(default_factory=MercadoLivreConfig)
 
     def model_post_init(self, __context):
