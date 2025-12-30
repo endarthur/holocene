@@ -1610,12 +1610,18 @@ This link will grant you access to:
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id
 
+        # Debug logging for group authorization
+        self.logger.info(f"_cmd_ask: chat_type={chat_type}, chat_id={chat_id}, user_id={user_id}, owner_chat_id={self.chat_id}")
+
         if not self._is_authorized(chat_id, chat_type):
             if self._is_group_chat(update):
                 # Check if the owner is trying to use /laney in an unauthorized group
-                if self._is_owner(user_id):
+                is_owner = self._is_owner(user_id)
+                self.logger.info(f"Group auth check: is_owner={is_owner} (user_id={user_id} vs chat_id={self.chat_id})")
+                if is_owner:
                     # Owner found! Send them a DM to authorize this group
                     chat_title = update.effective_chat.title or "Unknown Group"
+                    self.logger.info(f"Requesting authorization for group: {chat_title} ({chat_id})")
                     await self._request_group_authorization(chat_id, chat_title, update)
                 # Silently ignore other users
                 return
