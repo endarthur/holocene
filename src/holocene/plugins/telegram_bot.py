@@ -1860,13 +1860,15 @@ This link will grant you access to:
         async def update_progress():
             """Periodically update status message while Laney works."""
             import time
+            from telegram.error import RetryAfter
             start_time = time.time()
             spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             tick = 0
             last_tools = []
+            update_interval = 5  # Update every 5 seconds (avoid Telegram rate limits)
 
             while not progress_state["done"]:
-                await asyncio.sleep(2)  # Update every 2 seconds
+                await asyncio.sleep(update_interval)
                 if progress_state["done"]:
                     break
 
@@ -1885,8 +1887,11 @@ This link will grant you access to:
 
                 try:
                     await status_msg.edit_text(msg, parse_mode='Markdown')
+                except RetryAfter as e:
+                    # Respect Telegram's rate limit
+                    await asyncio.sleep(e.retry_after + 1)
                 except Exception:
-                    pass  # Ignore edit errors (rate limits, etc.)
+                    pass  # Ignore other edit errors
 
         # Start progress updater
         progress_task = asyncio.create_task(update_progress())
@@ -1924,8 +1929,15 @@ This link will grant you access to:
                 tools_info = f" (after {len(tools_called)} tool calls)" if tools_called else ""
                 msg = f"❌ *Laney Error*{tools_info}\n\n{result.get('error', 'Unknown error')[:500]}"
 
-            await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
-            self.messages_sent += 1
+            # Edit with rate limit handling
+            from telegram.error import RetryAfter
+            for attempt in range(3):
+                try:
+                    await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
+                    self.messages_sent += 1
+                    break
+                except RetryAfter as e:
+                    await asyncio.sleep(e.retry_after + 1)
 
             # Send any created documents as file attachments
             for doc_path in result.get('documents', []):
@@ -1948,13 +1960,25 @@ This link will grant you access to:
             progress_state["done"] = True
             progress_task.cancel()
             self.logger.error(f"Laney query error: {e}", exc_info=True)
-            try:
-                await status_msg.edit_text(
-                    f"❌ *Error*\n\n{str(e)[:200]}",
-                    parse_mode='Markdown'
-                )
-            except:
-                await update.message.reply_text("❌ Laney query failed")
+
+            # Try to send error message, respecting rate limits
+            from telegram.error import RetryAfter
+            error_msg = f"❌ *Error*\n\n{str(e)[:200]}"
+            for attempt in range(3):
+                try:
+                    await status_msg.edit_text(error_msg, parse_mode='Markdown')
+                    break
+                except RetryAfter as retry_err:
+                    await asyncio.sleep(retry_err.retry_after + 1)
+                except Exception:
+                    try:
+                        await asyncio.sleep(2)  # Brief pause before fallback
+                        await update.message.reply_text("❌ Laney query failed")
+                        break
+                    except RetryAfter as retry_err:
+                        await asyncio.sleep(retry_err.retry_after + 1)
+                    except Exception:
+                        break  # Give up silently
 
     def _detect_arxiv(self, text: str) -> Optional[str]:
         """Detect arXiv ID in text.
