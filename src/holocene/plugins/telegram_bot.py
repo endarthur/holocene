@@ -26,14 +26,17 @@ from holocene.integrations.archivebox import ArchiveBoxClient
 from holocene.integrations.internet_archive import InternetArchiveClient
 
 try:
-    from telegram import Update
-    from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
     Update = None
+    InlineKeyboardButton = None
+    InlineKeyboardMarkup = None
     CommandHandler = None
     MessageHandler = None
+    CallbackQueryHandler = None
     filters = None
     ContextTypes = None
     Application = None
@@ -421,11 +424,15 @@ class TelegramBotPlugin(Plugin):
 
         # Get chat ID (user to send notifications to)
         self.chat_id = None
-        self.authorized_groups: List[int] = []
+        self.authorized_groups: List[int] = []  # From config
+        self.pending_group_auth: Dict[int, dict] = {}  # chat_id -> {title, requested_at}
         telegram_config = getattr(self.core.config, 'telegram', None)
         if telegram_config:
             self.chat_id = getattr(telegram_config, 'chat_id', None)
             self.authorized_groups = getattr(telegram_config, 'authorized_groups', []) or []
+
+        # Load authorized groups from database
+        self._db_authorized_groups: set = self._load_db_authorized_groups()
 
         # Create bot application
         try:
@@ -474,6 +481,12 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(MessageHandler(
             filters.Document.PDF | filters.Document.ALL,
             self._handle_document
+        ))
+
+        # Register callback handler for inline buttons (group authorization)
+        self.application.add_handler(CallbackQueryHandler(
+            self._handle_group_auth_callback,
+            pattern="^auth_group:"
         ))
 
         # Subscribe to events for notifications
@@ -613,6 +626,61 @@ class TelegramBotPlugin(Plugin):
             except:
                 pass
 
+    def _load_db_authorized_groups(self) -> set:
+        """Load authorized groups from database."""
+        try:
+            conn = sqlite3.connect(self.core.config.db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT chat_id FROM telegram_authorized_groups
+                WHERE is_active = 1
+            """)
+            groups = {row[0] for row in cursor.fetchall()}
+            conn.close()
+            if groups:
+                self.logger.info(f"Loaded {len(groups)} authorized groups from DB")
+            return groups
+        except Exception as e:
+            self.logger.debug(f"Could not load authorized groups from DB: {e}")
+            return set()
+
+    def _add_authorized_group(self, chat_id: int, chat_title: str, authorized_by: int) -> bool:
+        """Add a group to authorized list in database."""
+        try:
+            conn = sqlite3.connect(self.core.config.db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO telegram_authorized_groups
+                (chat_id, chat_title, authorized_by, authorized_at, is_active)
+                VALUES (?, ?, ?, ?, 1)
+            """, (chat_id, chat_title, authorized_by, datetime.now().isoformat()))
+            conn.commit()
+            conn.close()
+            self._db_authorized_groups.add(chat_id)
+            self.logger.info(f"Authorized group: {chat_title} ({chat_id})")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to add authorized group: {e}")
+            return False
+
+    def _remove_authorized_group(self, chat_id: int) -> bool:
+        """Remove a group from authorized list."""
+        try:
+            conn = sqlite3.connect(self.core.config.db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE telegram_authorized_groups
+                SET is_active = 0
+                WHERE chat_id = ?
+            """, (chat_id,))
+            conn.commit()
+            conn.close()
+            self._db_authorized_groups.discard(chat_id)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to remove authorized group: {e}")
+            return False
+
     def _is_authorized(self, chat_id: int, chat_type: str = "private") -> bool:
         """Check if user/group is authorized to use bot.
 
@@ -623,9 +691,9 @@ class TelegramBotPlugin(Plugin):
         Returns:
             True if authorized, False otherwise
         """
-        # Group chats check against authorized_groups list
+        # Group chats check against both config and DB authorized groups
         if chat_type in ("group", "supergroup"):
-            return chat_id in self.authorized_groups
+            return chat_id in self.authorized_groups or chat_id in self._db_authorized_groups
 
         # Private chats: if no chat_id configured yet, first user becomes authorized
         if not self.chat_id:
@@ -634,10 +702,111 @@ class TelegramBotPlugin(Plugin):
         # Otherwise, only configured chat_id is authorized
         return chat_id == self.chat_id
 
+    def _is_owner(self, user_id: int) -> bool:
+        """Check if user is the bot owner (for authorizing groups)."""
+        return user_id == self.chat_id
+
     def _is_group_chat(self, update) -> bool:
         """Check if message is from a group chat."""
         chat_type = update.effective_chat.type
         return chat_type in ("group", "supergroup")
+
+    async def _request_group_authorization(self, chat_id: int, chat_title: str, update):
+        """Send authorization request to owner via DM."""
+        # Store pending request
+        self.pending_group_auth[chat_id] = {
+            'title': chat_title,
+            'requested_at': datetime.now().isoformat()
+        }
+
+        # Create inline keyboard with Authorize/Deny buttons
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Authorize", callback_data=f"auth_group:{chat_id}:yes"),
+                InlineKeyboardButton("❌ Deny", callback_data=f"auth_group:{chat_id}:no"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # Send DM to owner
+        try:
+            await self.application.bot.send_message(
+                chat_id=self.chat_id,  # Owner's private chat
+                text=f"🔔 *Group Authorization Request*\n\n"
+                     f"You used `/laney` in:\n"
+                     f"**{chat_title}**\n"
+                     f"`{chat_id}`\n\n"
+                     f"Do you want to authorize Laney for this group?",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            self.logger.info(f"Sent group auth request for: {chat_title} ({chat_id})")
+        except Exception as e:
+            self.logger.error(f"Failed to send auth request: {e}")
+
+    async def _handle_group_auth_callback(self, update, context):
+        """Handle inline button callbacks for group authorization."""
+        query = update.callback_query
+        await query.answer()  # Acknowledge the callback
+
+        # Parse callback data: "auth_group:<chat_id>:<yes|no>"
+        data = query.data
+        if not data.startswith("auth_group:"):
+            return
+
+        parts = data.split(":")
+        if len(parts) != 3:
+            return
+
+        _, chat_id_str, action = parts
+        try:
+            group_chat_id = int(chat_id_str)
+        except ValueError:
+            return
+
+        # Get pending request info
+        pending = self.pending_group_auth.pop(group_chat_id, None)
+        chat_title = pending['title'] if pending else f"Group {group_chat_id}"
+
+        if action == "yes":
+            # Authorize the group
+            success = self._add_authorized_group(
+                chat_id=group_chat_id,
+                chat_title=chat_title,
+                authorized_by=update.effective_user.id
+            )
+
+            if success:
+                await query.edit_message_text(
+                    f"✅ *Group Authorized*\n\n"
+                    f"**{chat_title}**\n\n"
+                    f"Laney will now respond to `/laney` commands in this group.",
+                    parse_mode='Markdown'
+                )
+
+                # Also notify the group
+                try:
+                    await self.application.bot.send_message(
+                        chat_id=group_chat_id,
+                        text="👋 Hello! I'm now authorized in this group.\n\n"
+                             "Use `/laney <question>` to ask me anything!\n"
+                             "Type `/help` for more info.",
+                        parse_mode='Markdown'
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Could not notify group: {e}")
+            else:
+                await query.edit_message_text(
+                    f"❌ Failed to authorize group. Check logs.",
+                    parse_mode='Markdown'
+                )
+        else:
+            # Denied
+            await query.edit_message_text(
+                f"🚫 *Authorization Denied*\n\n"
+                f"**{chat_title}** will not receive Laney responses.",
+                parse_mode='Markdown'
+            )
 
     async def _cmd_start(self, update, context):
         """Handle /start command."""
@@ -1438,9 +1607,17 @@ This link will grant you access to:
 
         # Check authorization (pass chat_type for group support)
         chat_type = update.effective_chat.type
-        if not self._is_authorized(update.effective_chat.id, chat_type):
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+
+        if not self._is_authorized(chat_id, chat_type):
             if self._is_group_chat(update):
-                # Don't spam groups with "Unauthorized" - just ignore
+                # Check if the owner is trying to use /laney in an unauthorized group
+                if self._is_owner(user_id):
+                    # Owner found! Send them a DM to authorize this group
+                    chat_title = update.effective_chat.title or "Unknown Group"
+                    await self._request_group_authorization(chat_id, chat_title, update)
+                # Silently ignore other users
                 return
             await update.message.reply_text("❌ Unauthorized")
             return

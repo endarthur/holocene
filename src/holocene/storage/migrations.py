@@ -331,6 +331,24 @@ MIGRATIONS: List[Dict] = [
             CREATE INDEX IF NOT EXISTS idx_api_cache_hits ON api_cache(hit_count DESC);
         """,
     },
+    {
+        'version': 14,
+        'name': 'add_telegram_authorized_groups',
+        'description': 'Dynamic authorization for Telegram group chats (no config editing needed)',
+        'up': """
+            -- Telegram authorized groups - groups where Laney can respond
+            CREATE TABLE IF NOT EXISTS telegram_authorized_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL UNIQUE,
+                chat_title TEXT,
+                authorized_by INTEGER,  -- user_id who authorized
+                authorized_at TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_telegram_groups_active ON telegram_authorized_groups(is_active, chat_id);
+        """,
+    },
 ]
 
 
