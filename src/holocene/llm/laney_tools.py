@@ -849,6 +849,10 @@ class LaneyToolHandler:
         # Use external list if provided (for async sending from Telegram bot)
         self.pending_updates: List[Dict[str, Any]] = pending_updates if pending_updates is not None else []
 
+        # Session-level cache for web searches and URL fetches (avoid redundant API calls)
+        self._search_cache: Dict[str, Any] = {}
+        self._fetch_cache: Dict[str, Any] = {}
+
         # Map tool names to handler methods
         self.handlers = {
             # Collection search
@@ -1131,17 +1135,28 @@ class LaneyToolHandler:
                 "hint": "Add brave_api_key to config or set BRAVE_API_KEY env var"
             }
 
+        # Check session cache first
+        cache_key = f"{query}|{count}|{freshness}"
+        if cache_key in self._search_cache:
+            cached = self._search_cache[cache_key]
+            cached["cached"] = True
+            return cached
+
         try:
             results = self.brave_client.search_simple(
                 query=query,
                 count=min(count, 10),
                 freshness=freshness,
             )
-            return {
+            result = {
                 "query": query,
                 "results": results,
                 "count": len(results),
+                "cached": False,
             }
+            # Cache for this session
+            self._search_cache[cache_key] = result
+            return result
         except Exception as e:
             return {"error": f"Web search failed: {str(e)}"}
 
@@ -1746,6 +1761,13 @@ from itertools import combinations, permutations, product
         """
         import requests
 
+        # Check session cache first
+        cache_key = f"{url}|{max_length}"
+        if cache_key in self._fetch_cache:
+            cached = self._fetch_cache[cache_key].copy()
+            cached["cached"] = True
+            return cached
+
         try:
             # Fetch the page
             headers = {
@@ -1785,13 +1807,17 @@ from itertools import combinations, permutations, product
                     "url": url,
                 }
 
-            return {
+            result = {
                 "success": True,
                 "url": url,
                 "content": text,
                 "length": len(text),
                 "truncated": len(response.text) > max_length,
+                "cached": False,
             }
+            # Cache for this session
+            self._fetch_cache[cache_key] = result
+            return result
 
         except requests.exceptions.Timeout:
             return {"error": "Request timed out", "url": url}
