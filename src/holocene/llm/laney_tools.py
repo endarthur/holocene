@@ -787,6 +787,82 @@ LANEY_TOOLS = [
             }
         }
     },
+    # === Email Tools ===
+    {
+        "type": "function",
+        "function": {
+            "name": "send_email",
+            "description": "Send an email to someone. Can only send to whitelisted addresses. Use this when the user asks you to email someone.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Recipient email address (must be whitelisted)"
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Email subject line"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Email body (markdown-style formatting supported)"
+                    }
+                },
+                "required": ["to", "subject", "body"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "email_whitelist_add",
+            "description": "Add an email address or domain to Laney's whitelist. Only the owner can do this. Domain format: @domain.com",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "description": "Email address (user@example.com) or domain (@example.com)"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional note about who this is (e.g., 'Arthur's friend')"
+                    }
+                },
+                "required": ["address"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "email_whitelist_remove",
+            "description": "Remove an email address or domain from Laney's whitelist. Only the owner can do this.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "description": "Email address or domain to remove"
+                    }
+                },
+                "required": ["address"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "email_whitelist_list",
+            "description": "List all whitelisted email addresses and domains",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
 ]
 
 # Safe math namespace for calculator
@@ -823,6 +899,8 @@ class LaneyToolHandler:
         documents_dir: Optional[Union[str, Path]] = None,
         conversation_id: Optional[int] = None,
         pending_updates: Optional[List[Dict[str, Any]]] = None,
+        email_config: Optional[Any] = None,
+        config_whitelist: Optional[List[str]] = None,
     ):
         """
         Initialize tool handler.
@@ -833,6 +911,8 @@ class LaneyToolHandler:
             documents_dir: Directory for document exports (default: ~/.holocene/documents)
             conversation_id: Current conversation ID (for title setting)
             pending_updates: Optional external list for interim updates (for async sending)
+            email_config: Email configuration (for send_email tool)
+            config_whitelist: Base whitelist from config (supplements DB whitelist)
         """
         self.db_path = str(db_path)
         self.conn = sqlite3.connect(self.db_path)
@@ -840,6 +920,8 @@ class LaneyToolHandler:
         self.brave_api_key = brave_api_key
         self._brave_client = None
         self.conversation_id = conversation_id
+        self.email_config = email_config
+        self.config_whitelist = config_whitelist or []
 
         # Documents directory
         if documents_dir:
@@ -911,6 +993,11 @@ class LaneyToolHandler:
             # Collection addition
             "add_link": self.add_link,
             "add_paper": self.add_paper,
+            # Email
+            "send_email": self.send_email,
+            "email_whitelist_add": self.email_whitelist_add,
+            "email_whitelist_remove": self.email_whitelist_remove,
+            "email_whitelist_list": self.email_whitelist_list,
         }
 
     @property
@@ -2646,3 +2733,236 @@ from itertools import combinations, permutations, product
             return json.loads(field)
         except (json.JSONDecodeError, TypeError):
             return field  # Return as-is if not JSON
+
+    # === Email Tools ===
+
+    def _is_email_whitelisted(self, address: str) -> bool:
+        """Check if email address is whitelisted (config + DB)."""
+        address_lower = address.lower()
+
+        # Check config whitelist first
+        for allowed in self.config_whitelist:
+            allowed_lower = allowed.lower()
+            if allowed_lower.startswith('@'):
+                if address_lower.endswith(allowed_lower):
+                    return True
+            else:
+                if address_lower == allowed_lower:
+                    return True
+
+        # Check DB whitelist
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT address FROM email_whitelist
+                WHERE is_active = 1
+            """)
+            for row in cursor.fetchall():
+                db_addr = row[0].lower()
+                if db_addr.startswith('@'):
+                    if address_lower.endswith(db_addr):
+                        return True
+                else:
+                    if address_lower == db_addr:
+                        return True
+        except Exception:
+            pass
+
+        return False
+
+    def send_email(self, to: str, subject: str, body: str) -> Dict[str, Any]:
+        """Send an email to someone.
+
+        Args:
+            to: Recipient email address (must be whitelisted)
+            subject: Email subject
+            body: Email body
+
+        Returns:
+            Send status
+        """
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        if not self.email_config:
+            return {"error": "Email not configured. Cannot send emails."}
+
+        # Check if recipient is whitelisted
+        if not self._is_email_whitelisted(to):
+            return {
+                "error": f"Cannot send to {to}: address not whitelisted. Ask the owner to add them first."
+            }
+
+        try:
+            # Create message
+            msg = MIMEMultipart('alternative')
+            msg['From'] = self.email_config.address
+            msg['To'] = to
+            msg['Subject'] = subject
+
+            # Plain text
+            text_part = MIMEText(body, 'plain', 'utf-8')
+            msg.attach(text_part)
+
+            # Basic HTML (convert markdown-ish)
+            html_body = body.replace('\n', '<br>\n')
+            html_body = f"<html><body>{html_body}<br><br>---<br><em>Laney - {self.email_config.address}</em></body></html>"
+            html_part = MIMEText(html_body, 'html', 'utf-8')
+            msg.attach(html_part)
+
+            # Send
+            with smtplib.SMTP(self.email_config.smtp_server, self.email_config.smtp_port) as server:
+                server.starttls()
+                server.login(self.email_config.username, self.email_config.password)
+                server.send_message(msg)
+
+            return {
+                "success": True,
+                "to": to,
+                "subject": subject,
+                "message": f"Email sent to {to}"
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to send email: {str(e)}"}
+
+    def email_whitelist_add(self, address: str, notes: Optional[str] = None) -> Dict[str, Any]:
+        """Add an email address or domain to the whitelist.
+
+        Args:
+            address: Email address or @domain.com
+            notes: Optional description
+
+        Returns:
+            Add status
+        """
+        try:
+            # Validate format
+            address = address.strip().lower()
+            if not address:
+                return {"error": "Address cannot be empty"}
+
+            if not address.startswith('@') and '@' not in address:
+                return {"error": "Invalid format. Use user@example.com or @example.com"}
+
+            cursor = self.conn.cursor()
+
+            # Check if already exists
+            cursor.execute("SELECT id FROM email_whitelist WHERE address = ?", (address,))
+            existing = cursor.fetchone()
+            if existing:
+                # Reactivate if inactive
+                cursor.execute("""
+                    UPDATE email_whitelist SET is_active = 1, notes = ?
+                    WHERE address = ?
+                """, (notes, address))
+                self.conn.commit()
+                return {
+                    "success": True,
+                    "address": address,
+                    "reactivated": True,
+                    "message": f"Re-activated {address} in whitelist"
+                }
+
+            # Insert new
+            cursor.execute("""
+                INSERT INTO email_whitelist (address, added_by, added_at, notes, is_active)
+                VALUES (?, 'owner', ?, ?, 1)
+            """, (address, datetime.now().isoformat(), notes))
+            self.conn.commit()
+
+            return {
+                "success": True,
+                "address": address,
+                "message": f"Added {address} to email whitelist"
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to add to whitelist: {str(e)}"}
+
+    def email_whitelist_remove(self, address: str) -> Dict[str, Any]:
+        """Remove an email address or domain from the whitelist.
+
+        Args:
+            address: Email address or domain to remove
+
+        Returns:
+            Removal status
+        """
+        try:
+            address = address.strip().lower()
+            cursor = self.conn.cursor()
+
+            # Check if exists
+            cursor.execute("SELECT id FROM email_whitelist WHERE address = ?", (address,))
+            existing = cursor.fetchone()
+
+            if not existing:
+                # Check if it's in config (can't remove config entries)
+                if any(a.lower() == address for a in self.config_whitelist):
+                    return {
+                        "error": f"{address} is in the config file whitelist. Edit config.yml to remove it."
+                    }
+                return {"error": f"{address} not found in whitelist"}
+
+            # Soft delete (set inactive)
+            cursor.execute("""
+                UPDATE email_whitelist SET is_active = 0
+                WHERE address = ?
+            """, (address,))
+            self.conn.commit()
+
+            return {
+                "success": True,
+                "address": address,
+                "message": f"Removed {address} from email whitelist"
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to remove from whitelist: {str(e)}"}
+
+    def email_whitelist_list(self) -> Dict[str, Any]:
+        """List all whitelisted email addresses and domains.
+
+        Returns:
+            List of whitelisted entries
+        """
+        try:
+            entries = []
+
+            # Config entries (always present)
+            for addr in self.config_whitelist:
+                entries.append({
+                    "address": addr,
+                    "source": "config",
+                    "notes": "From config.yml"
+                })
+
+            # Database entries
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT address, added_by, added_at, notes
+                FROM email_whitelist
+                WHERE is_active = 1
+                ORDER BY added_at DESC
+            """)
+
+            for row in cursor.fetchall():
+                entries.append({
+                    "address": row[0],
+                    "source": "database",
+                    "added_by": row[1],
+                    "added_at": row[2],
+                    "notes": row[3]
+                })
+
+            return {
+                "count": len(entries),
+                "entries": entries,
+                "config_count": len(self.config_whitelist),
+                "db_count": len(entries) - len(self.config_whitelist)
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to list whitelist: {str(e)}"}

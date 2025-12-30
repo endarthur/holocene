@@ -194,6 +194,11 @@ class EmailHandlerPlugin(Plugin):
                 self.logger.info(f"Ignoring email from non-allowed sender: {from_addr}")
                 return
 
+        # Auto-whitelist CC'd addresses (trusted sender vouches for them)
+        newly_whitelisted = self._auto_whitelist_cc(msg, from_addr)
+        if newly_whitelisted:
+            self.logger.info(f"Auto-whitelisted {len(newly_whitelisted)} CC'd addresses")
+
         # Extract body
         body = self._extract_body(msg)
 
@@ -290,6 +295,8 @@ class EmailHandlerPlugin(Plugin):
         tool_handler = LaneyToolHandler(
             db_path=config.db_path,
             brave_api_key=getattr(config.integrations, 'brave_api_key', None),
+            email_config=self.email_config,
+            config_whitelist=self.email_config.allowed_senders if self.email_config else [],
         )
 
         # Add email context to system prompt
@@ -470,7 +477,7 @@ class EmailHandlerPlugin(Plugin):
         return from_header
 
     def _is_sender_allowed(self, from_addr: str) -> bool:
-        """Check if sender is in allowed list.
+        """Check if sender is in allowed list (config + database).
 
         Supports:
         - Exact email matches: endarthur@gmail.com
@@ -478,6 +485,7 @@ class EmailHandlerPlugin(Plugin):
         """
         from_lower = from_addr.lower()
 
+        # Check config whitelist
         for allowed in self.email_config.allowed_senders:
             allowed_lower = allowed.lower()
 
@@ -490,7 +498,77 @@ class EmailHandlerPlugin(Plugin):
                 if from_lower == allowed_lower:
                     return True
 
+        # Check database whitelist
+        try:
+            db = self.core.db
+            cursor = db.conn.execute("""
+                SELECT address FROM email_whitelist
+                WHERE is_active = 1
+            """)
+            for row in cursor.fetchall():
+                db_addr = row[0].lower()
+                if db_addr.startswith('@'):
+                    if from_lower.endswith(db_addr):
+                        return True
+                else:
+                    if from_lower == db_addr:
+                        return True
+        except Exception as e:
+            self.logger.warning(f"Error checking DB whitelist: {e}")
+
         return False
+
+    def _auto_whitelist_cc(self, msg, primary_sender: str) -> List[str]:
+        """Auto-whitelist CC'd addresses when primary sender is trusted.
+
+        If the primary sender is whitelisted, any CC'd addresses are
+        automatically added to the whitelist (as the trusted sender
+        is vouching for them).
+
+        Returns list of newly whitelisted addresses.
+        """
+        newly_added = []
+
+        # Get CC addresses
+        cc_header = msg.get('Cc', '') or ''
+        if not cc_header:
+            return newly_added
+
+        # Extract all email addresses from CC
+        cc_addresses = re.findall(r'[\w.-]+@[\w.-]+', cc_header)
+
+        for addr in cc_addresses:
+            addr_lower = addr.lower()
+
+            # Skip if already whitelisted
+            if self._is_sender_allowed(addr_lower):
+                continue
+
+            # Skip if it's us
+            if addr_lower == self.email_config.address.lower():
+                continue
+
+            # Add to DB whitelist
+            try:
+                db = self.core.db
+                now = datetime.now().isoformat()
+                db.conn.execute("""
+                    INSERT OR IGNORE INTO email_whitelist
+                    (address, added_by, added_at, notes, is_active)
+                    VALUES (?, ?, ?, ?, 1)
+                """, (
+                    addr_lower,
+                    primary_sender,
+                    now,
+                    f"Auto-added: CC'd by {primary_sender}"
+                ))
+                db.conn.commit()
+                newly_added.append(addr_lower)
+                self.logger.info(f"Auto-whitelisted {addr_lower} (CC'd by {primary_sender})")
+            except Exception as e:
+                self.logger.error(f"Failed to auto-whitelist {addr_lower}: {e}")
+
+        return newly_added
 
     def _extract_body(self, msg) -> str:
         """Extract text body from email message."""

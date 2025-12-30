@@ -349,6 +349,25 @@ MIGRATIONS: List[Dict] = [
             CREATE INDEX IF NOT EXISTS idx_telegram_groups_active ON telegram_authorized_groups(is_active, chat_id);
         """,
     },
+    {
+        'version': 15,
+        'name': 'add_email_whitelist',
+        'description': 'Dynamic email whitelist for Laney (supplements config)',
+        'up': """
+            -- Email whitelist - addresses/domains allowed to email Laney
+            -- Supplements config.email.allowed_senders
+            CREATE TABLE IF NOT EXISTS email_whitelist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                address TEXT NOT NULL UNIQUE,  -- email or @domain.com
+                added_by TEXT,  -- who added (email address or 'owner')
+                added_at TEXT NOT NULL,
+                notes TEXT,  -- e.g., "Arthur's friend"
+                is_active INTEGER DEFAULT 1
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_email_whitelist_active ON email_whitelist(is_active, address);
+        """,
+    },
 ]
 
 

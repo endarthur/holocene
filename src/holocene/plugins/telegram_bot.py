@@ -2093,11 +2093,18 @@ This link will grant you access to:
 
             config = self.core.config
             client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+
+            # Get email config for Laney tools
+            email_config = getattr(config, 'email', None)
+            email_whitelist = getattr(email_config, 'allowed_senders', []) if email_config else []
+
             tool_handler = LaneyToolHandler(
                 db_path=config.db_path,
                 brave_api_key=getattr(config.integrations, 'brave_api_key', None),
                 conversation_id=conversation_id,
                 pending_updates=progress_state["pending_updates"],  # Shared list for async sending
+                email_config=email_config,
+                config_whitelist=email_whitelist,
             )
 
             # Load conversation history (last N messages)
