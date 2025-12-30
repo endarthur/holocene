@@ -1839,7 +1839,7 @@ This link will grant you access to:
                     model=config.llm.primary,
                     temperature=0.3,
                     max_iterations=20,
-                    timeout=120,
+                    timeout=300,  # 5 minutes for complex queries
                     on_tool_call=on_tool,
                 )
                 # Capture created documents before closing

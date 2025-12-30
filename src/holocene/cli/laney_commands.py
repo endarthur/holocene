@@ -125,7 +125,7 @@ def laney(query: str, model: str, verbose: bool):
                 model=model_id,
                 temperature=0.3,
                 max_iterations=20,
-                timeout=120
+                timeout=300  # 5 minutes for complex queries
             )
 
         tool_handler.close()
