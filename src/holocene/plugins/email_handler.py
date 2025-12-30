@@ -48,11 +48,11 @@ class EmailHandlerPlugin(Plugin):
 
         if not email_config or not email_config.enabled:
             print("[EMAIL] Email not enabled in config", flush=True)
-            self.enabled = False
+            self._email_configured = False
             return
 
         self.email_config = email_config
-        self.enabled = True
+        self._email_configured = True
         print(f"[EMAIL] Configured for {email_config.address}", flush=True)
 
         # Stats
@@ -73,11 +73,12 @@ class EmailHandlerPlugin(Plugin):
 
     def on_enable(self):
         """Enable the plugin and start email checking."""
-        if not self.enabled:
-            self.logger.warning("Email handler not enabled (missing config)")
+        print("[EMAIL] on_enable called", flush=True)
+        if not getattr(self, '_email_configured', False):
+            print("[EMAIL] Email handler not enabled (missing config)", flush=True)
             return
 
-        self.logger.info(f"EmailHandler enabled for {self.email_config.address}")
+        print(f"[EMAIL] Starting email checker for {self.email_config.address}", flush=True)
 
         # Start background email checker
         self._start_email_checker()
