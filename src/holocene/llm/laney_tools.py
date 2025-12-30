@@ -460,6 +460,30 @@ LANEY_TOOLS = [
             }
         }
     },
+    # === Progress Updates ===
+    {
+        "type": "function",
+        "function": {
+            "name": "send_update",
+            "description": "Send an interim progress update to the user. Use this during complex, multi-step tasks to share findings as you discover them - don't wait until the end. Good for: sharing interesting discoveries, reporting search results before continuing, giving status on long operations, or sending partial documents section by section.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "The update message to send. Can include markdown formatting. Keep it focused and useful - share what you found, not just 'still working'."
+                    },
+                    "update_type": {
+                        "type": "string",
+                        "enum": ["discovery", "progress", "result", "question"],
+                        "description": "Type of update: 'discovery' for interesting findings, 'progress' for status updates, 'result' for partial results, 'question' for clarifying questions",
+                        "default": "progress"
+                    }
+                },
+                "required": ["message"]
+            }
+        }
+    },
     # === URL Fetching ===
     {
         "type": "function",
@@ -792,6 +816,7 @@ class LaneyToolHandler:
         brave_api_key: Optional[str] = None,
         documents_dir: Optional[Union[str, Path]] = None,
         conversation_id: Optional[int] = None,
+        pending_updates: Optional[List[Dict[str, Any]]] = None,
     ):
         """
         Initialize tool handler.
@@ -801,6 +826,7 @@ class LaneyToolHandler:
             brave_api_key: Optional Brave Search API key for web search
             documents_dir: Directory for document exports (default: ~/.holocene/documents)
             conversation_id: Current conversation ID (for title setting)
+            pending_updates: Optional external list for interim updates (for async sending)
         """
         self.db_path = str(db_path)
         self.conn = sqlite3.connect(self.db_path)
@@ -818,6 +844,10 @@ class LaneyToolHandler:
 
         # Track documents created during this session (for Telegram file sending)
         self.created_documents: List[Path] = []
+
+        # Track pending updates to send to the user (for interim progress)
+        # Use external list if provided (for async sending from Telegram bot)
+        self.pending_updates: List[Dict[str, Any]] = pending_updates if pending_updates is not None else []
 
         # Map tool names to handler methods
         self.handlers = {
@@ -846,6 +876,8 @@ class LaneyToolHandler:
             "run_python": self.run_python,
             # Document export
             "write_document": self.write_document,
+            # Progress updates
+            "send_update": self.send_update,
             # URL fetching
             "fetch_url": self.fetch_url,
             # Item details
@@ -1669,6 +1701,36 @@ from itertools import combinations, permutations, product
                 "success": False,
                 "error": f"Failed to write document: {str(e)}",
             }
+
+    # === Progress Updates ===
+
+    def send_update(self, message: str, update_type: str = "progress") -> Dict[str, Any]:
+        """Send an interim progress update to the user.
+
+        Args:
+            message: The update message to send
+            update_type: Type of update (discovery, progress, result, question)
+
+        Returns:
+            Dict with success status
+        """
+        # Validate update type
+        valid_types = ["discovery", "progress", "result", "question"]
+        if update_type not in valid_types:
+            update_type = "progress"
+
+        # Queue the update for the Telegram bot to send
+        self.pending_updates.append({
+            "message": message,
+            "type": update_type,
+            "timestamp": datetime.now().isoformat(),
+        })
+
+        return {
+            "success": True,
+            "message": f"Update queued ({update_type})",
+            "queued_updates": len(self.pending_updates),
+        }
 
     # === URL Fetching ===
 

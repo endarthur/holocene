@@ -1796,7 +1796,7 @@ This link will grant you access to:
         )
 
         # Shared state for progress updates (thread-safe via GIL for simple ops)
-        progress_state = {"tools": [], "done": False}
+        progress_state = {"tools": [], "done": False, "pending_updates": []}
 
         # Run Laney query in background with conversation history
         def run_laney():
@@ -1810,6 +1810,7 @@ This link will grant you access to:
                 db_path=config.db_path,
                 brave_api_key=getattr(config.integrations, 'brave_api_key', None),
                 conversation_id=conversation_id,
+                pending_updates=progress_state["pending_updates"],  # Shared list for async sending
             )
 
             # Load conversation history (last N messages)
@@ -1859,19 +1860,52 @@ This link will grant you access to:
 
         # Progress updater task
         async def update_progress():
-            """Periodically update status message while Laney works."""
+            """Periodically update status message and send interim updates."""
             import time
-            from telegram.error import RetryAfter
+            from telegram.error import RetryAfter, BadRequest
             start_time = time.time()
             spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             tick = 0
             last_tools = []
             update_interval = 5  # Update every 5 seconds (avoid Telegram rate limits)
+            sent_updates = 0  # Track how many we've sent
+
+            # Emoji for update types
+            update_emoji = {
+                "discovery": "💡",
+                "progress": "📍",
+                "result": "📊",
+                "question": "❓",
+            }
 
             while not progress_state["done"]:
                 await asyncio.sleep(update_interval)
                 if progress_state["done"]:
                     break
+
+                # Check for pending updates from Laney
+                pending = progress_state["pending_updates"]
+                while len(pending) > sent_updates:
+                    upd = pending[sent_updates]
+                    emoji = update_emoji.get(upd.get("type", "progress"), "📍")
+                    upd_msg = f"{emoji} *Laney update*\n\n{upd['message']}"
+
+                    try:
+                        # Send as a new message (not edit)
+                        await update.message.reply_text(upd_msg, parse_mode='Markdown')
+                        self.messages_sent += 1
+                    except BadRequest:
+                        # Markdown failed - send plain
+                        plain_msg = f"{emoji} Laney update\n\n{upd['message']}"
+                        await update.message.reply_text(plain_msg)
+                        self.messages_sent += 1
+                    except RetryAfter as e:
+                        await asyncio.sleep(e.retry_after + 1)
+                        continue  # Retry this update
+                    except Exception:
+                        pass  # Skip if send fails
+
+                    sent_updates += 1
 
                 tick += 1
                 elapsed = int(time.time() - start_time)
