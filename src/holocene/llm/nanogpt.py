@@ -121,10 +121,17 @@ class NanoGPTClient:
         Returns:
             Final response text after all tool calls are resolved
         """
+        import logging
+        import time
+        logger = logging.getLogger(__name__)
+
         conversation = list(messages)  # Copy to avoid mutating original
+        start_time = time.time()
 
         for iteration in range(max_iterations):
             # Call LLM
+            iter_start = time.time()
+            logger.info(f"[NanoGPT] Iteration {iteration+1}/{max_iterations}, calling API...")
             response = self.chat_completion(
                 messages=conversation,
                 model=model,
@@ -133,6 +140,7 @@ class NanoGPTClient:
                 tool_choice="auto",
                 timeout=timeout,
             )
+            logger.info(f"[NanoGPT] API responded in {time.time()-iter_start:.1f}s")
 
             # Check if we have tool calls
             if not self.has_tool_calls(response):
@@ -165,9 +173,13 @@ class NanoGPTClient:
                 # Execute tool
                 if tool_name in tool_handlers:
                     try:
+                        tool_start = time.time()
+                        logger.info(f"[NanoGPT] Executing tool: {tool_name}")
                         result = tool_handlers[tool_name](**args)
+                        logger.info(f"[NanoGPT] Tool {tool_name} completed in {time.time()-tool_start:.1f}s")
                         result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
                     except Exception as e:
+                        logger.error(f"[NanoGPT] Tool {tool_name} failed: {e}")
                         result_str = json.dumps({"error": str(e)})
                 else:
                     result_str = json.dumps({"error": f"Unknown tool: {tool_name}"})
