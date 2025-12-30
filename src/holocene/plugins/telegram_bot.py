@@ -1941,8 +1941,11 @@ This link will grant you access to:
                     await asyncio.sleep(e.retry_after + 1)
 
             # Send any created documents as file attachments
-            for doc_path in result.get('documents', []):
-                if doc_path.exists():
+            docs = result.get('documents', [])
+            self.logger.info(f"Documents to send: {len(docs)} - {docs}")
+            for doc_path in docs:
+                self.logger.info(f"Checking document: {doc_path}, exists: {doc_path.exists() if hasattr(doc_path, 'exists') else 'N/A'}")
+                if hasattr(doc_path, 'exists') and doc_path.exists():
                     try:
                         await update.message.reply_document(
                             document=open(doc_path, 'rb'),
@@ -1950,6 +1953,7 @@ This link will grant you access to:
                             caption=f"📄 {doc_path.stem.replace('-', ' ').title()}"
                         )
                         self.messages_sent += 1
+                        self.logger.info(f"Sent document: {doc_path.name}")
                     except Exception as e:
                         self.logger.error(f"Failed to send document {doc_path}: {e}")
 
