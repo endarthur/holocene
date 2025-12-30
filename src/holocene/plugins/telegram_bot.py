@@ -1833,28 +1833,58 @@ This link will grant you access to:
                 tools_called.append(name)
                 progress_state["tools"] = list(tools_called)  # Update shared state
 
+            # Model fallback chain - try alternatives on timeout
+            fallback_models = [
+                config.llm.primary,  # deepseek-ai/DeepSeek-V3.1
+                "moonshotai/Kimi-K2-Instruct",
+                "nousresearch/hermes-4-70b",
+            ]
+
+            last_error = None
+            used_model = None
+
             try:
-                response = client.run_with_tools(
-                    messages=messages,
-                    tools=LANEY_TOOLS,
-                    tool_handlers=tool_handler.handlers,
-                    model=config.llm.primary,
-                    temperature=0.3,
-                    max_iterations=20,
-                    timeout=900,  # 15 minutes for complex queries with many tool calls
-                    on_tool_call=on_tool,
-                )
-                # Capture created documents before closing
-                created_docs = list(tool_handler.created_documents)
-                return {
-                    "success": True,
-                    "response": response,
-                    "tools_called": tools_called,
-                    "documents": created_docs,
-                    "context_warning": context_warning,
-                }
-            except Exception as e:
-                return {"success": False, "error": str(e), "documents": [], "context_warning": context_warning, "tools_called": tools_called}
+                for model in fallback_models:
+                    try:
+                        import logging
+                        logging.getLogger(__name__).info(f"[Laney] Trying model: {model}")
+                        progress_state["current_model"] = model
+
+                        response = client.run_with_tools(
+                            messages=messages,
+                            tools=LANEY_TOOLS,
+                            tool_handlers=tool_handler.handlers,
+                            model=model,
+                            temperature=0.3,
+                            max_iterations=20,
+                            timeout=120,  # 2 min per model attempt (will retry with fallback)
+                            on_tool_call=on_tool,
+                        )
+                        used_model = model
+                        # Capture created documents before closing
+                        created_docs = list(tool_handler.created_documents)
+                        return {
+                            "success": True,
+                            "response": response,
+                            "tools_called": tools_called,
+                            "documents": created_docs,
+                            "context_warning": context_warning,
+                            "model_used": used_model,
+                        }
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        # Only fallback on timeout errors
+                        if "timeout" in error_str or "timed out" in error_str:
+                            import logging
+                            logging.getLogger(__name__).warning(f"[Laney] Model {model} timed out, trying next...")
+                            last_error = e
+                            continue
+                        else:
+                            # Non-timeout error - don't retry
+                            return {"success": False, "error": str(e), "documents": [], "context_warning": context_warning, "tools_called": tools_called}
+
+                # All models failed
+                return {"success": False, "error": f"All models timed out. Last error: {last_error}", "documents": [], "context_warning": context_warning, "tools_called": tools_called}
             finally:
                 tool_handler.close()
 
@@ -1911,12 +1941,18 @@ This link will grant you access to:
                 elapsed = int(time.time() - start_time)
                 spin = spinner[tick % len(spinner)]
 
+                # Get current model (short name)
+                current_model = progress_state.get("current_model", "")
+                model_short = current_model.split("/")[-1][:12] if current_model else ""
+
                 tools = progress_state["tools"]
                 if tools and tools != last_tools:
                     # Show latest tool
                     latest = tools[-1].replace("_", " ")
                     msg = f"🔮 *Laney* {spin} `{latest}` ({elapsed}s)"
                     last_tools = list(tools)
+                elif model_short:
+                    msg = f"🔮 *Laney* {spin} [{model_short}] ({elapsed}s)"
                 else:
                     msg = f"🔮 *Laney is working...* {spin} ({elapsed}s)"
 
