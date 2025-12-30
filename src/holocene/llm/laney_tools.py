@@ -1780,29 +1780,54 @@ from itertools import combinations, permutations, product
             output_path = self.documents_dir / output_filename
 
             try:
-                cmd = ["pandoc", str(md_path), "-o", str(output_path)]
-
-                # Add format-specific options
+                # For PDF, try multiple engines in order of preference
                 if format == "pdf":
-                    cmd.extend(["--pdf-engine=xelatex"])
-                elif format == "html":
-                    cmd.extend(["--standalone", "--self-contained"])
-                # docx, txt, rst, epub work with pandoc defaults
+                    pdf_engines = ["wkhtmltopdf", "pdflatex", "xelatex", "lualatex"]
+                    last_error = ""
+                    success = False
 
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                    for engine in pdf_engines:
+                        cmd = ["pandoc", str(md_path), "-o", str(output_path), f"--pdf-engine={engine}"]
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                        if result.returncode == 0:
+                            success = True
+                            break
+                        last_error = result.stderr
 
-                if result.returncode != 0:
-                    # Pandoc failed - return markdown instead
-                    self.created_documents.append(md_path)
-                    return {
-                        "success": True,
-                        "file_path": str(md_path),
-                        "filename": md_filename,
-                        "format": "md",
-                        "title": title,
-                        "warning": f"Pandoc conversion to {format} failed: {result.stderr[:200]}. Returning markdown.",
-                        "size_bytes": len(full_content.encode('utf-8')),
-                    }
+                    if not success:
+                        # All engines failed - return markdown
+                        self.created_documents.append(md_path)
+                        return {
+                            "success": True,
+                            "file_path": str(md_path),
+                            "filename": md_filename,
+                            "format": "md",
+                            "title": title,
+                            "warning": f"PDF conversion failed (tried {', '.join(pdf_engines)}). Install one of: texlive-xetex, texlive-latex-base, or wkhtmltopdf. Returning markdown.",
+                            "size_bytes": len(full_content.encode('utf-8')),
+                        }
+                else:
+                    cmd = ["pandoc", str(md_path), "-o", str(output_path)]
+
+                    # Add format-specific options
+                    if format == "html":
+                        cmd.extend(["--standalone", "--self-contained"])
+                    # docx, txt, rst, epub work with pandoc defaults
+
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+                    if result.returncode != 0:
+                        # Pandoc failed - return markdown instead
+                        self.created_documents.append(md_path)
+                        return {
+                            "success": True,
+                            "file_path": str(md_path),
+                            "filename": md_filename,
+                            "format": "md",
+                            "title": title,
+                            "warning": f"Pandoc conversion to {format} failed: {result.stderr[:200]}. Returning markdown.",
+                            "size_bytes": len(full_content.encode('utf-8')),
+                        }
 
                 # Conversion succeeded
                 self.created_documents.append(output_path)
