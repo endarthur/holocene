@@ -1930,13 +1930,23 @@ This link will grant you access to:
                 tools_info = f" (after {len(tools_called)} tool calls)" if tools_called else ""
                 msg = f"❌ *Laney Error*{tools_info}\n\n{result.get('error', 'Unknown error')[:500]}"
 
-            # Edit with rate limit handling
-            from telegram.error import RetryAfter
+            # Edit with rate limit handling and markdown fallback
+            from telegram.error import RetryAfter, BadRequest
             for attempt in range(3):
                 try:
                     await status_msg.edit_text(msg, parse_mode='Markdown', disable_web_page_preview=True)
                     self.messages_sent += 1
                     break
+                except BadRequest as e:
+                    # Markdown parsing failed - fall back to plain text
+                    if "parse entities" in str(e).lower() or "can't find end" in str(e).lower():
+                        self.logger.warning(f"Markdown parse failed, falling back to plain text: {e}")
+                        # Remove markdown formatting and try again
+                        plain_msg = msg.replace('*', '').replace('_', '').replace('`', '')
+                        await status_msg.edit_text(plain_msg, disable_web_page_preview=True)
+                        self.messages_sent += 1
+                        break
+                    raise
                 except RetryAfter as e:
                     await asyncio.sleep(e.retry_after + 1)
 
@@ -1967,11 +1977,16 @@ This link will grant you access to:
             self.logger.error(f"Laney query error: {e}", exc_info=True)
 
             # Try to send error message, respecting rate limits
-            from telegram.error import RetryAfter
+            from telegram.error import RetryAfter, BadRequest
             error_msg = f"❌ *Error*\n\n{str(e)[:200]}"
             for attempt in range(3):
                 try:
                     await status_msg.edit_text(error_msg, parse_mode='Markdown')
+                    break
+                except BadRequest:
+                    # Markdown failed - send plain text
+                    plain_msg = f"❌ Error\n\n{str(e)[:200]}"
+                    await status_msg.edit_text(plain_msg)
                     break
                 except RetryAfter as retry_err:
                     await asyncio.sleep(retry_err.retry_after + 1)
