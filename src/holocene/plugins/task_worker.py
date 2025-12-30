@@ -40,9 +40,9 @@ class TaskWorkerPlugin(Plugin):
 
         if not self.api_key:
             self.logger.warning("No NanoGPT API key - task worker disabled")
-            self.enabled = False
+            self._can_run = False
         else:
-            self.enabled = True
+            self._can_run = True
 
         # Worker state
         self.running = False
@@ -61,7 +61,7 @@ class TaskWorkerPlugin(Plugin):
 
     def on_enable(self):
         """Start the task worker."""
-        if not self.enabled:
+        if not self._can_run:
             self.logger.warning("TaskWorker not enabled (no API key)")
             return
 
