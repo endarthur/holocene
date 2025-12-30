@@ -178,7 +178,7 @@ class EmailHandlerPlugin(Plugin):
 
         # Check if sender is allowed
         if self.email_config.allowed_senders:
-            if from_addr.lower() not in [s.lower() for s in self.email_config.allowed_senders]:
+            if not self._is_sender_allowed(from_addr):
                 self.logger.info(f"Ignoring email from non-allowed sender: {from_addr}")
                 return
 
@@ -391,6 +391,29 @@ class EmailHandlerPlugin(Plugin):
             return match.group(0)
 
         return from_header
+
+    def _is_sender_allowed(self, from_addr: str) -> bool:
+        """Check if sender is in allowed list.
+
+        Supports:
+        - Exact email matches: endarthur@gmail.com
+        - Domain wildcards: @gentropic.org (matches any @gentropic.org address)
+        """
+        from_lower = from_addr.lower()
+
+        for allowed in self.email_config.allowed_senders:
+            allowed_lower = allowed.lower()
+
+            if allowed_lower.startswith('@'):
+                # Domain wildcard - check if sender's domain matches
+                if from_lower.endswith(allowed_lower):
+                    return True
+            else:
+                # Exact email match
+                if from_lower == allowed_lower:
+                    return True
+
+        return False
 
     def _extract_body(self, msg) -> str:
         """Extract text body from email message."""
