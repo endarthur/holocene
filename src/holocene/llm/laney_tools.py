@@ -853,6 +853,9 @@ class LaneyToolHandler:
         self._search_cache: Dict[str, Any] = {}
         self._fetch_cache: Dict[str, Any] = {}
 
+        # Load persistent cache hits into session cache on init
+        self._load_persistent_cache()
+
         # Map tool names to handler methods
         self.handlers = {
             # Collection search
@@ -911,6 +914,47 @@ class LaneyToolHandler:
             from ..integrations.brave_search import BraveSearchClient
             self._brave_client = BraveSearchClient(self.brave_api_key)
         return self._brave_client
+
+    # === Persistent Cache ===
+
+    def _load_persistent_cache(self):
+        """Load frequently used cache entries into session cache on startup."""
+        # We don't preload everything - just check DB on cache miss
+        pass
+
+    def _get_cached(self, cache_type: str, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Get from persistent cache, update hit count."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT response FROM api_cache
+                WHERE cache_type = ? AND cache_key = ?
+            """, (cache_type, cache_key))
+            row = cursor.fetchone()
+            if row:
+                # Update hit count
+                cursor.execute("""
+                    UPDATE api_cache
+                    SET hit_count = hit_count + 1, last_hit_at = ?
+                    WHERE cache_type = ? AND cache_key = ?
+                """, (datetime.now().isoformat(), cache_type, cache_key))
+                self.conn.commit()
+                return json.loads(row[0])
+        except Exception:
+            pass  # Cache miss or error - just return None
+        return None
+
+    def _set_cached(self, cache_type: str, cache_key: str, response: Dict[str, Any]):
+        """Store in persistent cache."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO api_cache (cache_type, cache_key, response, created_at, hit_count, last_hit_at)
+                VALUES (?, ?, ?, ?, 0, NULL)
+            """, (cache_type, cache_key, json.dumps(response), datetime.now().isoformat()))
+            self.conn.commit()
+        except Exception:
+            pass  # Don't fail on cache errors
 
     def close(self):
         """Close the database connection."""
@@ -1135,12 +1179,19 @@ class LaneyToolHandler:
                 "hint": "Add brave_api_key to config or set BRAVE_API_KEY env var"
             }
 
-        # Check session cache first
+        # Check session cache first (fastest)
         cache_key = f"{query}|{count}|{freshness}"
         if cache_key in self._search_cache:
-            cached = self._search_cache[cache_key]
-            cached["cached"] = True
+            cached = self._search_cache[cache_key].copy()
+            cached["cached"] = "session"
             return cached
+
+        # Check persistent cache (still fast, local DB)
+        db_cached = self._get_cached("web_search", cache_key)
+        if db_cached:
+            self._search_cache[cache_key] = db_cached  # Promote to session
+            db_cached["cached"] = "persistent"
+            return db_cached
 
         try:
             results = self.brave_client.search_simple(
@@ -1152,10 +1203,11 @@ class LaneyToolHandler:
                 "query": query,
                 "results": results,
                 "count": len(results),
-                "cached": False,
             }
-            # Cache for this session
+            # Cache in both session and persistent storage
             self._search_cache[cache_key] = result
+            self._set_cached("web_search", cache_key, result)
+            result["cached"] = False
             return result
         except Exception as e:
             return {"error": f"Web search failed: {str(e)}"}
@@ -1761,12 +1813,19 @@ from itertools import combinations, permutations, product
         """
         import requests
 
-        # Check session cache first
+        # Check session cache first (fastest)
         cache_key = f"{url}|{max_length}"
         if cache_key in self._fetch_cache:
             cached = self._fetch_cache[cache_key].copy()
-            cached["cached"] = True
+            cached["cached"] = "session"
             return cached
+
+        # Check persistent cache (still fast, local DB)
+        db_cached = self._get_cached("fetch_url", cache_key)
+        if db_cached:
+            self._fetch_cache[cache_key] = db_cached  # Promote to session
+            db_cached["cached"] = "persistent"
+            return db_cached
 
         try:
             # Fetch the page
@@ -1813,10 +1872,11 @@ from itertools import combinations, permutations, product
                 "content": text,
                 "length": len(text),
                 "truncated": len(response.text) > max_length,
-                "cached": False,
             }
-            # Cache for this session
+            # Cache in both session and persistent storage
             self._fetch_cache[cache_key] = result
+            self._set_cached("fetch_url", cache_key, result)
+            result["cached"] = False
             return result
 
         except requests.exceptions.Timeout:

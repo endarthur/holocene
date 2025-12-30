@@ -308,6 +308,29 @@ MIGRATIONS: List[Dict] = [
             CREATE INDEX IF NOT EXISTS idx_laney_tasks_pending ON laney_tasks(status, priority) WHERE status = 'pending';
         """,
     },
+    {
+        'version': 13,
+        'name': 'add_api_cache_table',
+        'description': 'Persistent cache for API results (web search, URL fetches) - saves money and enables offline access',
+        'up': """
+            -- API cache - persistent storage for expensive/useful API results
+            CREATE TABLE IF NOT EXISTS api_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cache_type TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                response TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                hit_count INTEGER DEFAULT 0,
+                last_hit_at TEXT
+            );
+
+            -- Unique constraint on type+key for upserts
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_api_cache_key ON api_cache(cache_type, cache_key);
+            -- Index for cache stats/cleanup
+            CREATE INDEX IF NOT EXISTS idx_api_cache_created ON api_cache(created_at);
+            CREATE INDEX IF NOT EXISTS idx_api_cache_hits ON api_cache(hit_count DESC);
+        """,
+    },
 ]
 
 
