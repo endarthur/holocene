@@ -958,6 +958,123 @@ LANEY_TOOLS = [
             }
         }
     },
+    # Backlog - global ideas/tasks that persist across conversations
+    {
+        "type": "function",
+        "function": {
+            "name": "backlog_add",
+            "description": "Add an idea, task, or item to the global backlog. The backlog persists across all conversations - use it for project ideas, research topics, improvements to explore later, or anything worth remembering long-term.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short title for the item (required)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Detailed description or notes"
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["idea", "feature", "research", "bug", "improvement"],
+                        "description": "Category (default: idea)"
+                    },
+                    "priority": {
+                        "type": "integer",
+                        "description": "Priority 1-10, lower = more urgent (default: 5)"
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Comma-separated tags for organization"
+                    }
+                },
+                "required": ["title"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "backlog_list",
+            "description": "List items from the global backlog. Use this to see what ideas, tasks, or research topics are pending across all conversations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["open", "in_progress", "done", "archived", "all"],
+                        "description": "Filter by status (default: open)"
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["idea", "feature", "research", "bug", "improvement"],
+                        "description": "Filter by category (optional)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max items to return (default: 20)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "backlog_update",
+            "description": "Update a backlog item - change status, priority, add notes, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_id": {
+                        "type": "integer",
+                        "description": "ID of the backlog item to update"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["open", "in_progress", "done", "archived"],
+                        "description": "New status"
+                    },
+                    "priority": {
+                        "type": "integer",
+                        "description": "New priority (1-10)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Updated description (appends if starts with '+', otherwise replaces)"
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "New tags (comma-separated)"
+                    }
+                },
+                "required": ["item_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "backlog_search",
+            "description": "Search the backlog by keyword in title, description, or tags.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    },
+                    "include_done": {
+                        "type": "boolean",
+                        "description": "Include completed items (default: false)"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
 ]
 
 # Safe math namespace for calculator
@@ -1098,6 +1215,11 @@ class LaneyToolHandler:
             "export_links_csv": self.export_links_csv,
             "export_papers_csv": self.export_papers_csv,
             "generate_collection_report": self.generate_collection_report,
+            # Backlog - global ideas/tasks across conversations
+            "backlog_add": self.backlog_add,
+            "backlog_list": self.backlog_list,
+            "backlog_update": self.backlog_update,
+            "backlog_search": self.backlog_search,
         }
 
     @property
@@ -3438,3 +3560,211 @@ from itertools import combinations, permutations, product
 
         except Exception as e:
             return {"error": f"Failed to generate report: {str(e)}"}
+
+    # ===== Backlog Tools =====
+    # Global ideas/tasks that persist across all conversations
+
+    def backlog_add(self, title: str, description: str = None, category: str = "idea",
+                    priority: int = 5, tags: str = None) -> Dict[str, Any]:
+        """Add an item to the global backlog."""
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+
+            # Validate priority
+            priority = max(1, min(10, priority))
+
+            # Validate category
+            valid_categories = ["idea", "feature", "research", "bug", "improvement"]
+            if category not in valid_categories:
+                category = "idea"
+
+            cursor.execute("""
+                INSERT INTO backlog (title, description, category, priority, tags,
+                                     source_conversation_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (title, description, category, priority, tags,
+                  self.conversation_id, now, now))
+            self.conn.commit()
+
+            item_id = cursor.lastrowid
+
+            return {
+                "success": True,
+                "id": item_id,
+                "title": title,
+                "category": category,
+                "priority": priority,
+                "message": f"Added to backlog: '{title}' (#{item_id})"
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to add to backlog: {str(e)}"}
+
+    def backlog_list(self, status: str = "open", category: str = None,
+                     limit: int = 20) -> Dict[str, Any]:
+        """List items from the backlog."""
+        try:
+            cursor = self.conn.cursor()
+
+            # Build query
+            conditions = []
+            params = []
+
+            if status != "all":
+                conditions.append("status = ?")
+                params.append(status)
+
+            if category:
+                conditions.append("category = ?")
+                params.append(category)
+
+            where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+            cursor.execute(f"""
+                SELECT id, title, description, category, priority, status, tags,
+                       created_at, updated_at
+                FROM backlog
+                WHERE {where_clause}
+                ORDER BY priority ASC, updated_at DESC
+                LIMIT ?
+            """, params + [limit])
+
+            items = []
+            for row in cursor.fetchall():
+                items.append({
+                    "id": row[0],
+                    "title": row[1],
+                    "description": row[2][:200] if row[2] else None,
+                    "category": row[3],
+                    "priority": row[4],
+                    "status": row[5],
+                    "tags": row[6],
+                    "created_at": row[7],
+                    "updated_at": row[8]
+                })
+
+            # Get total count for this filter
+            cursor.execute(f"SELECT COUNT(*) FROM backlog WHERE {where_clause}", params)
+            total = cursor.fetchone()[0]
+
+            return {
+                "items": items,
+                "count": len(items),
+                "total": total,
+                "filter_status": status,
+                "filter_category": category
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to list backlog: {str(e)}"}
+
+    def backlog_update(self, item_id: int, status: str = None, priority: int = None,
+                       description: str = None, tags: str = None) -> Dict[str, Any]:
+        """Update a backlog item."""
+        try:
+            cursor = self.conn.cursor()
+
+            # Check item exists
+            cursor.execute("SELECT title, description, status FROM backlog WHERE id = ?", (item_id,))
+            row = cursor.fetchone()
+            if not row:
+                return {"error": f"Backlog item #{item_id} not found"}
+
+            current_title, current_desc, current_status = row
+            now = datetime.now().isoformat()
+
+            updates = ["updated_at = ?"]
+            params = [now]
+
+            if status:
+                valid_statuses = ["open", "in_progress", "done", "archived"]
+                if status not in valid_statuses:
+                    return {"error": f"Invalid status. Must be one of: {valid_statuses}"}
+                updates.append("status = ?")
+                params.append(status)
+
+                # Set completed_at if marking done
+                if status == "done" and current_status != "done":
+                    updates.append("completed_at = ?")
+                    params.append(now)
+
+            if priority is not None:
+                priority = max(1, min(10, priority))
+                updates.append("priority = ?")
+                params.append(priority)
+
+            if description is not None:
+                # Append if starts with '+', otherwise replace
+                if description.startswith('+'):
+                    new_desc = (current_desc or "") + "\n\n" + description[1:].strip()
+                else:
+                    new_desc = description
+                updates.append("description = ?")
+                params.append(new_desc)
+
+            if tags is not None:
+                updates.append("tags = ?")
+                params.append(tags)
+
+            params.append(item_id)
+
+            cursor.execute(f"""
+                UPDATE backlog
+                SET {", ".join(updates)}
+                WHERE id = ?
+            """, params)
+            self.conn.commit()
+
+            return {
+                "success": True,
+                "id": item_id,
+                "title": current_title,
+                "message": f"Updated backlog item #{item_id}"
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to update backlog: {str(e)}"}
+
+    def backlog_search(self, query: str, include_done: bool = False) -> Dict[str, Any]:
+        """Search the backlog by keyword."""
+        try:
+            cursor = self.conn.cursor()
+
+            search_term = f"%{query}%"
+
+            status_filter = "" if include_done else "AND status NOT IN ('done', 'archived')"
+
+            cursor.execute(f"""
+                SELECT id, title, description, category, priority, status, tags,
+                       created_at, updated_at
+                FROM backlog
+                WHERE (title LIKE ? OR description LIKE ? OR tags LIKE ?)
+                {status_filter}
+                ORDER BY priority ASC, updated_at DESC
+                LIMIT 20
+            """, (search_term, search_term, search_term))
+
+            items = []
+            for row in cursor.fetchall():
+                items.append({
+                    "id": row[0],
+                    "title": row[1],
+                    "description": row[2][:200] if row[2] else None,
+                    "category": row[3],
+                    "priority": row[4],
+                    "status": row[5],
+                    "tags": row[6],
+                    "created_at": row[7],
+                    "updated_at": row[8]
+                })
+
+            return {
+                "items": items,
+                "count": len(items),
+                "query": query,
+                "include_done": include_done
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to search backlog: {str(e)}"}

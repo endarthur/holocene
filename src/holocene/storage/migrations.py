@@ -407,6 +407,32 @@ MIGRATIONS: List[Dict] = [
             CREATE INDEX IF NOT EXISTS idx_email_msg_reply ON email_messages(in_reply_to);
         """,
     },
+    {
+        'version': 17,
+        'name': 'add_backlog',
+        'description': 'Global backlog/ideas list accessible across all Laney conversations',
+        'up': """
+            -- Backlog - persistent ideas/tasks that span conversations
+            CREATE TABLE IF NOT EXISTS backlog (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                category TEXT DEFAULT 'idea',  -- idea, feature, research, bug, improvement
+                priority INTEGER DEFAULT 5,  -- 1-10, lower = higher priority
+                status TEXT DEFAULT 'open',  -- open, in_progress, done, archived
+                tags TEXT,  -- comma-separated tags
+                source_conversation_id INTEGER,  -- which conversation spawned this
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+
+            -- Indexes for backlog queries
+            CREATE INDEX IF NOT EXISTS idx_backlog_status ON backlog(status);
+            CREATE INDEX IF NOT EXISTS idx_backlog_priority ON backlog(priority);
+            CREATE INDEX IF NOT EXISTS idx_backlog_category ON backlog(category);
+        """,
+    },
 ]
 
 
