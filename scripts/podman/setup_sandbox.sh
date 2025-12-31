@@ -17,6 +17,7 @@ CONTAINER_NAME="laney-sandbox"
 IMAGE_NAME="laney-sandbox"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKERFILE="$SCRIPT_DIR/Dockerfile.laney-sandbox"
+WORKSPACE_DIR="$HOME/.holocene/sandbox"  # Shared directory for file I/O
 
 # Colors
 RED='\033[0;31m'
@@ -44,6 +45,9 @@ build_image() {
 }
 
 start_container() {
+    # Ensure workspace directory exists
+    mkdir -p "$WORKSPACE_DIR"
+
     # Check if container exists
     if sudo podman container exists "$CONTAINER_NAME" 2>/dev/null; then
         if sudo podman ps -q -f "name=$CONTAINER_NAME" | grep -q .; then
@@ -57,9 +61,11 @@ start_container() {
         sudo podman run -d \
             --name "$CONTAINER_NAME" \
             --restart unless-stopped \
+            -v "$WORKSPACE_DIR:/workspace:Z" \
             "$IMAGE_NAME"
     fi
     info "Container is running"
+    info "Workspace: $WORKSPACE_DIR (mounted at /workspace in container)"
 }
 
 stop_container() {
