@@ -3103,15 +3103,32 @@ class LaneyToolHandler:
             if attachments:
                 msg.attach(alt_part)
 
-            # Process attachments from sandbox
+            # Process attachments from sandbox or documents directory
             attached_files = []
             sandbox_dir = Path.home() / ".holocene" / "sandbox"
+            documents_dir = Path.home() / ".holocene" / "documents"
             if attachments:
                 for file_path in attachments:
-                    # Resolve path relative to sandbox
-                    full_path = sandbox_dir / file_path.lstrip('/')
-                    if not full_path.exists():
-                        return {"error": f"Attachment not found: {file_path}"}
+                    # Try multiple locations: absolute path, sandbox, documents
+                    full_path = Path(file_path)
+                    if full_path.is_absolute():
+                        if not full_path.exists():
+                            return {"error": f"Attachment not found: {file_path}"}
+                    else:
+                        # Try sandbox first, then documents
+                        sandbox_path = sandbox_dir / file_path.lstrip('/')
+                        docs_path = documents_dir / file_path.lstrip('/')
+                        if sandbox_path.exists():
+                            full_path = sandbox_path
+                        elif docs_path.exists():
+                            full_path = docs_path
+                        else:
+                            # Try just the filename in documents
+                            docs_filename = documents_dir / Path(file_path).name
+                            if docs_filename.exists():
+                                full_path = docs_filename
+                            else:
+                                return {"error": f"Attachment not found: {file_path} (checked sandbox and documents)"}
 
                     # Determine MIME type
                     mime_type, _ = mimetypes.guess_type(str(full_path))
