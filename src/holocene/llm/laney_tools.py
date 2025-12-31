@@ -436,6 +436,27 @@ LANEY_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "attach_file",
+            "description": "Attach a file from the sandbox to send via Telegram or include in the response. Use after creating files with run_bash (plots, data exports, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to /workspace (e.g., 'plot.png', 'results/data.csv')"
+                    },
+                    "caption": {
+                        "type": "string",
+                        "description": "Optional caption/description for the file"
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
     # === Document Export ===
     {
         "type": "function",
@@ -799,7 +820,7 @@ LANEY_TOOLS = [
         "type": "function",
         "function": {
             "name": "send_email",
-            "description": "Send an email to someone. Can only send to whitelisted addresses. Use this when the user asks you to email someone.",
+            "description": "Send an email to someone. Can only send to whitelisted addresses. Supports file attachments from the sandbox.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -814,6 +835,11 @@ LANEY_TOOLS = [
                     "body": {
                         "type": "string",
                         "description": "Email body (markdown-style formatting supported)"
+                    },
+                    "attachments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of file paths from /workspace to attach (e.g., ['plot.png', 'data.csv'])"
                     }
                 },
                 "required": ["to", "subject", "body"]
@@ -1189,6 +1215,7 @@ class LaneyToolHandler:
             "note_delete": self.note_delete,
             # Code execution (sandbox)
             "run_bash": self.run_bash,
+            "attach_file": self.attach_file,
             # Document export
             "write_document": self.write_document,
             # Progress updates
@@ -1994,6 +2021,38 @@ class LaneyToolHandler:
                 "stdout": "",
                 "stderr": "",
             }
+
+    def attach_file(self, path: str, caption: Optional[str] = None) -> Dict[str, Any]:
+        """Attach a file from the sandbox to send via Telegram.
+
+        Args:
+            path: File path relative to /workspace
+            caption: Optional caption for the file
+
+        Returns:
+            Attachment status
+        """
+        sandbox_dir = Path.home() / ".holocene" / "sandbox"
+        full_path = sandbox_dir / path.lstrip('/')
+
+        if not full_path.exists():
+            return {
+                "success": False,
+                "error": f"File not found: {path}",
+                "hint": "Make sure the file exists in /workspace"
+            }
+
+        # Add to created_documents list for Telegram to pick up
+        self.created_documents.append(full_path)
+
+        return {
+            "success": True,
+            "path": str(full_path),
+            "filename": full_path.name,
+            "size_bytes": full_path.stat().st_size,
+            "caption": caption,
+            "message": f"File '{full_path.name}' attached and will be sent with the response"
+        }
 
     # === Document Export ===
 
@@ -2988,20 +3047,24 @@ class LaneyToolHandler:
 
         return False
 
-    def send_email(self, to: str, subject: str, body: str) -> Dict[str, Any]:
+    def send_email(self, to: str, subject: str, body: str, attachments: Optional[List[str]] = None) -> Dict[str, Any]:
         """Send an email to someone.
 
         Args:
             to: Recipient email address (must be whitelisted)
             subject: Email subject
             body: Email body
+            attachments: Optional list of file paths relative to /workspace
 
         Returns:
             Send status
         """
         import smtplib
+        import mimetypes
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
 
         if not self.email_config:
             return {"error": "Email not configured. Cannot send emails."}
@@ -3013,21 +3076,57 @@ class LaneyToolHandler:
             }
 
         try:
-            # Create message
-            msg = MIMEMultipart('alternative')
+            # Use 'mixed' for attachments, 'alternative' for text only
+            if attachments:
+                msg = MIMEMultipart('mixed')
+                # Create alternative part for text/html
+                alt_part = MIMEMultipart('alternative')
+            else:
+                msg = MIMEMultipart('alternative')
+                alt_part = msg
+
             msg['From'] = self.email_config.address
             msg['To'] = to
             msg['Subject'] = subject
 
             # Plain text
             text_part = MIMEText(body, 'plain', 'utf-8')
-            msg.attach(text_part)
+            alt_part.attach(text_part)
 
             # Basic HTML (convert markdown-ish)
             html_body = body.replace('\n', '<br>\n')
             html_body = f"<html><body>{html_body}<br><br>---<br><em>Laney - {self.email_config.address}</em></body></html>"
             html_part = MIMEText(html_body, 'html', 'utf-8')
-            msg.attach(html_part)
+            alt_part.attach(html_part)
+
+            # If mixed, attach the alternative part
+            if attachments:
+                msg.attach(alt_part)
+
+            # Process attachments from sandbox
+            attached_files = []
+            sandbox_dir = Path.home() / ".holocene" / "sandbox"
+            if attachments:
+                for file_path in attachments:
+                    # Resolve path relative to sandbox
+                    full_path = sandbox_dir / file_path.lstrip('/')
+                    if not full_path.exists():
+                        return {"error": f"Attachment not found: {file_path}"}
+
+                    # Determine MIME type
+                    mime_type, _ = mimetypes.guess_type(str(full_path))
+                    if mime_type is None:
+                        mime_type = 'application/octet-stream'
+                    main_type, sub_type = mime_type.split('/', 1)
+
+                    # Read and attach file
+                    with open(full_path, 'rb') as f:
+                        part = MIMEBase(main_type, sub_type)
+                        part.set_payload(f.read())
+                    encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', 'attachment', filename=full_path.name)
+                    msg.attach(part)
+                    attached_files.append(full_path.name)
 
             # Send
             with smtplib.SMTP(self.email_config.smtp_server, self.email_config.smtp_port) as server:
@@ -3035,12 +3134,15 @@ class LaneyToolHandler:
                 server.login(self.email_config.username, self.email_config.password)
                 server.send_message(msg)
 
-            return {
+            result = {
                 "success": True,
                 "to": to,
                 "subject": subject,
                 "message": f"Email sent to {to}"
             }
+            if attached_files:
+                result["attachments"] = attached_files
+            return result
 
         except Exception as e:
             return {"error": f"Failed to send email: {str(e)}"}
