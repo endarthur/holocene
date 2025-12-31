@@ -492,75 +492,74 @@ This is for a daily email digest - it should be the most interesting part."""
         """Format the digest as a nice email body.
 
         Structure designed to avoid Gmail clipping - interesting stuff first.
+        Uses double newlines between sections for proper paragraph breaks.
         """
-        lines = []
+        sections = []
 
         # Greeting + quick stats (compact header)
         stats = digest['stats']
-        lines.append(f"Morning, Arthur. _{stats['books']} books · {stats['papers']} papers · {stats['links']} links_\n")
+        sections.append(f"Morning, Arthur. _{stats['books']} books · {stats['papers']} papers · {stats['links']} links_")
 
         # The Digression - THE SOUL OF THE EMAIL (put it first!)
         if digest.get('digression'):
             dig = digest['digression']
-            lines.append(f"**On {dig['topic']}:**")
-            lines.append(dig['content'])
-            lines.append("")
+            sections.append(f"**On {dig['topic']}:**\n{dig['content']}")
 
         # Brief commentary on today's activity
         if digest.get('commentary'):
-            lines.append(f"_{digest['commentary']}_\n")
+            sections.append(f"_{digest['commentary']}_")
 
-        # Rediscovery - brief, inline
+        # Rediscovery - on one line
         if digest.get('rediscovery'):
             rd = digest['rediscovery']
-            lines.append("**From the archives:** ", )
             if rd['type'] == 'book':
                 author = rd.get('author') or 'Unknown'
-                lines.append(f"*{rd['title']}* by {author}")
+                sections.append(f"**From the archives:** *{rd['title']}* by {author}")
             elif rd['type'] == 'paper':
-                lines.append(f"*{rd['title']}*")
+                sections.append(f"**From the archives:** *{rd['title']}*")
             elif rd['type'] == 'link':
-                lines.append(f"[{rd['title']}]({rd['url']})")
-            lines.append("")
+                sections.append(f"**From the archives:** [{rd['title']}]({rd['url']})")
 
         # Recent additions - compact
         has_recent = (digest['recent_books'] or digest['recent_papers'] or digest['recent_links'])
 
         if has_recent:
-            lines.append("**Today:**")
-            items = []
+            items = ["**Today:**"]
 
             if digest['recent_books']:
                 for book in digest['recent_books'][:3]:
-                    items.append(f"📚 {book['title']}")
+                    items.append(f"- 📚 {book['title']}")
 
             if digest['recent_papers']:
                 for paper in digest['recent_papers'][:3]:
-                    items.append(f"📄 {paper['title'][:40]}...")
+                    items.append(f"- 📄 {paper['title'][:40]}...")
 
             if digest['recent_links']:
                 for link in digest['recent_links'][:5]:
                     title = link['title'] or link['url'][:30]
-                    items.append(f"🔗 [{title}]({link['url']})")
+                    items.append(f"- 🔗 [{title}]({link['url']})")
 
-            for item in items:
-                lines.append(f"- {item}")
-            lines.append("")
+            sections.append("\n".join(items))
 
         # Tasks - single line each
+        task_lines = []
         if digest['completed_tasks']:
             completed_list = ", ".join([t['title'] for t in digest['completed_tasks'][:3]])
-            lines.append(f"✓ Done: {completed_list}")
+            task_lines.append(f"✓ Done: {completed_list}")
 
         if digest['pending_tasks']:
             pending_count = len(digest['pending_tasks'])
             if pending_count > 0:
-                lines.append(f"⏳ {pending_count} tasks waiting")
+                task_lines.append(f"⏳ {pending_count} tasks waiting")
+
+        if task_lines:
+            sections.append("\n".join(task_lines))
 
         # Sign off
-        lines.append("\n—Laney")
+        sections.append("—Laney")
 
-        return "\n".join(lines)
+        # Join sections with double newlines for paragraph breaks
+        return "\n\n".join(sections)
 
     def _send_email(self, to_addr: str, subject: str, body: str):
         """Send an email via SMTP."""
