@@ -1938,6 +1938,23 @@ This link will grant you access to:
             )
             return
 
+        # Check for "share format": Title + URL (e.g., Google Discover shares)
+        share_info = self._detect_share_format(text)
+        if share_info:
+            title = share_info['title']
+            url = share_info['url']
+            processing_msg = await update.message.reply_text(
+                f"🔗 Shared link detected\n*{title[:50]}{'...' if len(title) > 50 else ''}*\n`{url}`\n\n⏳ Processing...",
+                parse_mode='Markdown'
+            )
+            # Pass title hint to the link processor
+            self.run_in_background(
+                lambda: self._add_link_from_url(url, update.effective_chat.id, processing_msg, title_hint=title),
+                callback=lambda result: self.logger.info(f"Shared link added: {result}"),
+                error_handler=lambda e: self.logger.error(f"Failed to add shared link: {e}")
+            )
+            return
+
         # Default: Send everything else to Laney
         await self._ask_laney(text, update)
 
@@ -2049,6 +2066,42 @@ This link will grant you access to:
         text = text.strip()
         url_pattern = r'^https?://[^\s]+$'
         return bool(re.match(url_pattern, text))
+
+    def _detect_share_format(self, text: str) -> Optional[Dict[str, str]]:
+        """Detect 'share format' messages: title followed by URL.
+
+        Common formats:
+        - Google Discover: "Title | Source https://share.google/..."
+        - Generic share: "Title https://..."
+        - With newlines: "Title\nhttps://..."
+
+        Args:
+            text: Input text
+
+        Returns:
+            Dict with 'title' and 'url' if detected, None otherwise
+        """
+        text = text.strip()
+
+        # Pattern: anything + whitespace/newline + URL at end
+        # The URL must be at the very end of the message
+        pattern = r'^(.+?)[\s\n]+(https?://[^\s]+)$'
+        match = re.match(pattern, text, re.DOTALL)
+
+        if match:
+            title = match.group(1).strip()
+            url = match.group(2).strip()
+
+            # Clean up title - remove trailing pipe and source if present
+            # e.g., "Article Title | Hackaday" -> "Article Title | Hackaday" (keep it)
+            # But remove common junk suffixes
+            title = re.sub(r'\s*[-–—]\s*$', '', title)  # Remove trailing dashes
+
+            # Must have some meaningful title (not just punctuation)
+            if len(title) > 3 and not title.startswith('http'):
+                return {'title': title, 'url': url}
+
+        return None
 
     async def _ask_laney(self, query: str, update):
         """Send a query to Laney and reply with response.
@@ -2562,13 +2615,14 @@ You are in a Telegram group chat with multiple participants. Messages are prefix
             self._send_notification(f"❌ Failed to add arXiv paper: {str(e)}", chat_id)
             raise
 
-    def _add_link_from_url(self, url: str, chat_id: int, processing_msg=None):
+    def _add_link_from_url(self, url: str, chat_id: int, processing_msg=None, title_hint: str = None):
         """Add link from URL (runs in background).
 
         Args:
             url: URL string
             chat_id: Telegram chat ID for notifications
             processing_msg: Optional message to edit with results (instead of sending new)
+            title_hint: Optional title from share format (e.g., Google Discover)
         """
         try:
             db = self.core.db
@@ -2586,10 +2640,11 @@ You are in a Telegram group chat with multiple participants. Messages are prefix
                 return "already_exists"
 
             # Add link (unwrapping happens inside insert_link)
+            # Use title_hint if provided (from share format detection)
             link_id = db.insert_link(
                 url=url,
                 source="telegram",
-                title=None,  # Will be fetched later
+                title=title_hint,  # Use hint from share format, or None to fetch later
                 notes="Added via Telegram bot"
             )
 
@@ -2631,6 +2686,10 @@ You are in a Telegram group chat with multiple participants. Messages are prefix
 
             # Build notification message
             msg = f"✅ *Link Added*\n\n"
+
+            # Show title if we have one
+            if title_hint:
+                msg += f"*{title_hint}*\n\n"
 
             if actual_url != url:
                 # URL was unwrapped
