@@ -2,12 +2,14 @@
 
 This plugin:
 - Sends daily digest emails to Arthur with collection updates
-- Tracks interesting patterns and connections
-- Provides proactive insights without being asked
+- Uses LLM to generate thoughtful commentary (not just data dumps)
+- Surfaces forgotten items from the collection
+- Spots patterns and connections
 - Only emails Arthur by default (endarthur@gmail.com)
 """
 
 import json
+import random
 import smtplib
 import threading
 from datetime import datetime, timedelta
@@ -27,7 +29,7 @@ class ProactiveLaneyPlugin(Plugin):
     def get_metadata(self):
         return {
             "name": "proactive_laney",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "description": "Daily digests and proactive insights from Laney",
             "runs_on": ["rei"],
             "requires": []
@@ -112,10 +114,7 @@ class ProactiveLaneyPlugin(Plugin):
         try:
             digest = self._generate_digest()
 
-            if not digest['has_content']:
-                self.logger.info("No content for digest - skipping")
-                return
-
+            # Always send something, even if quiet day
             # Format as email
             subject = f"Laney's Daily Digest - {datetime.now().strftime('%b %d, %Y')}"
             body = self._format_digest_email(digest)
@@ -149,7 +148,8 @@ class ProactiveLaneyPlugin(Plugin):
             'recent_links': [],
             'pending_tasks': [],
             'completed_tasks': [],
-            'insights': []
+            'rediscovery': None,
+            'commentary': None,
         }
 
         try:
@@ -183,7 +183,7 @@ class ProactiveLaneyPlugin(Plugin):
                 for r in cursor.fetchall()
             ]
 
-            # Recent papers (last 24h) - note: papers uses added_at, not created_at
+            # Recent papers (last 24h)
             cursor = db.conn.execute("""
                 SELECT title, authors, added_at
                 FROM papers
@@ -235,7 +235,7 @@ class ProactiveLaneyPlugin(Plugin):
                 for r in cursor.fetchall()
             ]
 
-            # Check if there's any content worth sending
+            # Check if there's any content
             digest['has_content'] = (
                 len(digest['recent_books']) > 0 or
                 len(digest['recent_papers']) > 0 or
@@ -244,95 +244,227 @@ class ProactiveLaneyPlugin(Plugin):
                 len(digest['completed_tasks']) > 0
             )
 
-            # Add some insights if we have data
-            if digest['has_content']:
-                insights = self._generate_insights(digest)
-                digest['insights'] = insights
+            # Get a rediscovery - something from more than 2 weeks ago
+            digest['rediscovery'] = self._find_rediscovery(db)
+
+            # Generate LLM commentary
+            digest['commentary'] = self._generate_llm_commentary(digest)
 
         except Exception as e:
             self.logger.error(f"Error generating digest: {e}", exc_info=True)
 
         return digest
 
-    def _generate_insights(self, digest: Dict[str, Any]) -> List[str]:
-        """Generate simple insights from the digest data."""
-        insights = []
+    def _find_rediscovery(self, db) -> Optional[Dict[str, Any]]:
+        """Find an interesting item from the collection to resurface."""
+        two_weeks_ago = (datetime.now() - timedelta(days=14)).isoformat()
 
-        # Link sources breakdown
-        sources = {}
-        for link in digest['recent_links']:
-            source = link.get('source', 'unknown')
-            sources[source] = sources.get(source, 0) + 1
+        # Randomly choose between books, papers, or links
+        item_type = random.choice(['book', 'paper', 'link'])
 
-        if sources:
-            top_source = max(sources.items(), key=lambda x: x[1])
-            if top_source[1] > 1:
-                insights.append(f"Most active link source today: {top_source[0]} ({top_source[1]} links)")
+        try:
+            if item_type == 'book':
+                cursor = db.conn.execute("""
+                    SELECT title, author, subjects, summary
+                    FROM books
+                    WHERE created_at < ?
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                """, (two_weeks_ago,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'type': 'book',
+                        'title': row[0],
+                        'author': row[1],
+                        'subjects': row[2],
+                        'summary': row[3][:200] if row[3] else None
+                    }
 
-        # Task progress
-        pending = len(digest['pending_tasks'])
-        completed = len(digest['completed_tasks'])
-        if completed > 0:
-            insights.append(f"Completed {completed} task(s) in the last 24 hours")
-        if pending > 5:
-            insights.append(f"You have {pending} pending tasks in the queue")
+            elif item_type == 'paper':
+                cursor = db.conn.execute("""
+                    SELECT title, authors, abstract, journal
+                    FROM papers
+                    WHERE added_at < ?
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                """, (two_weeks_ago,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'type': 'paper',
+                        'title': row[0],
+                        'authors': row[1],
+                        'abstract': row[2][:200] if row[2] else None,
+                        'journal': row[3]
+                    }
 
-        return insights
+            else:  # link
+                cursor = db.conn.execute("""
+                    SELECT url, title, source
+                    FROM links
+                    WHERE created_at < ? AND title IS NOT NULL AND title != ''
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                """, (two_weeks_ago,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'type': 'link',
+                        'url': row[0],
+                        'title': row[1],
+                        'source': row[2]
+                    }
+        except Exception as e:
+            self.logger.warning(f"Error finding rediscovery: {e}")
+
+        return None
+
+    def _generate_llm_commentary(self, digest: Dict[str, Any]) -> Optional[str]:
+        """Use LLM to generate thoughtful commentary on the digest."""
+        try:
+            from ..llm.nanogpt import NanoGPTClient
+
+            config = self.core.config
+            if not config.llm.api_key:
+                return None
+
+            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+
+            # Build context for LLM
+            context_parts = []
+
+            # Recent activity
+            if digest['recent_links']:
+                links_summary = ", ".join([l['title'] or l['url'][:30] for l in digest['recent_links'][:5]])
+                context_parts.append(f"New links saved: {links_summary}")
+
+            if digest['recent_books']:
+                books_summary = ", ".join([b['title'] for b in digest['recent_books'][:3]])
+                context_parts.append(f"New books: {books_summary}")
+
+            if digest['recent_papers']:
+                papers_summary = ", ".join([p['title'][:50] for p in digest['recent_papers'][:3]])
+                context_parts.append(f"New papers: {papers_summary}")
+
+            if digest['completed_tasks']:
+                tasks_summary = ", ".join([t['title'] for t in digest['completed_tasks'][:3]])
+                context_parts.append(f"Completed tasks: {tasks_summary}")
+
+            if digest['rediscovery']:
+                rd = digest['rediscovery']
+                context_parts.append(f"Rediscovery ({rd['type']}): {rd.get('title', 'untitled')}")
+
+            # Collection stats
+            stats = digest['stats']
+            context_parts.append(f"Collection: {stats['books']} books, {stats['papers']} papers, {stats['links']} links")
+
+            context = "\n".join(context_parts) if context_parts else "Quiet day - no new items."
+
+            prompt = f"""You are Laney, a pattern-recognition AI assistant. Write a brief, personalized opening for a daily digest email to Arthur (a geoscientist/maker who works on GCU projects).
+
+Today's data:
+{context}
+
+Write 2-3 sentences that:
+- Sound like a thoughtful collaborator, not a robot
+- Notice something interesting or make a connection if possible
+- Have personality - slightly intense about patterns, direct, no fluff
+- If it's a quiet day, that's fine - maybe suggest looking at the rediscovery or mention something useful
+
+Keep it SHORT (2-3 sentences max). No greeting (that comes separately). No bullet points. Just the observation/thought."""
+
+            response = client.simple_prompt(
+                prompt=prompt,
+                model=config.llm.primary_cheap or config.llm.primary,
+                temperature=0.7,
+                max_tokens=150
+            )
+
+            return response.strip() if response else None
+
+        except Exception as e:
+            self.logger.warning(f"Error generating LLM commentary: {e}")
+            return None
 
     def _format_digest_email(self, digest: Dict[str, Any]) -> str:
         """Format the digest as a nice email body."""
         lines = []
-        lines.append("Good morning, Arthur!\n")
-        lines.append("Here's your daily collection update:\n")
 
-        # Stats summary
+        # Greeting
+        lines.append("Morning, Arthur.\n")
+
+        # LLM Commentary (the soul of the digest)
+        if digest.get('commentary'):
+            lines.append(digest['commentary'])
+            lines.append("")
+
+        # Quick stats line
         stats = digest['stats']
-        lines.append(f"**Collection:** {stats['books']} books, {stats['papers']} papers, "
-                    f"{stats['links']} links, {stats['favorites']} ML favorites\n")
+        lines.append(f"*Collection: {stats['books']} books · {stats['papers']} papers · {stats['links']} links*\n")
 
-        # Recent additions
+        # Rediscovery section - something you might have forgotten
+        if digest.get('rediscovery'):
+            rd = digest['rediscovery']
+            lines.append("---")
+            lines.append("\n## 🔮 From the Archives")
+            if rd['type'] == 'book':
+                author = rd.get('author') or 'Unknown'
+                lines.append(f"**{rd['title']}** by {author}")
+                if rd.get('summary'):
+                    lines.append(f"_{rd['summary']}..._")
+            elif rd['type'] == 'paper':
+                lines.append(f"**{rd['title']}**")
+                if rd.get('authors'):
+                    authors = rd['authors'][:50] + "..." if len(rd['authors']) > 50 else rd['authors']
+                    lines.append(f"_{authors}_")
+            elif rd['type'] == 'link':
+                lines.append(f"[{rd['title']}]({rd['url']})")
+            lines.append("")
+
+        # Recent additions (only if there are any)
+        has_recent = (digest['recent_books'] or digest['recent_papers'] or digest['recent_links'])
+
+        if has_recent:
+            lines.append("---")
+            lines.append("\n## Today's Additions")
+
         if digest['recent_books']:
-            lines.append("\n## New Books")
-            for book in digest['recent_books']:
+            lines.append("\n**Books:**")
+            for book in digest['recent_books'][:5]:
                 author = book['author'] or 'Unknown'
-                lines.append(f"- **{book['title']}** by {author}")
+                lines.append(f"- {book['title']} ({author})")
 
         if digest['recent_papers']:
-            lines.append("\n## New Papers")
-            for paper in digest['recent_papers']:
-                authors = paper['authors'] or 'Unknown'
-                if len(authors) > 50:
-                    authors = authors[:47] + "..."
-                lines.append(f"- **{paper['title']}** ({authors})")
+            lines.append("\n**Papers:**")
+            for paper in digest['recent_papers'][:5]:
+                lines.append(f"- {paper['title']}")
 
         if digest['recent_links']:
-            lines.append("\n## New Links")
-            for link in digest['recent_links'][:10]:  # Limit to 10
-                title = link['title'] or link['url'][:50]
-                source = link['source'] or 'unknown'
-                lines.append(f"- [{title}]({link['url']}) (via {source})")
+            lines.append("\n**Links:**")
+            for link in digest['recent_links'][:8]:
+                title = link['title'] or link['url'][:40]
+                source = link['source'] or 'saved'
+                lines.append(f"- [{title}]({link['url']}) _{source}_")
 
-        # Tasks
-        if digest['completed_tasks']:
-            lines.append("\n## Completed Tasks")
-            for task in digest['completed_tasks']:
-                lines.append(f"- {task['title']} ({task['type']})")
+        # Tasks (condensed)
+        if digest['completed_tasks'] or digest['pending_tasks']:
+            lines.append("\n---")
+            lines.append("\n## Tasks")
 
-        if digest['pending_tasks']:
-            lines.append("\n## Pending Tasks")
-            for task in digest['pending_tasks'][:5]:
-                priority = "!" * (6 - task['priority']) if task['priority'] <= 5 else ""
-                lines.append(f"- {priority} {task['title']} ({task['type']})")
+            if digest['completed_tasks']:
+                completed_list = ", ".join([t['title'] for t in digest['completed_tasks'][:3]])
+                lines.append(f"✓ Completed: {completed_list}")
 
-        # Insights
-        if digest['insights']:
-            lines.append("\n## Insights")
-            for insight in digest['insights']:
-                lines.append(f"- {insight}")
+            if digest['pending_tasks']:
+                pending_count = len(digest['pending_tasks'])
+                if pending_count > 0:
+                    top_task = digest['pending_tasks'][0]['title']
+                    lines.append(f"⏳ {pending_count} pending (next: {top_task})")
 
+        # Sign off
         lines.append("\n---")
-        lines.append("*Laney - your pattern-recognition collaborator*")
-        lines.append("*laney@gentropic.org*")
+        lines.append("*—Laney*")
 
         return "\n".join(lines)
 
@@ -369,22 +501,36 @@ class ProactiveLaneyPlugin(Plugin):
         html = text
 
         # Headers
-        html = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+        html = re.sub(r'^## (.+)$', r'<h2 style="margin-top: 1em; margin-bottom: 0.5em; color: #333;">\1</h2>', html, flags=re.MULTILINE)
         html = re.sub(r'^# (.+)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
+
+        # Horizontal rules
+        html = re.sub(r'^---$', r'<hr style="border: none; border-top: 1px solid #ddd; margin: 1em 0;">', html, flags=re.MULTILINE)
 
         # Bold
         html = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', html)
 
+        # Italic (single asterisks and underscores)
+        html = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'<em>\1</em>', html)
+        html = re.sub(r'_([^_]+)_', r'<em style="color: #666;">\1</em>', html)
+
         # Links
-        html = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', html)
+        html = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2" style="color: #0066cc;">\1</a>', html)
 
         # List items
-        html = re.sub(r'^- (.+)$', r'<li>\1</li>', html, flags=re.MULTILINE)
+        html = re.sub(r'^- (.+)$', r'<li style="margin: 0.3em 0;">\1</li>', html, flags=re.MULTILINE)
 
-        # Line breaks
-        html = html.replace('\n', '<br>\n')
+        # Wrap consecutive list items in ul
+        html = re.sub(r'(<li[^>]*>.*?</li>\n?)+', lambda m: f'<ul style="margin: 0.5em 0; padding-left: 1.5em;">{m.group(0)}</ul>', html)
 
-        return f"<html><body style='font-family: sans-serif;'>{html}</body></html>"
+        # Line breaks (but not after block elements)
+        html = re.sub(r'(?<!>)\n(?!<)', '<br>\n', html)
+
+        return f"""<html>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333; line-height: 1.5;">
+{html}
+</body>
+</html>"""
 
     def send_immediate_digest(self) -> bool:
         """Send digest immediately (for testing or manual trigger)."""
