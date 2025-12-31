@@ -265,7 +265,7 @@ class ProactiveLaneyPlugin(Plugin):
         try:
             if item_type == 'book':
                 cursor = db.conn.execute("""
-                    SELECT title, author, subjects, summary
+                    SELECT title, author, subjects, enriched_summary
                     FROM books
                     WHERE created_at < ?
                     ORDER BY RANDOM()
@@ -378,7 +378,6 @@ Keep it SHORT (2-3 sentences max). No greeting (that comes separately). No bulle
                 prompt=prompt,
                 model=config.llm.primary_cheap or config.llm.primary,
                 temperature=0.7,
-                max_tokens=150
             )
 
             return response.strip() if response else None
