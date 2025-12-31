@@ -183,12 +183,12 @@ class ProactiveLaneyPlugin(Plugin):
                 for r in cursor.fetchall()
             ]
 
-            # Recent papers (last 24h)
+            # Recent papers (last 24h) - note: papers uses added_at, not created_at
             cursor = db.conn.execute("""
-                SELECT title, authors, created_at
+                SELECT title, authors, added_at
                 FROM papers
-                WHERE created_at > ?
-                ORDER BY created_at DESC
+                WHERE added_at > ?
+                ORDER BY added_at DESC
                 LIMIT 10
             """, (yesterday,))
             digest['recent_papers'] = [
