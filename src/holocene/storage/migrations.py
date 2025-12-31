@@ -368,6 +368,45 @@ MIGRATIONS: List[Dict] = [
             CREATE INDEX IF NOT EXISTS idx_email_whitelist_active ON email_whitelist(is_active, address);
         """,
     },
+    {
+        'version': 16,
+        'name': 'add_email_threads',
+        'description': 'Email conversation threading for Laney email handler',
+        'up': """
+            -- Email threads - groups related messages together
+            CREATE TABLE IF NOT EXISTS email_threads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject_normalized TEXT NOT NULL,  -- Subject without Re:/Fwd: prefixes
+                participants TEXT NOT NULL,  -- JSON array of email addresses
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                message_count INTEGER DEFAULT 0
+            );
+
+            -- Email messages - individual messages within threads
+            CREATE TABLE IF NOT EXISTS email_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id INTEGER NOT NULL,
+                message_id TEXT,  -- RFC 5322 Message-ID header
+                in_reply_to TEXT,  -- In-Reply-To header
+                references_header TEXT,  -- References header
+                sender TEXT NOT NULL,
+                recipient TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                body_preview TEXT,  -- First 500 chars for context
+                direction TEXT NOT NULL,  -- 'inbound' or 'outbound'
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (thread_id) REFERENCES email_threads(id) ON DELETE CASCADE
+            );
+
+            -- Indexes for efficient thread lookups
+            CREATE INDEX IF NOT EXISTS idx_email_threads_updated ON email_threads(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_email_threads_subject ON email_threads(subject_normalized);
+            CREATE INDEX IF NOT EXISTS idx_email_msg_thread ON email_messages(thread_id);
+            CREATE INDEX IF NOT EXISTS idx_email_msg_id ON email_messages(message_id);
+            CREATE INDEX IF NOT EXISTS idx_email_msg_reply ON email_messages(in_reply_to);
+        """,
+    },
 ]
 
 

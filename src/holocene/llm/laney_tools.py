@@ -3,6 +3,8 @@
 Provides tools for searching and querying the Holocene knowledge base.
 """
 
+import csv
+import io
 import json
 import math
 import re
@@ -863,6 +865,99 @@ LANEY_TOOLS = [
             }
         }
     },
+    # === Export Tools ===
+    {
+        "type": "function",
+        "function": {
+            "name": "export_books_csv",
+            "description": "Export the book collection to a CSV file. Returns the file path for attachment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional search query to filter books"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum books to export (default: all)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_links_csv",
+            "description": "Export saved links to a CSV file. Returns the file path for attachment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional search query to filter links"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum links to export (default: 500)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "export_papers_csv",
+            "description": "Export academic papers to a CSV file. Returns the file path for attachment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional search query to filter papers"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum papers to export (default: all)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_collection_report",
+            "description": "Generate a markdown report summarizing the collection (stats, recent additions, patterns). Returns file path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_books": {
+                        "type": "boolean",
+                        "description": "Include books section (default: true)"
+                    },
+                    "include_papers": {
+                        "type": "boolean",
+                        "description": "Include papers section (default: true)"
+                    },
+                    "include_links": {
+                        "type": "boolean",
+                        "description": "Include links section (default: true)"
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Include items from last N days (default: 30)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
 ]
 
 # Safe math namespace for calculator
@@ -998,6 +1093,11 @@ class LaneyToolHandler:
             "email_whitelist_add": self.email_whitelist_add,
             "email_whitelist_remove": self.email_whitelist_remove,
             "email_whitelist_list": self.email_whitelist_list,
+            # Exports
+            "export_books_csv": self.export_books_csv,
+            "export_links_csv": self.export_links_csv,
+            "export_papers_csv": self.export_papers_csv,
+            "generate_collection_report": self.generate_collection_report,
         }
 
     @property
@@ -2966,3 +3066,375 @@ from itertools import combinations, permutations, product
 
         except Exception as e:
             return {"error": f"Failed to list whitelist: {str(e)}"}
+
+    # === Export Tools ===
+
+    def export_books_csv(self, query: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
+        """Export books to CSV file.
+
+        Args:
+            query: Optional search filter
+            limit: Max books to export
+
+        Returns:
+            File path and count
+        """
+        try:
+            cursor = self.conn.cursor()
+
+            if query:
+                cursor.execute("""
+                    SELECT id, title, authors, isbn, publication_year, publisher,
+                           dewey_number, cutter_number, call_number, subjects,
+                           summary, added_at
+                    FROM books
+                    WHERE title LIKE ? OR authors LIKE ? OR subjects LIKE ?
+                    ORDER BY title
+                """, (f"%{query}%", f"%{query}%", f"%{query}%"))
+            else:
+                cursor.execute("""
+                    SELECT id, title, authors, isbn, publication_year, publisher,
+                           dewey_number, cutter_number, call_number, subjects,
+                           summary, added_at
+                    FROM books
+                    ORDER BY title
+                """)
+
+            rows = cursor.fetchall()
+            if limit:
+                rows = rows[:limit]
+
+            # Generate CSV
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(['ID', 'Title', 'Authors', 'ISBN', 'Year', 'Publisher',
+                           'Dewey', 'Cutter', 'Call Number', 'Subjects', 'Summary', 'Added'])
+
+            for row in rows:
+                writer.writerow(row)
+
+            # Save to file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"books_export_{timestamp}.csv"
+            filepath = self.documents_dir / filename
+
+            with open(filepath, 'w', encoding='utf-8', newline='') as f:
+                f.write(output.getvalue())
+
+            self.created_documents.append(filepath)
+
+            return {
+                "success": True,
+                "file_path": str(filepath),
+                "filename": filename,
+                "count": len(rows),
+                "message": f"Exported {len(rows)} books to {filename}"
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to export books: {str(e)}"}
+
+    def export_links_csv(self, query: Optional[str] = None, limit: int = 500) -> Dict[str, Any]:
+        """Export links to CSV file.
+
+        Args:
+            query: Optional search filter
+            limit: Max links to export (default 500)
+
+        Returns:
+            File path and count
+        """
+        try:
+            cursor = self.conn.cursor()
+
+            if query:
+                cursor.execute("""
+                    SELECT id, url, title, source, trust_tier, created_at,
+                           ia_url, last_checked, status_code
+                    FROM links
+                    WHERE url LIKE ? OR title LIKE ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (f"%{query}%", f"%{query}%", limit))
+            else:
+                cursor.execute("""
+                    SELECT id, url, title, source, trust_tier, created_at,
+                           ia_url, last_checked, status_code
+                    FROM links
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (limit,))
+
+            rows = cursor.fetchall()
+
+            # Generate CSV
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(['ID', 'URL', 'Title', 'Source', 'Trust Tier', 'Created',
+                           'Archive URL', 'Last Checked', 'Status'])
+
+            for row in rows:
+                writer.writerow(row)
+
+            # Save to file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"links_export_{timestamp}.csv"
+            filepath = self.documents_dir / filename
+
+            with open(filepath, 'w', encoding='utf-8', newline='') as f:
+                f.write(output.getvalue())
+
+            self.created_documents.append(filepath)
+
+            return {
+                "success": True,
+                "file_path": str(filepath),
+                "filename": filename,
+                "count": len(rows),
+                "message": f"Exported {len(rows)} links to {filename}"
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to export links: {str(e)}"}
+
+    def export_papers_csv(self, query: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
+        """Export papers to CSV file.
+
+        Args:
+            query: Optional search filter
+            limit: Max papers to export
+
+        Returns:
+            File path and count
+        """
+        try:
+            cursor = self.conn.cursor()
+
+            if query:
+                cursor.execute("""
+                    SELECT id, title, authors, doi, arxiv_id, publication_date,
+                           abstract, url, added_at
+                    FROM papers
+                    WHERE title LIKE ? OR authors LIKE ? OR abstract LIKE ?
+                    ORDER BY added_at DESC
+                """, (f"%{query}%", f"%{query}%", f"%{query}%"))
+            else:
+                cursor.execute("""
+                    SELECT id, title, authors, doi, arxiv_id, publication_date,
+                           abstract, url, added_at
+                    FROM papers
+                    ORDER BY added_at DESC
+                """)
+
+            rows = cursor.fetchall()
+            if limit:
+                rows = rows[:limit]
+
+            # Generate CSV
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(['ID', 'Title', 'Authors', 'DOI', 'arXiv ID', 'Published',
+                           'Abstract', 'URL', 'Added'])
+
+            for row in rows:
+                writer.writerow(row)
+
+            # Save to file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"papers_export_{timestamp}.csv"
+            filepath = self.documents_dir / filename
+
+            with open(filepath, 'w', encoding='utf-8', newline='') as f:
+                f.write(output.getvalue())
+
+            self.created_documents.append(filepath)
+
+            return {
+                "success": True,
+                "file_path": str(filepath),
+                "filename": filename,
+                "count": len(rows),
+                "message": f"Exported {len(rows)} papers to {filename}"
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to export papers: {str(e)}"}
+
+    def generate_collection_report(
+        self,
+        include_books: bool = True,
+        include_papers: bool = True,
+        include_links: bool = True,
+        days: int = 30
+    ) -> Dict[str, Any]:
+        """Generate a markdown collection report.
+
+        Args:
+            include_books: Include books section
+            include_papers: Include papers section
+            include_links: Include links section
+            days: Include items from last N days
+
+        Returns:
+            File path and summary
+        """
+        try:
+            cursor = self.conn.cursor()
+            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+            report_lines = []
+
+            report_lines.append(f"# Holocene Collection Report")
+            report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+            report_lines.append(f"Period: Last {days} days")
+            report_lines.append("")
+
+            # Overall stats
+            report_lines.append("## Collection Overview")
+            report_lines.append("")
+
+            cursor.execute("SELECT COUNT(*) FROM books")
+            total_books = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM papers")
+            total_papers = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM links")
+            total_links = cursor.fetchone()[0]
+
+            report_lines.append(f"- **Total Books:** {total_books}")
+            report_lines.append(f"- **Total Papers:** {total_papers}")
+            report_lines.append(f"- **Total Links:** {total_links}")
+            report_lines.append("")
+
+            if include_books:
+                report_lines.append("## Books")
+                report_lines.append("")
+
+                # Recent books
+                cursor.execute("""
+                    SELECT title, authors, publication_year, call_number
+                    FROM books
+                    WHERE added_at >= ?
+                    ORDER BY added_at DESC
+                    LIMIT 10
+                """, (cutoff_date,))
+                recent_books = cursor.fetchall()
+
+                if recent_books:
+                    report_lines.append(f"### Recently Added ({len(recent_books)} in last {days} days)")
+                    report_lines.append("")
+                    for book in recent_books:
+                        title, authors, year, call = book
+                        year_str = f" ({year})" if year else ""
+                        call_str = f" [{call}]" if call else ""
+                        report_lines.append(f"- **{title}**{year_str} - {authors or 'Unknown'}{call_str}")
+                    report_lines.append("")
+
+                # By Dewey class
+                cursor.execute("""
+                    SELECT SUBSTR(dewey_number, 1, 1) as class, COUNT(*) as cnt
+                    FROM books
+                    WHERE dewey_number IS NOT NULL
+                    GROUP BY class
+                    ORDER BY cnt DESC
+                """)
+                dewey_dist = cursor.fetchall()
+
+                if dewey_dist:
+                    dewey_names = {
+                        '0': 'Computer Science & Info', '1': 'Philosophy', '2': 'Religion',
+                        '3': 'Social Sciences', '4': 'Language', '5': 'Science',
+                        '6': 'Technology', '7': 'Arts', '8': 'Literature', '9': 'History'
+                    }
+                    report_lines.append("### Distribution by Subject")
+                    report_lines.append("")
+                    for cls, cnt in dewey_dist:
+                        name = dewey_names.get(cls, 'Other')
+                        report_lines.append(f"- {cls}00s {name}: {cnt}")
+                    report_lines.append("")
+
+            if include_papers:
+                report_lines.append("## Papers")
+                report_lines.append("")
+
+                cursor.execute("""
+                    SELECT title, authors, doi
+                    FROM papers
+                    WHERE added_at >= ?
+                    ORDER BY added_at DESC
+                    LIMIT 10
+                """, (cutoff_date,))
+                recent_papers = cursor.fetchall()
+
+                if recent_papers:
+                    report_lines.append(f"### Recently Added ({len(recent_papers)} in last {days} days)")
+                    report_lines.append("")
+                    for paper in recent_papers:
+                        title, authors, doi = paper
+                        authors_short = authors[:50] + "..." if authors and len(authors) > 50 else authors
+                        report_lines.append(f"- **{title}** - {authors_short or 'Unknown'}")
+                    report_lines.append("")
+
+            if include_links:
+                report_lines.append("## Links")
+                report_lines.append("")
+
+                cursor.execute("""
+                    SELECT COUNT(*) FROM links WHERE created_at >= ?
+                """, (cutoff_date,))
+                recent_link_count = cursor.fetchone()[0]
+
+                cursor.execute("""
+                    SELECT trust_tier, COUNT(*) FROM links GROUP BY trust_tier
+                """)
+                tier_dist = cursor.fetchall()
+
+                report_lines.append(f"### Summary")
+                report_lines.append(f"- Added in last {days} days: {recent_link_count}")
+                report_lines.append("")
+                report_lines.append("### By Trust Tier")
+                for tier, cnt in tier_dist:
+                    report_lines.append(f"- {tier or 'unclassified'}: {cnt}")
+                report_lines.append("")
+
+                # Recent interesting links
+                cursor.execute("""
+                    SELECT title, url FROM links
+                    WHERE created_at >= ? AND title IS NOT NULL AND title != ''
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                """, (cutoff_date,))
+                recent_links = cursor.fetchall()
+
+                if recent_links:
+                    report_lines.append("### Recent Links")
+                    for title, url in recent_links:
+                        title_short = title[:60] + "..." if len(title) > 60 else title
+                        report_lines.append(f"- [{title_short}]({url})")
+                    report_lines.append("")
+
+            report_lines.append("---")
+            report_lines.append("*Generated by Laney*")
+
+            # Save to file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"collection_report_{timestamp}.md"
+            filepath = self.documents_dir / filename
+
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(report_lines))
+
+            self.created_documents.append(filepath)
+
+            return {
+                "success": True,
+                "file_path": str(filepath),
+                "filename": filename,
+                "total_books": total_books,
+                "total_papers": total_papers,
+                "total_links": total_links,
+                "message": f"Generated collection report: {filename}"
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to generate report: {str(e)}"}
