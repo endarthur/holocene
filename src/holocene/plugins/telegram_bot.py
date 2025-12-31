@@ -367,6 +367,58 @@ class ConversationManager:
         finally:
             conn.close()
 
+    def delete_last_messages(self, conversation_id: int, count: int = 1) -> int:
+        """Delete the last N messages from a conversation.
+
+        Deletes both user and assistant messages. Useful for correcting
+        mistakes or removing sensitive content from history.
+
+        Args:
+            conversation_id: Conversation ID
+            count: Number of messages to delete (default 1)
+
+        Returns:
+            Number of messages actually deleted
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+
+            # Get IDs of last N messages
+            cursor.execute("""
+                SELECT id FROM laney_messages
+                WHERE conversation_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (conversation_id, count))
+            rows = cursor.fetchall()
+
+            if not rows:
+                return 0
+
+            ids_to_delete = [row['id'] for row in rows]
+
+            # Delete the messages
+            placeholders = ','.join('?' * len(ids_to_delete))
+            cursor.execute(f"""
+                DELETE FROM laney_messages
+                WHERE id IN ({placeholders})
+            """, ids_to_delete)
+
+            deleted_count = cursor.rowcount
+
+            # Update conversation message count
+            cursor.execute("""
+                UPDATE laney_conversations
+                SET message_count = message_count - ?
+                WHERE id = ?
+            """, (deleted_count, conversation_id))
+
+            conn.commit()
+            return deleted_count
+        finally:
+            conn.close()
+
 
 class TelegramBotPlugin(Plugin):
     """Telegram bot interface for mobile access (eunice device)."""
@@ -491,6 +543,7 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("resume", self._cmd_resume_conversation))
         self.application.add_handler(CommandHandler("context", self._cmd_context))
         self.application.add_handler(CommandHandler("title", self._cmd_title))
+        self.application.add_handler(CommandHandler("forget", self._cmd_forget))
 
         # Register message handlers for content (text, PDFs, etc.)
         self.application.add_handler(MessageHandler(
@@ -933,6 +986,7 @@ Just send any text to chat with Laney
 /resume <id> - Resume old conversation
 /context - Current conversation info
 /title <name> - Rename conversation
+/forget [n] - Remove last n messages
 
 *Other Commands:*
 /login - Magic link for web access
@@ -1882,6 +1936,51 @@ This link will grant you access to:
             f"Conversation renamed to: *{new_title}*",
             parse_mode='Markdown'
         )
+        self.messages_sent += 1
+
+    async def _cmd_forget(self, update, context):
+        """Handle /forget command - delete last N messages from history.
+
+        Usage:
+            /forget      - Delete last message (user + assistant pair = 2)
+            /forget 3    - Delete last 3 messages
+        """
+        self.commands_received += 1
+
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("Unauthorized")
+            return
+
+        # Parse count argument (default to 2 = last exchange)
+        count = 2  # Default: delete last user message + assistant response
+        if context.args:
+            try:
+                count = int(context.args[0])
+                if count < 1:
+                    count = 1
+                elif count > 50:
+                    count = 50  # Safety limit
+            except ValueError:
+                await update.message.reply_text(
+                    "Usage: `/forget [count]`\n\n"
+                    "Examples:\n"
+                    "• `/forget` - Remove last exchange (2 messages)\n"
+                    "• `/forget 1` - Remove last message only\n"
+                    "• `/forget 5` - Remove last 5 messages",
+                    parse_mode='Markdown'
+                )
+                return
+
+        chat_id = update.effective_chat.id
+        conv_id = self.conversation_manager.get_or_create_conversation(chat_id)
+        deleted = self.conversation_manager.delete_last_messages(conv_id, count)
+
+        if deleted == 0:
+            await update.message.reply_text("No messages to forget.")
+        elif deleted == 1:
+            await update.message.reply_text("🗑️ Forgot 1 message.")
+        else:
+            await update.message.reply_text(f"🗑️ Forgot {deleted} messages.")
         self.messages_sent += 1
 
     # Message and document handlers
