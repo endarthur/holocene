@@ -268,7 +268,7 @@ class ProactiveLaneyPlugin(Plugin):
         try:
             if item_type == 'book':
                 cursor = db.conn.execute("""
-                    SELECT title, author, subjects, enriched_summary
+                    SELECT title, author, subjects, enriched_summary, access_url
                     FROM books
                     WHERE created_at < ?
                     ORDER BY RANDOM()
@@ -281,12 +281,13 @@ class ProactiveLaneyPlugin(Plugin):
                         'title': row[0],
                         'author': row[1],
                         'subjects': row[2],
-                        'summary': row[3][:200] if row[3] else None
+                        'summary': row[3][:200] if row[3] else None,
+                        'url': row[4]  # Internet Archive URL
                     }
 
             elif item_type == 'paper':
                 cursor = db.conn.execute("""
-                    SELECT title, authors, abstract, journal
+                    SELECT title, authors, abstract, journal, doi, arxiv_id, url
                     FROM papers
                     WHERE added_at < ?
                     ORDER BY RANDOM()
@@ -294,12 +295,22 @@ class ProactiveLaneyPlugin(Plugin):
                 """, (two_weeks_ago,))
                 row = cursor.fetchone()
                 if row:
+                    # Build reference URL: prefer DOI, then arXiv, then generic URL
+                    ref_url = None
+                    if row[4]:  # doi
+                        ref_url = f"https://doi.org/{row[4]}"
+                    elif row[5]:  # arxiv_id
+                        ref_url = f"https://arxiv.org/abs/{row[5]}"
+                    elif row[6]:  # url
+                        ref_url = row[6]
+
                     return {
                         'type': 'paper',
                         'title': row[0],
                         'authors': row[1],
                         'abstract': row[2][:200] if row[2] else None,
-                        'journal': row[3]
+                        'journal': row[3],
+                        'url': ref_url
                     }
 
             else:  # link
@@ -509,14 +520,20 @@ This is for a daily email digest - it should be the most interesting part."""
         if digest.get('commentary'):
             sections.append(f"_{digest['commentary']}_")
 
-        # Rediscovery - on one line
+        # Rediscovery - with clickable reference
         if digest.get('rediscovery'):
             rd = digest['rediscovery']
             if rd['type'] == 'book':
                 author = rd.get('author') or 'Unknown'
-                sections.append(f"**From the archives:** *{rd['title']}* by {author}")
+                if rd.get('url'):
+                    sections.append(f"**From the archives:** [{rd['title']}]({rd['url']}) by {author}")
+                else:
+                    sections.append(f"**From the archives:** *{rd['title']}* by {author}")
             elif rd['type'] == 'paper':
-                sections.append(f"**From the archives:** *{rd['title']}*")
+                if rd.get('url'):
+                    sections.append(f"**From the archives:** [{rd['title']}]({rd['url']})")
+                else:
+                    sections.append(f"**From the archives:** *{rd['title']}*")
             elif rd['type'] == 'link':
                 sections.append(f"**From the archives:** [{rd['title']}]({rd['url']})")
 
