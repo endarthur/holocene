@@ -172,6 +172,7 @@ def laney(query: str, model: str, verbose: bool):
             db_path=config.db_path,
             brave_api_key=config.integrations.brave_api_key,
             sandbox_container=config.integrations.sandbox_container if config.integrations.sandbox_enabled else None,
+            email_config=config.email if config.email.enabled else None,
         )
 
         # Build messages
