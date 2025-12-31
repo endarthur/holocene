@@ -408,26 +408,31 @@ LANEY_TOOLS = [
             }
         }
     },
-    # === Sandboxed Code Execution ===
+    # === Sandboxed Command Execution ===
     {
         "type": "function",
         "function": {
-            "name": "run_python",
-            "description": "Execute Python code in a sandboxed environment. Use for data processing, analysis, or complex calculations. Has access to: math, datetime, json, re, collections, itertools, statistics. NO file I/O or network access.",
+            "name": "run_bash",
+            "description": "Execute a bash command in an isolated sandbox container. Use for: Python with scientific stack (numpy, pandas, scipy, matplotlib, sklearn), data processing, file manipulation, CLI tools (curl, jq, grep, awk, git). The sandbox has its own filesystem at /workspace. Output is captured from stdout/stderr.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "code": {
+                    "command": {
                         "type": "string",
-                        "description": "Python code to execute. Use print() to output results."
+                        "description": "Bash command to execute. For Python: 'python3 -c \"code\"' or 'python3 script.py'. For multi-line Python, use heredoc: python3 << 'EOF'\ncode\nEOF"
                     },
                     "timeout": {
                         "type": "integer",
-                        "description": "Timeout in seconds (default: 5, max: 30)",
-                        "default": 5
+                        "description": "Timeout in seconds (default: 30, max: 300)",
+                        "default": 30
+                    },
+                    "workdir": {
+                        "type": "string",
+                        "description": "Working directory inside sandbox (default: /workspace)",
+                        "default": "/workspace"
                     }
                 },
-                "required": ["code"]
+                "required": ["command"]
             }
         }
     },
@@ -1113,6 +1118,7 @@ class LaneyToolHandler:
         pending_updates: Optional[List[Dict[str, Any]]] = None,
         email_config: Optional[Any] = None,
         config_whitelist: Optional[List[str]] = None,
+        sandbox_host: Optional[str] = None,
     ):
         """
         Initialize tool handler.
@@ -1125,6 +1131,7 @@ class LaneyToolHandler:
             pending_updates: Optional external list for interim updates (for async sending)
             email_config: Email configuration (for send_email tool)
             config_whitelist: Base whitelist from config (supplements DB whitelist)
+            sandbox_host: SSH host for sandbox execution (e.g., "laney-sandbox")
         """
         self.db_path = str(db_path)
         self.conn = sqlite3.connect(self.db_path)
@@ -1134,6 +1141,7 @@ class LaneyToolHandler:
         self.conversation_id = conversation_id
         self.email_config = email_config
         self.config_whitelist = config_whitelist or []
+        self.sandbox_host = sandbox_host  # SSH host for run_bash
 
         # Documents directory
         if documents_dir:
@@ -1179,8 +1187,8 @@ class LaneyToolHandler:
             "note_search": self.note_search,
             "note_list": self.note_list,
             "note_delete": self.note_delete,
-            # Code execution
-            "run_python": self.run_python,
+            # Code execution (sandbox)
+            "run_bash": self.run_bash,
             # Document export
             "write_document": self.write_document,
             # Progress updates
@@ -1911,83 +1919,73 @@ class LaneyToolHandler:
         except Exception as e:
             return {"error": f"Failed to delete note: {str(e)}"}
 
-    # === Sandboxed Code Execution ===
+    # === Sandboxed Command Execution ===
 
-    def run_python(self, code: str, timeout: int = 5) -> Dict[str, Any]:
-        """Execute Python code in a sandboxed subprocess.
+    def run_bash(self, command: str, timeout: int = 30, workdir: str = "/workspace") -> Dict[str, Any]:
+        """Execute a bash command in the sandbox container via SSH.
 
         Args:
-            code: Python code to execute
-            timeout: Timeout in seconds (max 30)
+            command: Bash command to execute
+            timeout: Timeout in seconds (default: 30, max: 300)
+            workdir: Working directory inside sandbox (default: /workspace)
 
         Returns:
             Dict with stdout, stderr, and exit code
         """
-        timeout = min(timeout, 30)  # Cap at 30 seconds
+        timeout = min(timeout, 300)  # Cap at 5 minutes
 
-        # Simple sandbox - rely on subprocess isolation + timeout
-        # Pre-import useful modules for convenience
-        sandbox_wrapper = '''
-# Pre-import useful modules
-import math
-import datetime
-import json
-import re
-import collections
-import itertools
-import functools
-import statistics
-import random
-import string
-import decimal
-import fractions
-from datetime import date, time, timedelta
-from collections import Counter, defaultdict, namedtuple, deque
-from itertools import combinations, permutations, product
-
-# User code below
-'''
-        full_code = sandbox_wrapper + "\n" + code
+        # Check if sandbox is configured
+        if not self.sandbox_host:
+            return {
+                "success": False,
+                "error": "Sandbox not configured. Set sandbox_host in config.",
+                "stdout": "",
+                "stderr": "",
+                "hint": "Run scripts/setup_laney_sandbox.sh on Proxmox to create the sandbox."
+            }
 
         try:
-            # Write to temp file
-            with tempfile.NamedTemporaryFile(
-                mode='w',
-                suffix='.py',
-                delete=False,
-                encoding='utf-8'
-            ) as f:
-                f.write(full_code)
-                temp_path = f.name
+            # Build SSH command
+            # Using bash -c to handle complex commands and set working directory
+            ssh_command = [
+                "ssh",
+                "-o", "ConnectTimeout=5",
+                "-o", "BatchMode=yes",  # No password prompts
+                self.sandbox_host,
+                f"cd {workdir} && {command}"
+            ]
 
-            # Run in subprocess
+            # Run via SSH
             result = subprocess.run(
-                [sys.executable, temp_path],
+                ssh_command,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd=tempfile.gettempdir(),  # Run in temp dir
             )
 
-            # Clean up
-            Path(temp_path).unlink(missing_ok=True)
-
             # Truncate long output
-            stdout = result.stdout[:5000] if result.stdout else ""
-            stderr = result.stderr[:2000] if result.stderr else ""
+            stdout = result.stdout[:10000] if result.stdout else ""
+            stderr = result.stderr[:5000] if result.stderr else ""
 
             return {
                 "success": result.returncode == 0,
                 "stdout": stdout,
                 "stderr": stderr,
                 "exit_code": result.returncode,
+                "workdir": workdir,
             }
 
         except subprocess.TimeoutExpired:
-            Path(temp_path).unlink(missing_ok=True)
             return {
                 "success": False,
-                "error": f"Code execution timed out after {timeout} seconds",
+                "error": f"Command timed out after {timeout} seconds",
+                "stdout": "",
+                "stderr": "",
+            }
+        except FileNotFoundError:
+            return {
+                "success": False,
+                "error": "SSH not found. Is openssh-client installed?",
                 "stdout": "",
                 "stderr": "",
             }

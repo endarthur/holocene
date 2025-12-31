@@ -338,6 +338,7 @@ class EmailHandlerPlugin(Plugin):
             brave_api_key=getattr(config.integrations, 'brave_api_key', None),
             email_config=self.email_config,
             config_whitelist=self.email_config.allowed_senders if self.email_config else [],
+            sandbox_host=config.integrations.sandbox_host if config.integrations.sandbox_enabled else None,
         )
 
         # Build system prompt with context

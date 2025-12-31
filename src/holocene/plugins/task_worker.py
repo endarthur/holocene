@@ -223,9 +223,11 @@ Begin the task now."""
         from ..llm.laney_tools import LANEY_TOOLS, LaneyToolHandler
 
         client = NanoGPTClient(self.api_key)
+        config = self.core.config
         tool_handler = LaneyToolHandler(
             db_path=self.db_path,
-            brave_api_key=getattr(self.core.config.integrations, 'brave_api_key', None),
+            brave_api_key=getattr(config.integrations, 'brave_api_key', None),
+            sandbox_host=config.integrations.sandbox_host if config.integrations.sandbox_enabled else None,
         )
 
         # Track items added during this task
