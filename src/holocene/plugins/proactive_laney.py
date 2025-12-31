@@ -616,8 +616,14 @@ This is for a daily email digest - it should be the most interesting part."""
         # Wrap consecutive list items in ul
         html = re.sub(r'(<li[^>]*>.*?</li>\n?)+', lambda m: f'<ul style="margin: 0.5em 0; padding-left: 1.5em;">{m.group(0)}</ul>', html)
 
-        # Line breaks (but not after block elements)
+        # Paragraph breaks (double newlines) - convert BEFORE single newlines
+        html = re.sub(r'\n\n', '</p><p style="margin: 1em 0;">', html)
+
+        # Line breaks (single newlines, but not after block elements)
         html = re.sub(r'(?<!>)\n(?!<)', '<br>\n', html)
+
+        # Wrap in opening paragraph
+        html = f'<p style="margin: 0 0 1em 0;">{html}</p>'
 
         return f"""<html>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333; line-height: 1.5;">
