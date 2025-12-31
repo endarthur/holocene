@@ -2055,18 +2055,30 @@ This link will grant you access to:
 
         Uses conversation history for context - Laney remembers past messages.
         If Laney creates documents, sends them as file attachments.
+        In group chats, attributes messages to the sender so Laney knows who said what.
 
         Args:
             query: The question/text to send to Laney
             update: Telegram update object
         """
         chat_id = update.effective_chat.id
+        is_group = self._is_group_chat(update)
+
+        # In group chats, attribute the message to the sender
+        if is_group:
+            user = update.effective_user
+            # Prefer username, fall back to first_name
+            sender_name = f"@{user.username}" if user.username else user.first_name
+            # Format: "[sender_name]: message"
+            attributed_query = f"[{sender_name}]: {query}"
+        else:
+            attributed_query = query
 
         # Get or create conversation
         conversation_id = self.conversation_manager.get_or_create_conversation(chat_id)
 
-        # Save user message to conversation (before sending to LLM)
-        self.conversation_manager.add_message(conversation_id, "user", query)
+        # Save user message to conversation (with attribution for group chats)
+        self.conversation_manager.add_message(conversation_id, "user", attributed_query)
 
         # Send initial "thinking" message (with retry for network issues)
         status_msg = await self._retry_telegram_call(
@@ -2111,7 +2123,20 @@ This link will grant you access to:
             history = self.conversation_manager.get_context_messages(conversation_id)
 
             # Build messages with system prompt + history
-            messages = [{"role": "system", "content": LANEY_SYSTEM_PROMPT}]
+            # Add group chat context if applicable
+            system_prompt = LANEY_SYSTEM_PROMPT
+            if is_group:
+                system_prompt += """
+
+GROUP CHAT CONTEXT:
+You are in a Telegram group chat with multiple participants. Messages are prefixed with [username]: to indicate who sent them.
+- Pay attention to who is asking what - different people may have different questions
+- When referring to something someone said, use their username (e.g., "@alice asked about...")
+- If you need to address a specific person, use their username
+- The conversation history shows who said what, so you can follow multi-person discussions
+- When someone asks "what did I say" or refers to themselves, look at their username in the attribution"""
+
+            messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history)
 
             # Estimate context usage (rough: 4 chars per token)
