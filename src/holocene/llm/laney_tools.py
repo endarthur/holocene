@@ -1945,9 +1945,9 @@ class LaneyToolHandler:
             }
 
         try:
-            # Build podman exec command
+            # Build podman exec command (sudo required in LXC environment)
             podman_command = [
-                "podman", "exec",
+                "sudo", "podman", "exec",
                 "-w", workdir,  # Set working directory
                 self.sandbox_container,
                 "bash", "-c", command

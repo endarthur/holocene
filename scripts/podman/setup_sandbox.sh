@@ -34,27 +34,27 @@ check_podman() {
         sudo apt-get update
         sudo apt-get install -y podman
     fi
-    info "Podman version: $(podman --version)"
+    info "Podman version: $(sudo podman --version)"
 }
 
 build_image() {
     info "Building $IMAGE_NAME image..."
-    podman build -t "$IMAGE_NAME" -f "$DOCKERFILE" "$SCRIPT_DIR"
+    sudo podman build -t "$IMAGE_NAME" -f "$DOCKERFILE" "$SCRIPT_DIR"
     info "Image built successfully"
 }
 
 start_container() {
     # Check if container exists
-    if podman container exists "$CONTAINER_NAME" 2>/dev/null; then
-        if podman ps -q -f "name=$CONTAINER_NAME" | grep -q .; then
+    if sudo podman container exists "$CONTAINER_NAME" 2>/dev/null; then
+        if sudo podman ps -q -f "name=$CONTAINER_NAME" | grep -q .; then
             info "Container $CONTAINER_NAME is already running"
         else
             info "Starting existing container $CONTAINER_NAME..."
-            podman start "$CONTAINER_NAME"
+            sudo podman start "$CONTAINER_NAME"
         fi
     else
         info "Creating and starting container $CONTAINER_NAME..."
-        podman run -d \
+        sudo podman run -d \
             --name "$CONTAINER_NAME" \
             --restart unless-stopped \
             "$IMAGE_NAME"
@@ -63,29 +63,29 @@ start_container() {
 }
 
 stop_container() {
-    if podman container exists "$CONTAINER_NAME" 2>/dev/null; then
+    if sudo podman container exists "$CONTAINER_NAME" 2>/dev/null; then
         info "Stopping container $CONTAINER_NAME..."
-        podman stop "$CONTAINER_NAME" 2>/dev/null || true
+        sudo podman stop "$CONTAINER_NAME" 2>/dev/null || true
     else
         warn "Container $CONTAINER_NAME does not exist"
     fi
 }
 
 remove_container() {
-    if podman container exists "$CONTAINER_NAME" 2>/dev/null; then
+    if sudo podman container exists "$CONTAINER_NAME" 2>/dev/null; then
         info "Removing container $CONTAINER_NAME..."
-        podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
+        sudo podman rm -f "$CONTAINER_NAME" 2>/dev/null || true
     fi
 }
 
 show_status() {
     echo ""
     echo "=== Laney Sandbox Status ==="
-    if podman container exists "$CONTAINER_NAME" 2>/dev/null; then
-        podman ps -a -f "name=$CONTAINER_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Created}}"
+    if sudo podman container exists "$CONTAINER_NAME" 2>/dev/null; then
+        sudo podman ps -a -f "name=$CONTAINER_NAME" --format "table {{.Names}}\t{{.Status}}\t{{.Created}}"
         echo ""
         echo "Test command:"
-        echo "  podman exec $CONTAINER_NAME python3 -c \"import numpy; print(f'NumPy {numpy.__version__}')\""
+        echo "  sudo podman exec $CONTAINER_NAME python3 -c \"import numpy; print(f'NumPy {numpy.__version__}')\""
     else
         warn "Container $CONTAINER_NAME does not exist"
         echo "Run: bash setup_sandbox.sh setup"
@@ -127,10 +127,10 @@ case "${1:-setup}" in
         ;;
     shell)
         info "Opening shell in $CONTAINER_NAME..."
-        podman exec -it "$CONTAINER_NAME" /bin/bash
+        sudo podman exec -it "$CONTAINER_NAME" /bin/bash
         ;;
     logs)
-        podman logs "$CONTAINER_NAME"
+        sudo podman logs "$CONTAINER_NAME"
         ;;
     *)
         echo "Usage: $0 {setup|rebuild|reset|stop|start|status|shell|logs}"
