@@ -1,0 +1,43 @@
+# Laney Sandbox Container
+# A secure execution environment for Laney to run code
+#
+# Build: podman build -t laney-sandbox -f Dockerfile.laney-sandbox .
+# Run:   podman run -d --name laney-sandbox laney-sandbox
+#
+FROM python:3.11-slim-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    git \
+    jq \
+    sqlite3 \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create workspace directory
+RUN mkdir -p /workspace && chmod 777 /workspace
+
+# Install Python scientific stack
+RUN pip install --no-cache-dir \
+    numpy \
+    pandas \
+    scipy \
+    matplotlib \
+    seaborn \
+    scikit-learn \
+    statsmodels \
+    requests \
+    beautifulsoup4 \
+    lxml \
+    pyyaml \
+    toml \
+    jsonschema \
+    ipython
+
+# Set working directory
+WORKDIR /workspace
+
+# Keep container running (for exec access)
+CMD ["tail", "-f", "/dev/null"]

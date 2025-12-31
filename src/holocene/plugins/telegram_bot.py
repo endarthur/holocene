@@ -2269,7 +2269,7 @@ This link will grant you access to:
                 pending_updates=progress_state["pending_updates"],  # Shared list for async sending
                 email_config=email_config,
                 config_whitelist=email_whitelist,
-                sandbox_host=config.integrations.sandbox_host if config.integrations.sandbox_enabled else None,
+                sandbox_container=config.integrations.sandbox_container if config.integrations.sandbox_enabled else None,
             )
 
             # Load conversation history (last N messages)

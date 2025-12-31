@@ -1118,7 +1118,7 @@ class LaneyToolHandler:
         pending_updates: Optional[List[Dict[str, Any]]] = None,
         email_config: Optional[Any] = None,
         config_whitelist: Optional[List[str]] = None,
-        sandbox_host: Optional[str] = None,
+        sandbox_container: Optional[str] = None,
     ):
         """
         Initialize tool handler.
@@ -1131,7 +1131,7 @@ class LaneyToolHandler:
             pending_updates: Optional external list for interim updates (for async sending)
             email_config: Email configuration (for send_email tool)
             config_whitelist: Base whitelist from config (supplements DB whitelist)
-            sandbox_host: SSH host for sandbox execution (e.g., "laney-sandbox")
+            sandbox_container: Podman container name for sandbox execution
         """
         self.db_path = str(db_path)
         self.conn = sqlite3.connect(self.db_path)
@@ -1141,7 +1141,7 @@ class LaneyToolHandler:
         self.conversation_id = conversation_id
         self.email_config = email_config
         self.config_whitelist = config_whitelist or []
-        self.sandbox_host = sandbox_host  # SSH host for run_bash
+        self.sandbox_container = sandbox_container  # Podman container for run_bash
 
         # Documents directory
         if documents_dir:
@@ -1922,7 +1922,7 @@ class LaneyToolHandler:
     # === Sandboxed Command Execution ===
 
     def run_bash(self, command: str, timeout: int = 30, workdir: str = "/workspace") -> Dict[str, Any]:
-        """Execute a bash command in the sandbox container via SSH.
+        """Execute a bash command in the Podman sandbox container.
 
         Args:
             command: Bash command to execute
@@ -1935,29 +1935,27 @@ class LaneyToolHandler:
         timeout = min(timeout, 300)  # Cap at 5 minutes
 
         # Check if sandbox is configured
-        if not self.sandbox_host:
+        if not self.sandbox_container:
             return {
                 "success": False,
-                "error": "Sandbox not configured. Set sandbox_host in config.",
+                "error": "Sandbox not configured. Set sandbox_container in config.",
                 "stdout": "",
                 "stderr": "",
-                "hint": "Run scripts/setup_laney_sandbox.sh on Proxmox to create the sandbox."
+                "hint": "Run scripts/podman/setup_sandbox.sh on rei to create the sandbox."
             }
 
         try:
-            # Build SSH command
-            # Using bash -c to handle complex commands and set working directory
-            ssh_command = [
-                "ssh",
-                "-o", "ConnectTimeout=5",
-                "-o", "BatchMode=yes",  # No password prompts
-                self.sandbox_host,
-                f"cd {workdir} && {command}"
+            # Build podman exec command
+            podman_command = [
+                "podman", "exec",
+                "-w", workdir,  # Set working directory
+                self.sandbox_container,
+                "bash", "-c", command
             ]
 
-            # Run via SSH
+            # Run via Podman
             result = subprocess.run(
-                ssh_command,
+                podman_command,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -1985,7 +1983,7 @@ class LaneyToolHandler:
         except FileNotFoundError:
             return {
                 "success": False,
-                "error": "SSH not found. Is openssh-client installed?",
+                "error": "Podman not found. Is podman installed?",
                 "stdout": "",
                 "stderr": "",
             }

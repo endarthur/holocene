@@ -163,9 +163,9 @@ class IntegrationsConfig(BaseModel):
     uptime_kuma_push_token: Optional[str] = None  # For push monitor (daemon pings Uptime Kuma)
     uptime_kuma_link_health_token: Optional[str] = None  # For link health push monitor
 
-    # Laney sandbox (LXC container for code execution)
+    # Laney sandbox (Podman container for code execution)
     sandbox_enabled: bool = False
-    sandbox_host: str = "laney-sandbox"  # SSH host (from ~/.ssh/config)
+    sandbox_container: str = "laney-sandbox"  # Podman container name
 
     def model_post_init(self, __context):
         """Expand paths after initialization."""

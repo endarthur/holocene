@@ -227,7 +227,7 @@ Begin the task now."""
         tool_handler = LaneyToolHandler(
             db_path=self.db_path,
             brave_api_key=getattr(config.integrations, 'brave_api_key', None),
-            sandbox_host=config.integrations.sandbox_host if config.integrations.sandbox_enabled else None,
+            sandbox_container=config.integrations.sandbox_container if config.integrations.sandbox_enabled else None,
         )
 
         # Track items added during this task
