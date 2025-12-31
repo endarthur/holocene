@@ -250,6 +250,9 @@ class ProactiveLaneyPlugin(Plugin):
             # Generate LLM commentary
             digest['commentary'] = self._generate_llm_commentary(digest)
 
+            # Generate the digression - the soul of the email
+            digest['digression'] = self._generate_digression()
+
         except Exception as e:
             self.logger.error(f"Error generating digest: {e}", exc_info=True)
 
@@ -386,84 +389,176 @@ Keep it SHORT (2-3 sentences max). No greeting (that comes separately). No bulle
             self.logger.warning(f"Error generating LLM commentary: {e}")
             return None
 
+    def _generate_digression(self) -> Optional[Dict[str, str]]:
+        """Generate a mini deep-dive on a random topic - Laney's version of Quartz Obsession."""
+        try:
+            from ..llm.nanogpt import NanoGPTClient
+
+            config = self.core.config
+            if not config.llm.api_key:
+                return None
+
+            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+            db = self.core.db
+
+            # Pick a random seed from the collection
+            seed_type = random.choice(['book_subject', 'link_domain', 'paper_topic', 'random'])
+            seed_topic = None
+
+            try:
+                if seed_type == 'book_subject':
+                    cursor = db.conn.execute("""
+                        SELECT subjects FROM books
+                        WHERE subjects IS NOT NULL AND subjects != ''
+                        ORDER BY RANDOM() LIMIT 1
+                    """)
+                    row = cursor.fetchone()
+                    if row and row[0]:
+                        subjects = row[0].split(',')
+                        seed_topic = random.choice(subjects).strip()
+
+                elif seed_type == 'link_domain':
+                    cursor = db.conn.execute("""
+                        SELECT url FROM links
+                        WHERE title IS NOT NULL
+                        ORDER BY RANDOM() LIMIT 1
+                    """)
+                    row = cursor.fetchone()
+                    if row:
+                        from urllib.parse import urlparse
+                        domain = urlparse(row[0]).netloc.replace('www.', '')
+                        seed_topic = f"the website {domain}"
+
+                elif seed_type == 'paper_topic':
+                    cursor = db.conn.execute("""
+                        SELECT title FROM papers
+                        ORDER BY RANDOM() LIMIT 1
+                    """)
+                    row = cursor.fetchone()
+                    if row:
+                        # Extract a key phrase from paper title
+                        words = row[0].split()[:4]
+                        seed_topic = " ".join(words)
+
+            except Exception:
+                pass
+
+            if not seed_topic:
+                # Fallback topics related to Arthur's interests
+                fallback_topics = [
+                    "the history of geostatistics",
+                    "why geological maps are beautiful",
+                    "the maker movement and science",
+                    "thermal printers and their quirks",
+                    "why kids understand geology intuitively",
+                    "the aesthetics of data visualization",
+                    "open source hardware in education",
+                    "the satisfying click of mechanical things",
+                    "why spreadsheets are underrated",
+                    "the geology of Brazil",
+                ]
+                seed_topic = random.choice(fallback_topics)
+
+            prompt = f"""You are Laney, a pattern-recognition AI. Write a SHORT, interesting micro-essay (3-4 sentences) about: {seed_topic}
+
+Style:
+- Like a smart friend sharing a fascinating thing they learned
+- Find the unexpected angle or connection
+- Slightly nerdy enthusiasm is good
+- End with something thought-provoking or a question
+- NO intro like "Here's something interesting" - just dive in
+- Keep it under 80 words
+
+This is for a daily email digest - it should be the most interesting part."""
+
+            response = client.simple_prompt(
+                prompt=prompt,
+                model=config.llm.primary_cheap or config.llm.primary,
+                temperature=0.8,  # Slightly more creative
+            )
+
+            if response:
+                return {
+                    'topic': seed_topic,
+                    'content': response.strip()
+                }
+            return None
+
+        except Exception as e:
+            self.logger.warning(f"Error generating digression: {e}")
+            return None
+
     def _format_digest_email(self, digest: Dict[str, Any]) -> str:
-        """Format the digest as a nice email body."""
+        """Format the digest as a nice email body.
+
+        Structure designed to avoid Gmail clipping - interesting stuff first.
+        """
         lines = []
 
-        # Greeting
-        lines.append("Morning, Arthur.\n")
+        # Greeting + quick stats (compact header)
+        stats = digest['stats']
+        lines.append(f"Morning, Arthur. _{stats['books']} books · {stats['papers']} papers · {stats['links']} links_\n")
 
-        # LLM Commentary (the soul of the digest)
-        if digest.get('commentary'):
-            lines.append(digest['commentary'])
+        # The Digression - THE SOUL OF THE EMAIL (put it first!)
+        if digest.get('digression'):
+            dig = digest['digression']
+            lines.append(f"**On {dig['topic']}:**")
+            lines.append(dig['content'])
             lines.append("")
 
-        # Quick stats line
-        stats = digest['stats']
-        lines.append(f"*Collection: {stats['books']} books · {stats['papers']} papers · {stats['links']} links*\n")
+        # Brief commentary on today's activity
+        if digest.get('commentary'):
+            lines.append(f"_{digest['commentary']}_\n")
 
-        # Rediscovery section - something you might have forgotten
+        # Rediscovery - brief, inline
         if digest.get('rediscovery'):
             rd = digest['rediscovery']
-            lines.append("---")
-            lines.append("\n## 🔮 From the Archives")
+            lines.append("**From the archives:** ", )
             if rd['type'] == 'book':
                 author = rd.get('author') or 'Unknown'
-                lines.append(f"**{rd['title']}** by {author}")
-                if rd.get('summary'):
-                    lines.append(f"_{rd['summary']}..._")
+                lines.append(f"*{rd['title']}* by {author}")
             elif rd['type'] == 'paper':
-                lines.append(f"**{rd['title']}**")
-                if rd.get('authors'):
-                    authors = rd['authors'][:50] + "..." if len(rd['authors']) > 50 else rd['authors']
-                    lines.append(f"_{authors}_")
+                lines.append(f"*{rd['title']}*")
             elif rd['type'] == 'link':
                 lines.append(f"[{rd['title']}]({rd['url']})")
             lines.append("")
 
-        # Recent additions (only if there are any)
+        # Recent additions - compact
         has_recent = (digest['recent_books'] or digest['recent_papers'] or digest['recent_links'])
 
         if has_recent:
-            lines.append("---")
-            lines.append("\n## Today's Additions")
+            lines.append("**Today:**")
+            items = []
 
-        if digest['recent_books']:
-            lines.append("\n**Books:**")
-            for book in digest['recent_books'][:5]:
-                author = book['author'] or 'Unknown'
-                lines.append(f"- {book['title']} ({author})")
+            if digest['recent_books']:
+                for book in digest['recent_books'][:3]:
+                    items.append(f"📚 {book['title']}")
 
-        if digest['recent_papers']:
-            lines.append("\n**Papers:**")
-            for paper in digest['recent_papers'][:5]:
-                lines.append(f"- {paper['title']}")
+            if digest['recent_papers']:
+                for paper in digest['recent_papers'][:3]:
+                    items.append(f"📄 {paper['title'][:40]}...")
 
-        if digest['recent_links']:
-            lines.append("\n**Links:**")
-            for link in digest['recent_links'][:8]:
-                title = link['title'] or link['url'][:40]
-                source = link['source'] or 'saved'
-                lines.append(f"- [{title}]({link['url']}) _{source}_")
+            if digest['recent_links']:
+                for link in digest['recent_links'][:5]:
+                    title = link['title'] or link['url'][:30]
+                    items.append(f"🔗 [{title}]({link['url']})")
 
-        # Tasks (condensed)
-        if digest['completed_tasks'] or digest['pending_tasks']:
-            lines.append("\n---")
-            lines.append("\n## Tasks")
+            for item in items:
+                lines.append(f"- {item}")
+            lines.append("")
 
-            if digest['completed_tasks']:
-                completed_list = ", ".join([t['title'] for t in digest['completed_tasks'][:3]])
-                lines.append(f"✓ Completed: {completed_list}")
+        # Tasks - single line each
+        if digest['completed_tasks']:
+            completed_list = ", ".join([t['title'] for t in digest['completed_tasks'][:3]])
+            lines.append(f"✓ Done: {completed_list}")
 
-            if digest['pending_tasks']:
-                pending_count = len(digest['pending_tasks'])
-                if pending_count > 0:
-                    top_task = digest['pending_tasks'][0]['title']
-                    lines.append(f"⏳ {pending_count} pending (next: {top_task})")
+        if digest['pending_tasks']:
+            pending_count = len(digest['pending_tasks'])
+            if pending_count > 0:
+                lines.append(f"⏳ {pending_count} tasks waiting")
 
         # Sign off
-        lines.append("\n---")
-        lines.append("*—Laney*")
+        lines.append("\n—Laney")
 
         return "\n".join(lines)
 
