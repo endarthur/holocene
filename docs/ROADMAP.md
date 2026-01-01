@@ -949,8 +949,22 @@ holo books search "machine learning" --include-calibre
      - 🧠 **Complexity Laney** - Decides if task needs more powerful model
      - 📚 **Archivist Laney** - Checks collection first before external search
      - ⚡ **Efficiency Laney** - Prevents overthinking simple lookups
+     - ✅ **Reviewer Laney** - Verifies task completion (see below)
    - Fast local inference (~500ms) routes the main request appropriately
    - Disagreement = uncertainty signal → ask the human
+
+4. **Reviewer Laney** (Task Verification Agent)
+   - Post-task verification: Did Laney actually do what she claimed?
+   - Checks for "hallucinated completions" (e.g., claims to create files that don't exist)
+   - Verification types:
+     - 🔍 **File existence** - Do referenced files actually exist?
+     - 📊 **Output validation** - Does sandbox output match claims?
+     - 📧 **Delivery confirmation** - Were emails/messages actually sent?
+     - 🔗 **Link verification** - Do added items exist in DB?
+   - Runs automatically after background tasks complete
+   - Can re-queue failed tasks or notify user of discrepancies
+   - Uses cheap/fast model (verification is mostly rule-based + spot checks)
+   - Triggered by: task completion, user request, scheduled audits
 
 **Why "Council" not true MoE:**
 - Same base weights, different prompts → correlated blind spots
