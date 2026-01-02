@@ -2563,8 +2563,32 @@ CRITICAL: You must CALL the generate_image tool, not just describe what you woul
                 except RetryAfter as e:
                     await asyncio.sleep(e.retry_after + 1)
 
+            # Post-process: extract any markdown image references from the response
+            # Laney sometimes references images with ![caption](path) syntax - catch and send those
+            import re
+            from pathlib import Path
+            response_text = result.get('response', '')
+            markdown_images = re.findall(r'!\[.*?\]\(([^)]+)\)', response_text)
+            extra_docs = []
+            for img_path in markdown_images:
+                # Clean up path (remove sandbox: prefix if present)
+                clean_path = img_path.replace('sandbox:', '').strip()
+                p = Path(clean_path)
+                if p.exists() and p.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.csv']:
+                    extra_docs.append(p)
+                    self.logger.info(f"Extracted markdown image reference: {p}")
+
             # Send any created documents/images as file attachments
-            docs = result.get('documents', [])
+            docs = list(result.get('documents', [])) + extra_docs
+            # Deduplicate
+            seen = set()
+            unique_docs = []
+            for d in docs:
+                d_str = str(d)
+                if d_str not in seen:
+                    seen.add(d_str)
+                    unique_docs.append(d)
+            docs = unique_docs
             self.logger.info(f"Documents to send: {len(docs)} - {docs}")
             for doc_path in docs:
                 self.logger.info(f"Checking document: {doc_path}, exists: {doc_path.exists() if hasattr(doc_path, 'exists') else 'N/A'}")
