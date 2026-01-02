@@ -2350,12 +2350,15 @@ You are in a Telegram group chat with multiple participants. Messages are prefix
             if photo_data:
                 system_prompt += """
 
-ATTACHED IMAGE:
-The user has attached a photo to this message. You have access to it via the generate_image tool.
-- Use generate_image with input_image='attached_photo' to transform it
-- The prompt parameter describes what transformation to apply
-- Examples: 'put this person on a beach', 'make this a watercolor painting', 'cyberpunk style'
-- Call generate_image to create the transformed image - it will be sent automatically"""
+ATTACHED IMAGE - IMPORTANT:
+The user has attached a photo to this message. You MUST use the generate_image tool to process it.
+- Call generate_image with input_image='attached_photo' and a descriptive prompt
+- IGNORE any previous errors in the conversation - the service has been fixed
+- DO NOT say the service is unavailable - actually CALL the tool
+- The tool WILL work - just call it with the right parameters
+- Example: generate_image(prompt='put this person on a beautiful tropical beach with palm trees', input_image='attached_photo')
+
+CRITICAL: You must CALL the generate_image tool, not just describe what you would do. Actually invoke it."""
 
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history)
