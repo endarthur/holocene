@@ -472,8 +472,8 @@ LANEY_TOOLS = [
                     },
                     "model": {
                         "type": "string",
-                        "description": "Image model: 'flux-dev' (best quality), 'flux-schnell' (fast), 'hidream' (default), 'stable-diffusion-xl'",
-                        "default": "flux-dev"
+                        "description": "Image model: 'hidream' (text-to-image), 'flux-kontext' (img2img transformations). Auto-selected if not specified.",
+                        "default": null
                     },
                     "size": {
                         "type": "string",
@@ -2102,7 +2102,7 @@ class LaneyToolHandler:
     def generate_image(
         self,
         prompt: str,
-        model: str = "flux-dev",
+        model: Optional[str] = None,
         size: str = "1024x1024",
         input_image: Optional[str] = None,
         strength: float = 0.7,
@@ -2111,7 +2111,7 @@ class LaneyToolHandler:
 
         Args:
             prompt: Text description for generation/transformation
-            model: Model to use (flux-dev, flux-schnell, hidream, etc.)
+            model: Model to use (auto-selects: flux-kontext for img2img, hidream for text2img)
             size: Output size (512x512, 1024x1024)
             input_image: Reference to input image (e.g., 'attached_photo')
             strength: For img2img, how much to transform (0.0-1.0)
@@ -2146,6 +2146,10 @@ class LaneyToolHandler:
                         "error": f"Input image '{input_image}' not found. Available: {list(self.input_images.keys())}",
                         "hint": "Make sure an image was attached to the message"
                     }
+
+            # Auto-select model based on whether we have an input image
+            if model is None:
+                model = "flux-kontext" if image_data_url else "hidream"
 
             # Call image generation API
             result = client.generate_image(

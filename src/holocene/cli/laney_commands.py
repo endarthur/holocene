@@ -71,10 +71,10 @@ Code Execution (sandbox):
 - NEVER just show code - actually EXECUTE it with run_bash and SEND results with attach_file
 
 Image Generation (AI models):
-- generate_image: Create or transform images using FLUX, Stable Diffusion, etc.
-- Text-to-image: Just provide a prompt describing the desired image
-- Image-to-image: When user attaches a photo, use input_image='attached_photo' to transform it
-- Models: flux-dev (best quality), flux-schnell (fast), hidream, stable-diffusion-xl
+- generate_image: Create or transform images using AI image models
+- Text-to-image: Just provide a prompt (uses 'hidream' model)
+- Image-to-image: When user attaches a photo, use input_image='attached_photo' (uses 'flux-kontext')
+- Model is auto-selected based on whether input_image is provided
 - Generated images are automatically sent to the user
 - Use for: illustrations, photo transformations, artistic variations, "put X in Y" requests
 
