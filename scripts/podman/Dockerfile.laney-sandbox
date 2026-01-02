@@ -34,7 +34,9 @@ RUN pip install --no-cache-dir \
     pyyaml \
     toml \
     jsonschema \
-    ipython
+    ipython \
+    mplstereonet \
+    apsg
 
 # Set working directory
 WORKDIR /workspace
