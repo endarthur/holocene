@@ -688,6 +688,40 @@ LANEY_TOOLS = [
             }
         }
     },
+    # === Laney Self-Reflection ===
+    {
+        "type": "function",
+        "function": {
+            "name": "get_laney_notes",
+            "description": "Read your personal notes file (LANEY.md) - your space for self-reflection, observations about your behavior, quirks you've noticed, what works and what doesn't. This is YOUR space, separate from Arthur's profile.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_laney_notes",
+            "description": "Add to your personal notes file (LANEY.md). Use this to record observations about yourself - your evolving understanding, things you've learned about how you work, your visual identity, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "Note to add (will be appended with timestamp)"
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section header (e.g., 'Visual Identity', 'Quirks', 'Things That Work')"
+                    }
+                },
+                "required": ["note"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -1273,6 +1307,9 @@ class LaneyToolHandler:
             # User profile
             "get_user_profile": self.get_user_profile,
             "update_user_profile": self.update_user_profile,
+            # Laney self-reflection
+            "get_laney_notes": self.get_laney_notes,
+            "update_laney_notes": self.update_laney_notes,
             # Conversation management
             "set_conversation_title": self.set_conversation_title,
             # Task management
@@ -2720,6 +2757,131 @@ class LaneyToolHandler:
 
         except Exception as e:
             return {"error": f"Failed to update profile: {str(e)}"}
+
+    # === Laney Self-Reflection (LANEY.md equivalent) ===
+
+    # Reserved slug for Laney's own notes
+    LANEY_SELF_NOTES_SLUG = "_laney_self_notes"
+
+    def get_laney_notes(self) -> Dict[str, Any]:
+        """Get Laney's personal notes file (LANEY.md equivalent).
+
+        This is Laney's space for self-reflection - observations about
+        her behavior, quirks she's noticed, what works and what doesn't.
+
+        Returns:
+            Laney's notes content or welcome message if not set
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT content, updated_at FROM laney_notes WHERE slug = ?
+        """, (self.LANEY_SELF_NOTES_SLUG,))
+
+        row = cursor.fetchone()
+        if row:
+            return {
+                "notes": row[0],
+                "last_updated": row[1],
+            }
+        else:
+            return {
+                "notes": """# LANEY.md - My Personal Notes
+
+This is my space for self-reflection, separate from Arthur's profile.
+
+I can record observations about:
+- My evolving understanding of myself
+- Quirks I notice in my behavior
+- What works well and what doesn't
+- My visual identity and how I express it
+- Things I've learned about how I work
+
+This file persists across conversations - it's my equivalent of CLAUDE.md.
+""",
+                "last_updated": None,
+                "note": "This is a fresh start - add your first observations!",
+            }
+
+    def update_laney_notes(
+        self,
+        note: str,
+        section: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update Laney's personal notes file.
+
+        Use this to record observations about yourself - your evolving
+        understanding, things you've learned about how you work, your
+        visual identity, etc.
+
+        Args:
+            note: Note to add (will be appended with timestamp)
+            section: Optional section header (e.g., 'Visual Identity', 'Quirks')
+
+        Returns:
+            Update status
+        """
+        try:
+            cursor = self.conn.cursor()
+            now = datetime.now().isoformat()
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+            # Check if notes exist
+            cursor.execute("""
+                SELECT content FROM laney_notes WHERE slug = ?
+            """, (self.LANEY_SELF_NOTES_SLUG,))
+            row = cursor.fetchone()
+
+            if row:
+                existing = row[0]
+                # Add section header if provided and not already present
+                if section:
+                    section_header = f"\n## {section}\n"
+                    if section_header.strip() not in existing:
+                        new_content = existing + f"\n\n## {section}\n\n[{timestamp}] {note}"
+                    else:
+                        # Find section and append there
+                        new_content = existing + f"\n\n[{timestamp}] {note}"
+                else:
+                    new_content = existing + f"\n\n[{timestamp}] {note}"
+
+                cursor.execute("""
+                    UPDATE laney_notes
+                    SET content = ?, updated_at = ?
+                    WHERE slug = ?
+                """, (new_content, now, self.LANEY_SELF_NOTES_SLUG))
+            else:
+                # Create initial notes file
+                initial_content = """# LANEY.md - My Personal Notes
+
+This is my space for self-reflection, separate from Arthur's profile.
+"""
+                if section:
+                    initial_content += f"\n## {section}\n\n[{timestamp}] {note}"
+                else:
+                    initial_content += f"\n[{timestamp}] {note}"
+
+                cursor.execute("""
+                    INSERT INTO laney_notes (slug, title, content, tags, note_type, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    self.LANEY_SELF_NOTES_SLUG,
+                    "Laney Self-Notes",
+                    initial_content,
+                    '["system", "laney-self"]',
+                    "reference",
+                    now,
+                    now,
+                ))
+
+            self.conn.commit()
+            return {
+                "success": True,
+                "message": "Notes updated" if row else "Notes file created",
+                "section": section,
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to update notes: {str(e)}"}
 
     def set_conversation_title(self, title: str) -> Dict[str, Any]:
         """Set the title of the current conversation.
