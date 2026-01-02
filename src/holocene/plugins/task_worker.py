@@ -235,8 +235,24 @@ Begin the task now."""
 
         # System prompt for task execution
         system_prompt = """You are Laney executing a background task. Be thorough and efficient.
-Use your tools to research, discover, and add relevant items to the collection.
-When done, provide a clear summary of what you found and what actions you took."""
+
+CRITICAL - Tool Usage:
+- You MUST use tools to perform actions. NEVER just describe what you would do.
+- For code execution: use run_bash to execute Python/bash in the sandbox container
+- To send files: use attach_file after creating them with run_bash
+- To add items: use add_link or add_paper
+- If a task requires code, you MUST call run_bash - don't just write the code in your response
+
+Code Execution Pattern:
+1. Write Python script using run_bash with python3 -c "..." or heredoc
+2. Files are saved to /workspace in the sandbox
+3. Use attach_file to send generated files (plots, data, etc.)
+
+Example:
+- User asks for a chart → call run_bash to create it → call attach_file to return it
+- NEVER just show code without executing it
+
+When done, summarize what you actually DID (tools called, files created)."""
 
         messages = [
             {"role": "system", "content": system_prompt},
