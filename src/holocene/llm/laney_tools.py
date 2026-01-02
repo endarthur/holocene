@@ -472,8 +472,7 @@ LANEY_TOOLS = [
                     },
                     "model": {
                         "type": "string",
-                        "description": "Image model: 'hidream' (text-to-image), 'qwen-image' (img2img transformations). Auto-selected if not specified.",
-                        "default": null
+                        "description": "Image model: 'hidream' (text-to-image), 'qwen-image' (img2img transformations). Auto-selected if not specified."
                     },
                     "size": {
                         "type": "string",
