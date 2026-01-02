@@ -457,6 +457,44 @@ LANEY_TOOLS = [
             }
         }
     },
+    # === Image Generation ===
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": "Generate or transform images using AI models (FLUX, Stable Diffusion, etc.). Can create images from text prompts, or transform existing images (img2img). Use for: creating illustrations, transforming photos (e.g., 'put person on beach'), artistic variations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Text description for image generation or transformation. Be detailed and descriptive."
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Image model: 'flux-dev' (best quality), 'flux-schnell' (fast), 'hidream' (default), 'stable-diffusion-xl'",
+                        "default": "flux-dev"
+                    },
+                    "size": {
+                        "type": "string",
+                        "enum": ["512x512", "1024x1024"],
+                        "description": "Output image size",
+                        "default": "1024x1024"
+                    },
+                    "input_image": {
+                        "type": "string",
+                        "description": "For img2img: reference to input image from conversation context (e.g., 'attached_photo'). Laney will use the image data from the current conversation."
+                    },
+                    "strength": {
+                        "type": "number",
+                        "description": "For img2img: how much to transform (0.0=keep original, 1.0=ignore original). Default 0.7",
+                        "default": 0.7
+                    }
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
     # === Document Export ===
     {
         "type": "function",
@@ -1179,6 +1217,9 @@ class LaneyToolHandler:
         # Track documents created during this session (for Telegram file sending)
         self.created_documents: List[Path] = []
 
+        # Store input images for img2img transformations (set by Telegram bot)
+        self.input_images: Dict[str, str] = {}  # name -> base64 data URL
+
         # Track pending updates to send to the user (for interim progress)
         # Use external list if provided (for async sending from Telegram bot)
         self.pending_updates: List[Dict[str, Any]] = pending_updates if pending_updates is not None else []
@@ -1216,6 +1257,8 @@ class LaneyToolHandler:
             # Code execution (sandbox)
             "run_bash": self.run_bash,
             "attach_file": self.attach_file,
+            # Image generation
+            "generate_image": self.generate_image,
             # Document export
             "write_document": self.write_document,
             # Progress updates
@@ -2053,6 +2096,103 @@ class LaneyToolHandler:
             "caption": caption,
             "message": f"File '{full_path.name}' attached and will be sent with the response"
         }
+
+    # === Image Generation ===
+
+    def generate_image(
+        self,
+        prompt: str,
+        model: str = "flux-dev",
+        size: str = "1024x1024",
+        input_image: Optional[str] = None,
+        strength: float = 0.7,
+    ) -> Dict[str, Any]:
+        """Generate or transform images using AI models.
+
+        Args:
+            prompt: Text description for generation/transformation
+            model: Model to use (flux-dev, flux-schnell, hidream, etc.)
+            size: Output size (512x512, 1024x1024)
+            input_image: Reference to input image (e.g., 'attached_photo')
+            strength: For img2img, how much to transform (0.0-1.0)
+
+        Returns:
+            Result with path to generated image
+        """
+        from ..config import load_config
+        from .nanogpt import NanoGPTClient
+        import base64
+
+        try:
+            config = load_config()
+            client = NanoGPTClient(config.llm.api_key)
+
+            # Check for input image for img2img
+            image_data_url = None
+            if input_image:
+                # Look up image from stored input_images
+                if input_image in self.input_images:
+                    image_data_url = self.input_images[input_image]
+                elif "attached" in input_image.lower() or "photo" in input_image.lower():
+                    # Try common keys
+                    for key in ["attached_photo", "photo", "image"]:
+                        if key in self.input_images:
+                            image_data_url = self.input_images[key]
+                            break
+
+                if not image_data_url:
+                    return {
+                        "success": False,
+                        "error": f"Input image '{input_image}' not found. Available: {list(self.input_images.keys())}",
+                        "hint": "Make sure an image was attached to the message"
+                    }
+
+            # Call image generation API
+            result = client.generate_image(
+                prompt=prompt,
+                model=model,
+                size=size,
+                image_data_url=image_data_url,
+                strength=strength if image_data_url else None,
+            )
+
+            if not result.get("success") or not result.get("images"):
+                return {
+                    "success": False,
+                    "error": result.get("error", "No images generated"),
+                }
+
+            # Save generated image to sandbox directory
+            sandbox_dir = Path.home() / ".holocene" / "sandbox"
+            sandbox_dir.mkdir(parents=True, exist_ok=True)
+
+            import time
+            timestamp = int(time.time())
+            filename = f"generated_{timestamp}.png"
+            output_path = sandbox_dir / filename
+
+            # Decode base64 and save
+            image_data = base64.b64decode(result["images"][0])
+            output_path.write_bytes(image_data)
+
+            # Add to created_documents for Telegram to send
+            self.created_documents.append(output_path)
+
+            return {
+                "success": True,
+                "path": str(output_path),
+                "filename": filename,
+                "model": model,
+                "cost": result.get("cost"),
+                "message": f"Image generated and saved as {filename}. It will be sent with the response.",
+                "was_img2img": image_data_url is not None,
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Image generation failed: {str(e)}",
+            }
 
     # === Document Export ===
 

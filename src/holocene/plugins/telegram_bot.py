@@ -545,10 +545,14 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("title", self._cmd_title))
         self.application.add_handler(CommandHandler("forget", self._cmd_forget))
 
-        # Register message handlers for content (text, PDFs, etc.)
+        # Register message handlers for content (text, PDFs, photos, etc.)
         self.application.add_handler(MessageHandler(
             filters.TEXT & ~filters.COMMAND,
             self._handle_message
+        ))
+        self.application.add_handler(MessageHandler(
+            filters.PHOTO,
+            self._handle_photo
         ))
         self.application.add_handler(MessageHandler(
             filters.Document.PDF | filters.Document.ALL,
@@ -2057,6 +2061,54 @@ This link will grant you access to:
         # Default: Send everything else to Laney
         await self._ask_laney(text, update)
 
+    async def _handle_photo(self, update, context):
+        """Handle photo messages - send to Laney for image generation/transformation."""
+        if not self._is_authorized(update.effective_chat.id):
+            return
+
+        import base64
+
+        # Get the largest photo (best quality)
+        photo = update.message.photo[-1]  # Last one is largest
+        caption = update.message.caption or ""
+
+        self.logger.info(f"Received photo: {photo.file_id} ({photo.width}x{photo.height}), caption: {caption[:50]}...")
+
+        # Check if this is meant for Laney (has caption with /laney or any text)
+        if not caption:
+            await update.message.reply_text(
+                "📷 Photo received! Add a caption to tell Laney what to do with it.\n\n"
+                "Examples:\n"
+                "• `put this person on a beach`\n"
+                "• `make this image look like a painting`\n"
+                "• `transform this to cyberpunk style`"
+            )
+            return
+
+        # Download the photo
+        try:
+            file = await photo.get_file()
+            photo_bytes = await file.download_as_bytearray()
+
+            # Convert to base64 data URL for the API
+            b64_data = base64.b64encode(photo_bytes).decode('utf-8')
+            # Detect format from magic bytes
+            if photo_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+                mime_type = 'image/png'
+            else:
+                mime_type = 'image/jpeg'  # Default to JPEG for Telegram photos
+
+            photo_data_url = f"data:{mime_type};base64,{b64_data}"
+
+            self.logger.info(f"Photo downloaded and encoded ({len(photo_bytes)} bytes)")
+
+            # Send to Laney with the photo data
+            await self._ask_laney(caption, update, photo_data=photo_data_url)
+
+        except Exception as e:
+            self.logger.error(f"Failed to process photo: {e}")
+            await update.message.reply_text(f"❌ Failed to process photo: {e}")
+
     async def _handle_document(self, update, context):
         """Handle document uploads (PDFs, JSON files, etc.)."""
         if not self._is_authorized(update.effective_chat.id):
@@ -2202,7 +2254,7 @@ This link will grant you access to:
 
         return None
 
-    async def _ask_laney(self, query: str, update):
+    async def _ask_laney(self, query: str, update, photo_data: Optional[str] = None):
         """Send a query to Laney and reply with response.
 
         Uses conversation history for context - Laney remembers past messages.
@@ -2212,6 +2264,7 @@ This link will grant you access to:
         Args:
             query: The question/text to send to Laney
             update: Telegram update object
+            photo_data: Optional base64 data URL for attached photo (for img2img)
         """
         chat_id = update.effective_chat.id
         is_group = self._is_group_chat(update)
@@ -2272,6 +2325,10 @@ This link will grant you access to:
                 sandbox_container=config.integrations.sandbox_container if config.integrations.sandbox_enabled else None,
             )
 
+            # If photo was attached, make it available for image generation
+            if photo_data:
+                tool_handler.input_images["attached_photo"] = photo_data
+
             # Load conversation history (last N messages)
             history = self.conversation_manager.get_context_messages(conversation_id)
 
@@ -2288,6 +2345,17 @@ You are in a Telegram group chat with multiple participants. Messages are prefix
 - If you need to address a specific person, use their username
 - The conversation history shows who said what, so you can follow multi-person discussions
 - When someone asks "what did I say" or refers to themselves, look at their username in the attribution"""
+
+            # Add photo context if image was attached
+            if photo_data:
+                system_prompt += """
+
+ATTACHED IMAGE:
+The user has attached a photo to this message. You have access to it via the generate_image tool.
+- Use generate_image with input_image='attached_photo' to transform it
+- The prompt parameter describes what transformation to apply
+- Examples: 'put this person on a beach', 'make this a watercolor painting', 'cyberpunk style'
+- Call generate_image to create the transformed image - it will be sent automatically"""
 
             messages = [{"role": "system", "content": system_prompt}]
             messages.extend(history)

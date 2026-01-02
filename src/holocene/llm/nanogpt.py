@@ -248,3 +248,80 @@ class NanoGPTClient:
             return response.json()
         except Exception as e:
             return {"error": str(e)}
+
+    def generate_image(
+        self,
+        prompt: str,
+        model: str = "hidream",
+        size: str = "1024x1024",
+        n: int = 1,
+        image_data_url: Optional[str] = None,
+        mask_data_url: Optional[str] = None,
+        strength: Optional[float] = None,
+        guidance_scale: Optional[float] = None,
+        seed: Optional[int] = None,
+        timeout: int = 120,
+    ) -> Dict[str, Any]:
+        """
+        Generate or transform images using NanoGPT's image API.
+
+        Args:
+            prompt: Text description for generation
+            model: Image model to use (hidream, flux-dev, flux-schnell, etc.)
+            size: Output size (256x256, 512x512, 1024x1024)
+            n: Number of images to generate (default: 1)
+            image_data_url: Base64 data URL for img2img transformations
+            mask_data_url: Base64 data URL for inpainting mask
+            strength: Transformation strength for img2img (0.0-1.0)
+            guidance_scale: How closely to follow prompt
+            seed: Random seed for reproducibility
+            timeout: Request timeout in seconds
+
+        Returns:
+            Dict with 'images' (list of base64 data), 'cost', 'model'
+        """
+        payload = {
+            "prompt": prompt,
+            "model": model,
+            "size": size,
+            "n": n,
+            "response_format": "b64_json",
+        }
+
+        if image_data_url:
+            payload["imageDataUrl"] = image_data_url
+
+        if mask_data_url:
+            payload["maskDataUrl"] = mask_data_url
+
+        if strength is not None:
+            payload["strength"] = strength
+
+        if guidance_scale is not None:
+            payload["guidance_scale"] = guidance_scale
+
+        if seed is not None:
+            payload["seed"] = seed
+
+        # Image generation uses a different endpoint (not /api/v1)
+        response = self.session.post(
+            "https://nano-gpt.com/v1/images/generations",
+            json=payload,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+
+        result = response.json()
+
+        # Extract images from response
+        images = []
+        for item in result.get("data", []):
+            if "b64_json" in item:
+                images.append(item["b64_json"])
+
+        return {
+            "success": True,
+            "images": images,
+            "cost": result.get("cost"),
+            "model": model,
+        }
