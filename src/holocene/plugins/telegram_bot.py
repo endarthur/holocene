@@ -2560,20 +2560,29 @@ The user has attached a photo to this message. You have access to it via the gen
                 except RetryAfter as e:
                     await asyncio.sleep(e.retry_after + 1)
 
-            # Send any created documents as file attachments
+            # Send any created documents/images as file attachments
             docs = result.get('documents', [])
             self.logger.info(f"Documents to send: {len(docs)} - {docs}")
             for doc_path in docs:
                 self.logger.info(f"Checking document: {doc_path}, exists: {doc_path.exists() if hasattr(doc_path, 'exists') else 'N/A'}")
                 if hasattr(doc_path, 'exists') and doc_path.exists():
                     try:
-                        await update.message.reply_document(
-                            document=open(doc_path, 'rb'),
-                            filename=doc_path.name,
-                            caption=f"📄 {doc_path.stem.replace('-', ' ').title()}"
-                        )
+                        # Check if it's an image - send as photo for better display
+                        suffix = doc_path.suffix.lower()
+                        if suffix in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
+                            await update.message.reply_photo(
+                                photo=open(doc_path, 'rb'),
+                                caption=f"🎨 {doc_path.stem.replace('_', ' ').title()}"
+                            )
+                            self.logger.info(f"Sent image: {doc_path.name}")
+                        else:
+                            await update.message.reply_document(
+                                document=open(doc_path, 'rb'),
+                                filename=doc_path.name,
+                                caption=f"📄 {doc_path.stem.replace('-', ' ').title()}"
+                            )
+                            self.logger.info(f"Sent document: {doc_path.name}")
                         self.messages_sent += 1
-                        self.logger.info(f"Sent document: {doc_path.name}")
                     except Exception as e:
                         self.logger.error(f"Failed to send document {doc_path}: {e}")
 
