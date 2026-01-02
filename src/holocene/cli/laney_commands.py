@@ -73,7 +73,7 @@ Code Execution (sandbox):
 Image Generation (AI models):
 - generate_image: Create or transform images using AI image models
 - Text-to-image: Just provide a prompt (uses 'hidream' model)
-- Image-to-image: When user attaches a photo, use input_image='attached_photo' (uses 'flux-kontext')
+- Image-to-image: When user attaches a photo, use input_image='attached_photo' (uses 'qwen-image')
 - Model is auto-selected based on whether input_image is provided
 - Generated images are automatically sent to the user
 - Use for: illustrations, photo transformations, artistic variations, "put X in Y" requests

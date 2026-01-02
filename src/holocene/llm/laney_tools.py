@@ -472,7 +472,7 @@ LANEY_TOOLS = [
                     },
                     "model": {
                         "type": "string",
-                        "description": "Image model: 'hidream' (text-to-image), 'flux-kontext' (img2img transformations). Auto-selected if not specified.",
+                        "description": "Image model: 'hidream' (text-to-image), 'qwen-image' (img2img transformations). Auto-selected if not specified.",
                         "default": null
                     },
                     "size": {
@@ -2148,8 +2148,9 @@ class LaneyToolHandler:
                     }
 
             # Auto-select model based on whether we have an input image
+            # qwen-image supports img2img, hidream for text-to-image
             if model is None:
-                model = "flux-kontext" if image_data_url else "hidream"
+                model = "qwen-image" if image_data_url else "hidream"
 
             # Call image generation API
             result = client.generate_image(
