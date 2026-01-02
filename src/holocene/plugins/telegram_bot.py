@@ -2570,13 +2570,27 @@ CRITICAL: You must CALL the generate_image tool, not just describe what you woul
             response_text = result.get('response', '')
             markdown_images = re.findall(r'!\[.*?\]\(([^)]+)\)', response_text)
             extra_docs = []
+            missing_files = []
             for img_path in markdown_images:
                 # Clean up path (remove sandbox: prefix if present)
                 clean_path = img_path.replace('sandbox:', '').strip()
                 p = Path(clean_path)
-                if p.exists() and p.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.csv']:
-                    extra_docs.append(p)
-                    self.logger.info(f"Extracted markdown image reference: {p}")
+                if p.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.csv']:
+                    if p.exists():
+                        extra_docs.append(p)
+                        self.logger.info(f"Extracted markdown image reference: {p}")
+                    else:
+                        missing_files.append(clean_path)
+                        self.logger.warning(f"Laney referenced non-existent file: {clean_path}")
+
+            # Warn about missing files
+            if missing_files:
+                missing_warning = "⚠️ *Referenced files not found:*\n" + "\n".join(f"• `{f}`" for f in missing_files)
+                missing_warning += "\n\n_Tip: Use `attach_file` after creating files with `run_bash`_"
+                try:
+                    await update.message.reply_text(missing_warning, parse_mode='Markdown')
+                except Exception:
+                    await update.message.reply_text(missing_warning.replace('*', '').replace('_', '').replace('`', ''))
 
             # Send any created documents/images as file attachments
             docs = list(result.get('documents', [])) + extra_docs
