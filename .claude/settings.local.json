@@ -27,7 +27,9 @@
       "WebFetch(domain:api.search.brave.com)",
       "Bash(export BRAVE_API_KEY:*)",
       "Bash(holo laney:*)",
-      "WebFetch(domain:docs.nano-gpt.com)"
+      "WebFetch(domain:docs.nano-gpt.com)",
+      "WebFetch(domain:www.fiverr.com)",
+      "WebFetch(domain:vgen.co)"
     ],
     "deny": [],
     "ask": []
