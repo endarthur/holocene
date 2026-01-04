@@ -263,6 +263,10 @@ class APIServer:
         self.app.route("/webapp/sandbox/rename", methods=["POST"])(self._webapp_sandbox_rename)
         self.app.route("/webapp/sandbox/upload", methods=["POST"])(self._webapp_sandbox_upload)
 
+        # Adventure API (curiosity engine)
+        self.app.route("/adventure/trigger", methods=["POST"])(self._adventure_trigger)
+        self.app.route("/adventure/status", methods=["GET"])(self._adventure_status)
+
         # Error handlers
         self.app.errorhandler(404)(self._not_found)
         self.app.errorhandler(500)(self._internal_error)
@@ -2814,6 +2818,80 @@ class APIServer:
 
         except Exception as e:
             logger.error(f"Error in /webapp/sandbox/upload: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    # Adventure API handlers
+
+    def _adventure_trigger(self):
+        """POST /adventure/trigger - Start a research adventure.
+
+        Body JSON:
+            topic: Optional topic to explore (string)
+            budget: Optional prompt budget (int, default 100)
+        """
+        try:
+            # Get proactive_laney plugin
+            proactive_plugin = self.core.plugins.get('proactive_laney')
+            if not proactive_plugin:
+                return jsonify({"error": "Curiosity engine not available"}), 503
+
+            if not getattr(proactive_plugin, '_llm_enabled', False):
+                return jsonify({"error": "LLM not configured"}), 503
+
+            # Parse request
+            data = request.get_json() or {}
+            topic = data.get('topic')
+            budget = data.get('budget', 100)
+
+            # Check if already on adventure
+            if proactive_plugin.current_adventure_id is not None:
+                status = proactive_plugin.get_adventure_status()
+                return jsonify({
+                    "error": "Already on an adventure",
+                    "current_topic": status.get('current_topic'),
+                    "current_prompts": status.get('current_prompts', 0),
+                }), 409
+
+            # Trigger adventure
+            if topic:
+                proactive_plugin.trigger_adventure(topic=topic, budget=budget)
+                return jsonify({
+                    "success": True,
+                    "message": f"Adventure started: {topic}",
+                    "budget": budget,
+                })
+            else:
+                # Let Laney decide
+                started = proactive_plugin.trigger_adventure(budget=budget)
+                if started:
+                    status = proactive_plugin.get_adventure_status()
+                    return jsonify({
+                        "success": True,
+                        "message": "Adventure started (Laney chose the topic)",
+                        "topic": status.get('current_topic'),
+                    })
+                else:
+                    return jsonify({
+                        "success": False,
+                        "message": "Laney decided not to explore right now",
+                    })
+
+        except Exception as e:
+            logger.error(f"Error in /adventure/trigger: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _adventure_status(self):
+        """GET /adventure/status - Get current adventure status."""
+        try:
+            proactive_plugin = self.core.plugins.get('proactive_laney')
+            if not proactive_plugin:
+                return jsonify({"error": "Curiosity engine not available"}), 503
+
+            status = proactive_plugin.get_adventure_status()
+            return jsonify(status)
+
+        except Exception as e:
+            logger.error(f"Error in /adventure/status: {e}", exc_info=True)
             return jsonify({"error": str(e)}), 500
 
     # Error handlers
