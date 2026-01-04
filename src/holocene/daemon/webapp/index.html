@@ -895,13 +895,9 @@
                 `;
             }).join('');
 
-            // Add click handlers via event delegation
-            const fileItems = document.querySelectorAll('.file-item');
-            console.log('Found file items:', fileItems.length);
-
-            fileItems.forEach((el, idx) => {
-                console.log(`Setting up click for item ${idx}:`, el.dataset.name);
-                el.style.cursor = 'pointer'; // Ensure pointer cursor
+            // Add click handlers
+            document.querySelectorAll('.file-item').forEach((el) => {
+                el.style.cursor = 'pointer';
                 el.onclick = function(e) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -909,9 +905,6 @@
                     const path = decodeURIComponent(this.dataset.path);
                     const name = decodeURIComponent(this.dataset.name);
                     const isDir = this.dataset.isDir === 'true';
-
-                    console.log('File clicked:', path, name, isDir);
-                    alert('Clicked: ' + name); // Debug alert
 
                     if (isDir) {
                         navigateToFolder(path);
@@ -946,52 +939,37 @@
             loadFiles(path);
         }
 
-        // Show file actions (download, rename, delete)
+        // Show file actions (download, delete)
         function showFileActions(path, name) {
-            console.log('showFileActions called:', path, name);
-
             try {
                 tg.HapticFeedback.impactOccurred('medium');
-            } catch (e) {
-                console.log('HapticFeedback error:', e);
-            }
+            } catch (e) {}
 
             // Check if showPopup is available
             if (typeof tg.showPopup !== 'function') {
-                console.log('showPopup not available, using confirm');
-                // Fallback to simple confirm/prompt
-                const action = prompt(`${name}\n\nChoose action:\n1 = Download\n2 = Rename\n3 = Delete\n\nEnter number:`);
+                // Fallback for non-Telegram browsers
+                const action = prompt(`${name}\n\n1 = Download\n2 = Delete\n\nEnter number:`);
                 if (action === '1') downloadFile(path);
-                else if (action === '2') renameFile(path, name);
-                else if (action === '3') deleteFile(path, name);
+                else if (action === '2') deleteFile(path, name);
                 return;
             }
 
-            // Use Telegram popup for actions
-            try {
-                tg.showPopup({
-                    title: name,
-                    message: 'What would you like to do?',
-                    buttons: [
-                        { id: 'download', type: 'default', text: '📥 Download' },
-                        { id: 'rename', type: 'default', text: '✏️ Rename' },
-                        { id: 'delete', type: 'destructive', text: '🗑️ Delete' },
-                        { id: 'cancel', type: 'cancel' }
-                    ]
-                }, (buttonId) => {
-                    console.log('Popup callback:', buttonId);
-                    if (buttonId === 'download') {
-                        downloadFile(path);
-                    } else if (buttonId === 'rename') {
-                        renameFile(path, name);
-                    } else if (buttonId === 'delete') {
-                        deleteFile(path, name);
-                    }
-                });
-            } catch (e) {
-                console.error('showPopup error:', e);
-                alert('Error: ' + e.message);
-            }
+            // Use Telegram popup (max 3 buttons)
+            tg.showPopup({
+                title: name,
+                message: 'Choose action:',
+                buttons: [
+                    { id: 'download', type: 'default', text: 'Download' },
+                    { id: 'delete', type: 'destructive', text: 'Delete' },
+                    { id: 'cancel', type: 'close' }
+                ]
+            }, (buttonId) => {
+                if (buttonId === 'download') {
+                    downloadFile(path);
+                } else if (buttonId === 'delete') {
+                    deleteFile(path, name);
+                }
+            });
         }
 
         // Download file
