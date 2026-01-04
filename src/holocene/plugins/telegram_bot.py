@@ -544,6 +544,7 @@ class TelegramBotPlugin(Plugin):
         self.application.add_handler(CommandHandler("context", self._cmd_context))
         self.application.add_handler(CommandHandler("title", self._cmd_title))
         self.application.add_handler(CommandHandler("forget", self._cmd_forget))
+        self.application.add_handler(CommandHandler("adventure", self._cmd_adventure))
 
         # Register message handlers for content (text, PDFs, photos, etc.)
         self.application.add_handler(MessageHandler(
@@ -1002,6 +1003,7 @@ Just send any text to chat with Laney
 /spn <url> - Internet Archive snapshot
 /mono <url> - Local monolith archive
 /box <url> - ArchiveBox (JS render)
+/adventure [topic] - Start research adventure
 
 *Send me:*
 • Text - Chat with Laney (remembers context!)
@@ -1985,6 +1987,95 @@ This link will grant you access to:
             await update.message.reply_text("🗑️ Forgot 1 message.")
         else:
             await update.message.reply_text(f"🗑️ Forgot {deleted} messages.")
+        self.messages_sent += 1
+
+    async def _cmd_adventure(self, update, context):
+        """Handle /adventure command - start or check research adventures.
+
+        Usage:
+            /adventure           - Show status or let Laney decide
+            /adventure <topic>   - Start adventure on specific topic
+        """
+        self.commands_received += 1
+
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized")
+            return
+
+        # Get the proactive_laney plugin
+        proactive_plugin = self.core.plugins.get('proactive_laney')
+        if not proactive_plugin:
+            await update.message.reply_text(
+                "❌ Curiosity engine not available\n\n"
+                "The proactive_laney plugin is not running.",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Check if we have LLM configured
+        if not getattr(proactive_plugin, '_llm_enabled', False):
+            await update.message.reply_text(
+                "❌ Curiosity engine disabled\n\n"
+                "LLM not configured.",
+                parse_mode='Markdown'
+            )
+            return
+
+        # Parse arguments
+        topic = ' '.join(context.args) if context.args else None
+
+        # Get current status
+        status = proactive_plugin.get_adventure_status()
+
+        if topic:
+            # User wants to start a specific adventure
+            if status['on_adventure']:
+                await update.message.reply_text(
+                    f"🔮 Already on an adventure!\n\n"
+                    f"*Topic:* {status.get('current_topic', 'Unknown')}\n"
+                    f"*Progress:* {status.get('current_prompts', 0)}/{status.get('current_budget', 100)} prompts\n\n"
+                    f"Wait for it to complete or restart holod to interrupt.",
+                    parse_mode='Markdown'
+                )
+                return
+
+            # Start the adventure
+            await update.message.reply_text(
+                f"🚀 Starting adventure...\n\n*Topic:* {topic}",
+                parse_mode='Markdown'
+            )
+            proactive_plugin.trigger_adventure(topic=topic, budget=100)
+
+        else:
+            # Show status
+            if status['on_adventure']:
+                msg = (
+                    f"🔮 *Currently Exploring*\n\n"
+                    f"*Topic:* {status.get('current_topic', 'Unknown')}\n"
+                    f"*Progress:* {status.get('current_prompts', 0)}/{status.get('current_budget', 100)} prompts"
+                )
+            else:
+                msg = "🌙 *Not currently on an adventure*\n\n"
+
+                if status['paused_adventures']:
+                    msg += "*Paused adventures:*\n"
+                    for pa in status['paused_adventures'][:3]:
+                        msg += f"• {pa['topic']} ({pa['prompts']}/{pa['budget']})\n"
+                    msg += "\n"
+
+                if status['recent_completed']:
+                    msg += "*Recent adventures:*\n"
+                    for rc in status['recent_completed'][:3]:
+                        msg += f"• {rc['topic']} ({rc['prompts']} prompts)\n"
+                    msg += "\n"
+
+                msg += (
+                    f"*Budget:* {status['budget_used_today']}/{status['budget_total']} used today\n\n"
+                    f"_Use `/adventure <topic>` to start exploring_"
+                )
+
+            await update.message.reply_text(msg, parse_mode='Markdown')
+
         self.messages_sent += 1
 
     # Message and document handlers

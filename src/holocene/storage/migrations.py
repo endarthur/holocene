@@ -433,6 +433,44 @@ MIGRATIONS: List[Dict] = [
             CREATE INDEX IF NOT EXISTS idx_backlog_category ON backlog(category);
         """,
     },
+    {
+        'version': 18,
+        'name': 'add_laney_adventures',
+        'description': 'Autonomous research adventures - Laney explores topics on her own',
+        'up': """
+            -- Laney adventures - autonomous research sessions
+            CREATE TABLE IF NOT EXISTS laney_adventures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic TEXT NOT NULL,
+                seed_source TEXT,  -- 'backlog', 'collection', 'curiosity', 'user_request'
+                seed_item_id INTEGER,  -- ID of backlog item, link, etc. that sparked this
+                status TEXT NOT NULL DEFAULT 'exploring',  -- exploring, paused, completed, abandoned
+                budget_limit INTEGER DEFAULT 100,  -- max prompts for this adventure
+                prompts_used INTEGER DEFAULT 0,
+
+                -- Growing context (conversation-like)
+                context_messages TEXT DEFAULT '[]',  -- JSON array of messages
+
+                -- Findings
+                findings_summary TEXT,  -- LLM-generated summary when complete
+                items_added TEXT DEFAULT '[]',  -- JSON: links/papers added during adventure
+                follow_up_questions TEXT DEFAULT '[]',  -- JSON: questions to explore later
+
+                -- Timestamps
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+
+                -- For resume after crash
+                last_checkpoint TEXT  -- JSON: state needed to resume
+            );
+
+            -- Indexes for adventure queries
+            CREATE INDEX IF NOT EXISTS idx_adventures_status ON laney_adventures(status);
+            CREATE INDEX IF NOT EXISTS idx_adventures_created ON laney_adventures(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_adventures_active ON laney_adventures(status) WHERE status = 'exploring';
+        """,
+    },
 ]
 
 

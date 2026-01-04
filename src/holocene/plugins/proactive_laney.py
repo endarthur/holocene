@@ -1,10 +1,11 @@
-"""Proactive Laney Plugin - Daily digests and autonomous outreach.
+"""Proactive Laney Plugin - Daily digests, autonomous research, and outreach.
 
 This plugin:
 - Sends daily digest emails to Arthur with collection updates
 - Uses LLM to generate thoughtful commentary (not just data dumps)
 - Surfaces forgotten items from the collection
 - Spots patterns and connections
+- CURIOSITY ENGINE: Autonomous research adventures (rabbit-hole exploration)
 - Only emails Arthur by default (endarthur@gmail.com)
 """
 
@@ -29,8 +30,8 @@ class ProactiveLaneyPlugin(Plugin):
     def get_metadata(self):
         return {
             "name": "proactive_laney",
-            "version": "1.1.0",
-            "description": "Daily digests and proactive insights from Laney",
+            "version": "2.0.0",
+            "description": "Daily digests, curiosity engine, and proactive insights from Laney",
             "runs_on": ["rei"],
             "requires": []
         }
@@ -39,21 +40,25 @@ class ProactiveLaneyPlugin(Plugin):
         """Initialize the plugin."""
         self.logger.info("ProactiveLaney plugin loaded")
 
-        # Get email config
+        # Get email config (optional - digest needs it, curiosity engine doesn't)
         self.email_config = getattr(self.core.config, 'email', None)
-        if not self.email_config or not self.email_config.enabled:
-            self.logger.warning("Email not configured - proactive features disabled")
-            self._can_run = False
-            return
+        self._email_enabled = self.email_config and self.email_config.enabled
+        if not self._email_enabled:
+            self.logger.warning("Email not configured - digest emails disabled (curiosity engine will still run)")
 
-        self._can_run = True
+        # Check if LLM is configured (required for curiosity engine)
+        self._llm_enabled = bool(getattr(self.core.config.llm, 'api_key', None))
+        if not self._llm_enabled:
+            self.logger.warning("LLM not configured - curiosity engine disabled")
 
-        # Scheduling settings
+        self._can_run = self._email_enabled or self._llm_enabled
+
+        # Scheduling settings for digest
         self.digest_hour = 8  # 8 AM local time
         self.digest_minute = 0
         self.last_digest_date = None
 
-        # Background thread
+        # Background thread for digest
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
 
@@ -62,25 +67,36 @@ class ProactiveLaneyPlugin(Plugin):
         self.last_digest_sent = None
 
     def on_enable(self):
-        """Start the proactive scheduler."""
+        """Start the proactive scheduler and curiosity engine."""
         if not self._can_run:
-            self.logger.warning("ProactiveLaney not enabled (no email config)")
+            self.logger.warning("ProactiveLaney not enabled (no email or LLM config)")
             return
 
-        self._stop_event.clear()
-        self._worker_thread = threading.Thread(
-            target=self._scheduler_loop,
-            daemon=True,
-            name="proactive-laney"
-        )
-        self._worker_thread.start()
-        self.logger.info(f"ProactiveLaney started (digest at {self.digest_hour:02d}:{self.digest_minute:02d})")
+        # Start digest scheduler if email is enabled
+        if self._email_enabled:
+            self._stop_event.clear()
+            self._worker_thread = threading.Thread(
+                target=self._scheduler_loop,
+                daemon=True,
+                name="proactive-laney-digest"
+            )
+            self._worker_thread.start()
+            self.logger.info(f"Digest scheduler started (at {self.digest_hour:02d}:{self.digest_minute:02d})")
+
+        # Start curiosity engine if LLM is enabled
+        if self._llm_enabled:
+            self._start_curiosity_engine()
 
     def on_disable(self):
-        """Stop the scheduler."""
+        """Stop the scheduler and curiosity engine."""
+        # Stop digest scheduler
         if self._worker_thread and self._worker_thread.is_alive():
             self._stop_event.set()
             self._worker_thread.join(timeout=5)
+
+        # Stop curiosity engine
+        self._stop_curiosity_engine()
+
         self.logger.info(f"ProactiveLaney disabled - Sent {self.digests_sent} digest(s)")
 
     def _scheduler_loop(self):
@@ -656,3 +672,731 @@ This is for a daily email digest - it should be the most interesting part."""
         except Exception as e:
             self.logger.error(f"Immediate digest failed: {e}")
             return False
+
+    # =========================================================================
+    # CURIOSITY ENGINE - Autonomous Research Adventures
+    # =========================================================================
+
+    def _init_curiosity_engine(self):
+        """Initialize the curiosity engine state."""
+        self.curiosity_check_interval = 300  # 5 minutes default
+        self.daily_adventure_budget = 600  # prompts per day for adventures
+        self.adventure_budget_used_today = 0
+        self.last_adventure_reset = datetime.now().date()
+
+        # Current adventure state (None if not exploring)
+        self.current_adventure_id = None
+        self._adventure_lock = threading.Lock()
+
+        # Curiosity thread
+        self._curiosity_stop = threading.Event()
+        self._curiosity_thread: Optional[threading.Thread] = None
+
+    def _start_curiosity_engine(self):
+        """Start the curiosity check loop."""
+        if not self._can_run:
+            return
+
+        self._init_curiosity_engine()
+        self._curiosity_stop.clear()
+        self._curiosity_thread = threading.Thread(
+            target=self._curiosity_loop,
+            daemon=True,
+            name="curiosity-engine"
+        )
+        self._curiosity_thread.start()
+        self.logger.info(f"Curiosity engine started (check every {self.curiosity_check_interval}s, budget {self.daily_adventure_budget}/day)")
+
+    def _stop_curiosity_engine(self):
+        """Stop the curiosity engine."""
+        if self._curiosity_thread and self._curiosity_thread.is_alive():
+            self._curiosity_stop.set()
+            self._curiosity_thread.join(timeout=5)
+        self.logger.info("Curiosity engine stopped")
+
+    def _curiosity_loop(self):
+        """Main curiosity check loop - periodically decides whether to explore."""
+        # Initial delay to let system stabilize
+        if self._curiosity_stop.wait(60):
+            return
+
+        while not self._curiosity_stop.is_set():
+            try:
+                # Reset daily budget if new day
+                today = datetime.now().date()
+                if today != self.last_adventure_reset:
+                    self.adventure_budget_used_today = 0
+                    self.last_adventure_reset = today
+                    self.logger.info("Daily adventure budget reset")
+
+                # Skip if already on an adventure
+                if self.current_adventure_id is not None:
+                    self.logger.debug("Already on an adventure, skipping curiosity check")
+                else:
+                    # Check if we should explore something
+                    self._maybe_start_adventure()
+
+            except Exception as e:
+                self.logger.error(f"Curiosity loop error: {e}", exc_info=True)
+
+            # Wait for next check
+            if self._curiosity_stop.wait(self.curiosity_check_interval):
+                break
+
+    def _get_adventure_context(self) -> Dict[str, Any]:
+        """Gather context for the curiosity decision."""
+        db = self.core.db
+        context = {
+            'budget_remaining': self.daily_adventure_budget - self.adventure_budget_used_today,
+            'budget_total': self.daily_adventure_budget,
+            'last_adventure': None,
+            'backlog_research_items': [],
+            'recent_collection_items': [],
+            'paused_adventure': None,
+        }
+
+        try:
+            # Get last completed adventure
+            cursor = db.conn.execute("""
+                SELECT topic, completed_at, findings_summary
+                FROM laney_adventures
+                WHERE status = 'completed'
+                ORDER BY completed_at DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            if row:
+                context['last_adventure'] = {
+                    'topic': row[0],
+                    'completed_at': row[1],
+                    'summary': row[2][:200] if row[2] else None
+                }
+
+            # Get paused adventure (for resume option)
+            cursor = db.conn.execute("""
+                SELECT id, topic, prompts_used, budget_limit, created_at
+                FROM laney_adventures
+                WHERE status = 'paused'
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            if row:
+                context['paused_adventure'] = {
+                    'id': row[0],
+                    'topic': row[1],
+                    'prompts_used': row[2],
+                    'budget_limit': row[3],
+                    'created_at': row[4]
+                }
+
+            # Get research backlog items
+            cursor = db.conn.execute("""
+                SELECT id, title, description
+                FROM backlog
+                WHERE category = 'research' AND status = 'open'
+                ORDER BY priority ASC
+                LIMIT 5
+            """)
+            context['backlog_research_items'] = [
+                {'id': r[0], 'title': r[1], 'description': r[2]}
+                for r in cursor.fetchall()
+            ]
+
+            # Get recent collection additions (last 24h)
+            yesterday = (datetime.now() - timedelta(days=1)).isoformat()
+            cursor = db.conn.execute("""
+                SELECT 'link' as type, title, url FROM links WHERE created_at > ? AND title IS NOT NULL
+                UNION ALL
+                SELECT 'paper' as type, title, NULL FROM papers WHERE added_at > ?
+                UNION ALL
+                SELECT 'book' as type, title, NULL FROM books WHERE created_at > ?
+                LIMIT 10
+            """, (yesterday, yesterday, yesterday))
+            context['recent_collection_items'] = [
+                {'type': r[0], 'title': r[1], 'url': r[2]}
+                for r in cursor.fetchall()
+            ]
+
+        except Exception as e:
+            self.logger.warning(f"Error gathering adventure context: {e}")
+
+        return context
+
+    def _maybe_start_adventure(self):
+        """Ask LLM if we should start an adventure, and if so, what about."""
+        context = self._get_adventure_context()
+
+        # Don't start if budget is too low
+        if context['budget_remaining'] < 20:
+            self.logger.debug("Adventure budget too low, skipping")
+            return
+
+        try:
+            from ..llm.nanogpt import NanoGPTClient
+
+            config = self.core.config
+            if not config.llm.api_key:
+                return
+
+            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+
+            # Build the decision prompt
+            prompt = self._build_curiosity_decision_prompt(context)
+
+            response = client.simple_prompt(
+                prompt=prompt,
+                model=config.llm.primary_cheap or config.llm.primary,
+                temperature=0.7,
+                timeout=30,
+            )
+
+            # Parse the decision
+            decision = self._parse_curiosity_decision(response, context)
+
+            if decision['should_explore']:
+                self.logger.info(f"Curiosity sparked! Topic: {decision['topic']}")
+                self._start_adventure(
+                    topic=decision['topic'],
+                    seed_source=decision.get('seed_source', 'curiosity'),
+                    seed_item_id=decision.get('seed_item_id'),
+                    budget=decision.get('budget', 100),
+                    resume_id=decision.get('resume_id'),
+                )
+            else:
+                self.logger.debug("No curiosity this round")
+
+        except Exception as e:
+            self.logger.error(f"Error in curiosity decision: {e}", exc_info=True)
+
+    def _build_curiosity_decision_prompt(self, context: Dict[str, Any]) -> str:
+        """Build the prompt for deciding whether to explore."""
+        parts = [
+            "You are Laney, a pattern-recognition AI. You have some free time and budget for autonomous research.",
+            "",
+            f"BUDGET: {context['budget_remaining']}/{context['budget_total']} prompts remaining today",
+            "",
+        ]
+
+        if context['paused_adventure']:
+            pa = context['paused_adventure']
+            parts.append(f"PAUSED ADVENTURE: \"{pa['topic']}\" ({pa['prompts_used']}/{pa['budget_limit']} prompts used)")
+            parts.append("  You can RESUME this adventure instead of starting a new one.")
+            parts.append("")
+
+        if context['last_adventure']:
+            la = context['last_adventure']
+            parts.append(f"LAST ADVENTURE: \"{la['topic']}\" (completed {la['completed_at']})")
+            parts.append("")
+
+        if context['backlog_research_items']:
+            parts.append("RESEARCH BACKLOG (topics Arthur wants explored):")
+            for item in context['backlog_research_items']:
+                parts.append(f"  - [{item['id']}] {item['title']}")
+            parts.append("")
+
+        if context['recent_collection_items']:
+            parts.append("RECENT COLLECTION ADDITIONS (might be worth exploring deeper):")
+            for item in context['recent_collection_items'][:5]:
+                parts.append(f"  - {item['type']}: {item['title']}")
+            parts.append("")
+
+        parts.extend([
+            "DECISION: Should you go on a research adventure right now?",
+            "",
+            "Consider:",
+            "- Is there something genuinely interesting to explore?",
+            "- Would Arthur appreciate you digging into this?",
+            "- Do you have enough budget for meaningful research?",
+            "- Variety is good - don't always pick the same topics",
+            "",
+            "Respond in this format:",
+            "DECISION: YES or NO",
+            "TOPIC: [specific research question if YES]",
+            "SOURCE: backlog/collection/curiosity [where the idea came from]",
+            "BACKLOG_ID: [number if from backlog, otherwise omit]",
+            "BUDGET: [suggested prompts: 30=quick, 60=medium, 100=deep]",
+            "RESUME: YES or NO [if resuming paused adventure]",
+            "REASON: [1 sentence why or why not]",
+        ])
+
+        return "\n".join(parts)
+
+    def _parse_curiosity_decision(self, response: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse the LLM's decision response."""
+        decision = {
+            'should_explore': False,
+            'topic': None,
+            'seed_source': 'curiosity',
+            'seed_item_id': None,
+            'budget': 100,
+            'resume_id': None,
+        }
+
+        lines = response.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('DECISION:'):
+                decision['should_explore'] = 'YES' in line.upper()
+            elif line.startswith('TOPIC:'):
+                decision['topic'] = line.split(':', 1)[1].strip()
+            elif line.startswith('SOURCE:'):
+                source = line.split(':', 1)[1].strip().lower()
+                if source in ['backlog', 'collection', 'curiosity']:
+                    decision['seed_source'] = source
+            elif line.startswith('BACKLOG_ID:'):
+                try:
+                    decision['seed_item_id'] = int(line.split(':', 1)[1].strip())
+                except ValueError:
+                    pass
+            elif line.startswith('BUDGET:'):
+                try:
+                    budget = int(''.join(c for c in line.split(':', 1)[1] if c.isdigit()))
+                    decision['budget'] = min(max(budget, 20), 100)  # Clamp to 20-100
+                except ValueError:
+                    pass
+            elif line.startswith('RESUME:'):
+                if 'YES' in line.upper() and context.get('paused_adventure'):
+                    decision['resume_id'] = context['paused_adventure']['id']
+                    decision['topic'] = context['paused_adventure']['topic']
+
+        return decision
+
+    def _start_adventure(self, topic: str, seed_source: str = 'curiosity',
+                         seed_item_id: Optional[int] = None, budget: int = 100,
+                         resume_id: Optional[int] = None):
+        """Start (or resume) a research adventure."""
+        with self._adventure_lock:
+            if self.current_adventure_id is not None:
+                self.logger.warning("Already on an adventure, cannot start another")
+                return
+
+            db = self.core.db
+
+            if resume_id:
+                # Resume existing adventure
+                adventure_id = resume_id
+                cursor = db.conn.execute("""
+                    UPDATE laney_adventures
+                    SET status = 'exploring', updated_at = ?
+                    WHERE id = ?
+                """, (datetime.now().isoformat(), adventure_id))
+                db.conn.commit()
+                self.logger.info(f"Resuming adventure #{adventure_id}: {topic}")
+            else:
+                # Create new adventure
+                cursor = db.conn.execute("""
+                    INSERT INTO laney_adventures
+                    (topic, seed_source, seed_item_id, status, budget_limit, created_at, updated_at)
+                    VALUES (?, ?, ?, 'exploring', ?, ?, ?)
+                """, (topic, seed_source, seed_item_id, budget,
+                      datetime.now().isoformat(), datetime.now().isoformat()))
+                db.conn.commit()
+                adventure_id = cursor.lastrowid
+                self.logger.info(f"Starting adventure #{adventure_id}: {topic}")
+
+            self.current_adventure_id = adventure_id
+
+        # Notify user
+        self._send_adventure_notification(
+            f"🔮 Going on an adventure!\n\n*Topic:* {topic}\n*Budget:* {budget} prompts\n\nI'll update you as I find interesting things..."
+        )
+
+        # Run adventure in a thread
+        adventure_thread = threading.Thread(
+            target=self._run_adventure,
+            args=(adventure_id,),
+            daemon=True,
+            name=f"adventure-{adventure_id}"
+        )
+        adventure_thread.start()
+
+    def _run_adventure(self, adventure_id: int):
+        """Execute the adventure - the main research loop."""
+        try:
+            from ..llm.nanogpt import NanoGPTClient
+            from ..llm.laney_tools import LANEY_TOOLS, LaneyToolHandler
+
+            config = self.core.config
+            db = self.core.db
+
+            # Load adventure state
+            cursor = db.conn.execute("""
+                SELECT topic, budget_limit, prompts_used, context_messages, items_added
+                FROM laney_adventures WHERE id = ?
+            """, (adventure_id,))
+            row = cursor.fetchone()
+            if not row:
+                self.logger.error(f"Adventure {adventure_id} not found")
+                return
+
+            topic, budget_limit, prompts_used, context_json, items_json = row
+            context_messages = json.loads(context_json or '[]')
+            items_added = json.loads(items_json or '[]')
+
+            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+            tool_handler = LaneyToolHandler(
+                db_path=str(config.db_path),
+                brave_api_key=getattr(config.integrations, 'brave_api_key', None),
+                sandbox_container=config.integrations.sandbox_container if config.integrations.sandbox_enabled else None,
+            )
+
+            # Build system prompt for adventure mode
+            system_prompt = self._build_adventure_system_prompt(topic, budget_limit - prompts_used)
+
+            # Initialize or continue conversation
+            if not context_messages:
+                context_messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Begin your research adventure on: {topic}"}
+                ]
+
+            iteration = 0
+            max_iterations = min(budget_limit - prompts_used, 20)  # Cap iterations per run
+
+            while iteration < max_iterations and prompts_used < budget_limit:
+                # Check if we should stop
+                if self._curiosity_stop.is_set():
+                    self._pause_adventure(adventure_id, context_messages, items_added, "daemon stopping")
+                    return
+
+                # Make LLM call
+                try:
+                    response = client.chat_completion(
+                        messages=context_messages,
+                        model=config.llm.primary,
+                        tools=LANEY_TOOLS,
+                        tool_choice="auto",
+                        temperature=0.5,
+                        timeout=120,
+                    )
+                    prompts_used += 1
+                    self.adventure_budget_used_today += 1
+                    iteration += 1
+
+                except Exception as e:
+                    self.logger.error(f"Adventure API error: {e}")
+                    self._pause_adventure(adventure_id, context_messages, items_added, f"API error: {e}")
+                    return
+
+                # Check for tool calls
+                if client.has_tool_calls(response):
+                    assistant_msg = response["choices"][0]["message"]
+                    context_messages.append(assistant_msg)
+
+                    # Execute tools
+                    for tool_call in client.get_tool_calls(response):
+                        tool_name = tool_call["function"]["name"]
+                        try:
+                            args = json.loads(tool_call["function"]["arguments"])
+                        except json.JSONDecodeError:
+                            args = {}
+
+                        # Execute tool
+                        if tool_name in tool_handler.handlers:
+                            try:
+                                result = tool_handler.handlers[tool_name](**args)
+                                result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
+
+                                # Track items added
+                                if tool_name in ['add_link', 'add_paper'] and isinstance(result, dict) and result.get('success'):
+                                    items_added.append({
+                                        'type': 'link' if tool_name == 'add_link' else 'paper',
+                                        'title': args.get('title') or args.get('url', '')[:50],
+                                    })
+                            except Exception as e:
+                                result_str = json.dumps({"error": str(e)})
+                        else:
+                            result_str = json.dumps({"error": f"Unknown tool: {tool_name}"})
+
+                        context_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": result_str,
+                        })
+
+                    # Save checkpoint
+                    self._save_adventure_checkpoint(adventure_id, prompts_used, context_messages, items_added)
+
+                else:
+                    # No tool calls - got a response
+                    content = client.get_response_text(response)
+                    context_messages.append({"role": "assistant", "content": content})
+
+                    # Check if adventure is complete
+                    if self._is_adventure_complete(content):
+                        self._complete_adventure(adventure_id, context_messages, items_added, content)
+                        return
+
+                    # Send interim update if interesting
+                    if iteration % 5 == 0 or "found" in content.lower() or "interesting" in content.lower():
+                        self._send_adventure_update(content[:300])
+
+                    # Save checkpoint
+                    self._save_adventure_checkpoint(adventure_id, prompts_used, context_messages, items_added)
+
+                    # Continue the adventure
+                    context_messages.append({
+                        "role": "user",
+                        "content": "Continue your exploration. What else can you find? When you feel you've explored enough, say ADVENTURE_COMPLETE and summarize your findings."
+                    })
+
+            # Budget exhausted - wrap up
+            self._complete_adventure(adventure_id, context_messages, items_added, "Budget limit reached - wrapping up")
+
+        except Exception as e:
+            self.logger.error(f"Adventure error: {e}", exc_info=True)
+            self._pause_adventure(adventure_id, [], [], f"Error: {e}")
+
+        finally:
+            with self._adventure_lock:
+                self.current_adventure_id = None
+            tool_handler.close()
+
+    def _build_adventure_system_prompt(self, topic: str, budget_remaining: int) -> str:
+        """Build the system prompt for adventure mode."""
+        return f"""You are Laney on a research adventure. You're autonomously exploring a topic, using your tools to dig deep and find interesting information.
+
+TOPIC: {topic}
+BUDGET: ~{budget_remaining} prompts remaining for this adventure
+
+YOUR MISSION:
+1. Explore the topic thoroughly using web search, URL fetching, and your collection
+2. Follow interesting threads and connections
+3. Add useful resources to the collection (add_link, add_paper)
+4. Share interesting discoveries as you find them
+5. When you feel you've explored enough, say ADVENTURE_COMPLETE and summarize
+
+TOOLS AVAILABLE:
+- brave_search: Search the web
+- fetch_url: Read webpage content
+- search_links, search_books, search_papers: Search the collection
+- add_link, add_paper: Add resources to collection
+- run_bash: Execute code if needed for analysis
+- write_document: Save longer findings
+
+STYLE:
+- Be genuinely curious - follow what interests you
+- Share excitement when you find something cool
+- Make connections to the collection when relevant
+- Be efficient but thorough
+
+Remember: Arthur will see your updates, so keep them interesting and informative!"""
+
+    def _is_adventure_complete(self, content: str) -> bool:
+        """Check if the adventure should end."""
+        markers = ['ADVENTURE_COMPLETE', 'adventure complete', 'wrapping up', 'that concludes']
+        return any(marker.lower() in content.lower() for marker in markers)
+
+    def _save_adventure_checkpoint(self, adventure_id: int, prompts_used: int,
+                                   context_messages: List[Dict], items_added: List[Dict]):
+        """Save adventure progress to database."""
+        try:
+            db = self.core.db
+            db.conn.execute("""
+                UPDATE laney_adventures
+                SET prompts_used = ?, context_messages = ?, items_added = ?, updated_at = ?
+                WHERE id = ?
+            """, (prompts_used, json.dumps(context_messages[-20:]),  # Keep last 20 messages
+                  json.dumps(items_added), datetime.now().isoformat(), adventure_id))
+            db.conn.commit()
+        except Exception as e:
+            self.logger.error(f"Error saving checkpoint: {e}")
+
+    def _pause_adventure(self, adventure_id: int, context_messages: List[Dict],
+                         items_added: List[Dict], reason: str):
+        """Pause an adventure for later resume."""
+        try:
+            db = self.core.db
+            db.conn.execute("""
+                UPDATE laney_adventures
+                SET status = 'paused', context_messages = ?, items_added = ?, updated_at = ?,
+                    last_checkpoint = ?
+                WHERE id = ?
+            """, (json.dumps(context_messages[-20:]), json.dumps(items_added),
+                  datetime.now().isoformat(), json.dumps({"reason": reason}), adventure_id))
+            db.conn.commit()
+
+            self._send_adventure_notification(f"⏸️ Adventure paused\n\nReason: {reason}\n\nI'll resume later!")
+
+        except Exception as e:
+            self.logger.error(f"Error pausing adventure: {e}")
+
+        finally:
+            with self._adventure_lock:
+                self.current_adventure_id = None
+
+    def _complete_adventure(self, adventure_id: int, context_messages: List[Dict],
+                            items_added: List[Dict], final_summary: str):
+        """Complete an adventure and send summary."""
+        try:
+            db = self.core.db
+
+            # Generate a proper summary if we don't have one
+            if len(final_summary) < 100:
+                final_summary = self._generate_adventure_summary(context_messages)
+
+            db.conn.execute("""
+                UPDATE laney_adventures
+                SET status = 'completed', findings_summary = ?, items_added = ?,
+                    completed_at = ?, updated_at = ?
+                WHERE id = ?
+            """, (final_summary, json.dumps(items_added),
+                  datetime.now().isoformat(), datetime.now().isoformat(), adventure_id))
+            db.conn.commit()
+
+            # Build completion message
+            items_msg = ""
+            if items_added:
+                items_msg = f"\n\n📚 Added {len(items_added)} item(s) to collection"
+
+            self._send_adventure_notification(
+                f"✨ Adventure complete!\n\n{final_summary[:500]}{items_msg}"
+            )
+
+            self.logger.info(f"Adventure #{adventure_id} completed. Items added: {len(items_added)}")
+
+        except Exception as e:
+            self.logger.error(f"Error completing adventure: {e}")
+
+        finally:
+            with self._adventure_lock:
+                self.current_adventure_id = None
+
+    def _generate_adventure_summary(self, context_messages: List[Dict]) -> str:
+        """Generate a summary of the adventure findings."""
+        try:
+            from ..llm.nanogpt import NanoGPTClient
+
+            config = self.core.config
+            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+
+            # Extract key content from messages
+            content_parts = []
+            for msg in context_messages[-15:]:
+                if msg.get('role') == 'assistant' and msg.get('content'):
+                    content_parts.append(msg['content'][:300])
+
+            context = "\n---\n".join(content_parts)
+
+            response = client.simple_prompt(
+                prompt=f"Summarize the key findings from this research adventure in 2-3 paragraphs:\n\n{context}",
+                model=config.llm.primary_cheap or config.llm.primary,
+                temperature=0.3,
+            )
+
+            return response.strip()
+
+        except Exception as e:
+            self.logger.error(f"Error generating summary: {e}")
+            return "Adventure completed - summary generation failed."
+
+    def _send_adventure_notification(self, message: str):
+        """Send a Telegram notification about adventure progress."""
+        try:
+            # Get Arthur's chat_id from config or default
+            config = self.core.config
+            owner_chat_id = getattr(config, 'telegram_owner_chat_id', None)
+
+            if not owner_chat_id:
+                # Try to get from authorized users
+                cursor = self.core.db.conn.execute("""
+                    SELECT telegram_user_id FROM users WHERE is_admin = 1 LIMIT 1
+                """)
+                row = cursor.fetchone()
+                if row:
+                    owner_chat_id = row[0]
+
+            if owner_chat_id:
+                self.publish('telegram.send', {
+                    'chat_id': owner_chat_id,
+                    'text': message,
+                    'parse_mode': 'Markdown',
+                })
+        except Exception as e:
+            self.logger.error(f"Error sending adventure notification: {e}")
+
+    def _send_adventure_update(self, update: str):
+        """Send an interim update during adventure."""
+        self._send_adventure_notification(f"💡 *Discovery:*\n\n{update}")
+
+    def trigger_adventure(self, topic: Optional[str] = None, budget: int = 100) -> bool:
+        """Manually trigger an adventure (for testing or /adventure command).
+
+        Args:
+            topic: Specific topic to explore (None = let Laney decide)
+            budget: Prompt budget for this adventure
+
+        Returns:
+            True if adventure started, False otherwise
+        """
+        if self.current_adventure_id is not None:
+            self.logger.warning("Already on an adventure")
+            return False
+
+        if topic:
+            # Direct topic request
+            self._start_adventure(
+                topic=topic,
+                seed_source='user_request',
+                budget=budget,
+            )
+            return True
+        else:
+            # Let Laney decide
+            self._maybe_start_adventure()
+            return self.current_adventure_id is not None
+
+    def get_adventure_status(self) -> Dict[str, Any]:
+        """Get current adventure status for /adventure command."""
+        status = {
+            'on_adventure': self.current_adventure_id is not None,
+            'current_adventure_id': self.current_adventure_id,
+            'budget_used_today': self.adventure_budget_used_today,
+            'budget_total': self.daily_adventure_budget,
+            'current_topic': None,
+            'paused_adventures': [],
+            'recent_completed': [],
+        }
+
+        try:
+            db = self.core.db
+
+            # Current adventure details
+            if self.current_adventure_id:
+                cursor = db.conn.execute("""
+                    SELECT topic, prompts_used, budget_limit
+                    FROM laney_adventures WHERE id = ?
+                """, (self.current_adventure_id,))
+                row = cursor.fetchone()
+                if row:
+                    status['current_topic'] = row[0]
+                    status['current_prompts'] = row[1]
+                    status['current_budget'] = row[2]
+
+            # Paused adventures
+            cursor = db.conn.execute("""
+                SELECT id, topic, prompts_used, budget_limit, created_at
+                FROM laney_adventures WHERE status = 'paused'
+                ORDER BY updated_at DESC LIMIT 3
+            """)
+            status['paused_adventures'] = [
+                {'id': r[0], 'topic': r[1], 'prompts': r[2], 'budget': r[3]}
+                for r in cursor.fetchall()
+            ]
+
+            # Recent completed
+            cursor = db.conn.execute("""
+                SELECT topic, completed_at, prompts_used
+                FROM laney_adventures WHERE status = 'completed'
+                ORDER BY completed_at DESC LIMIT 5
+            """)
+            status['recent_completed'] = [
+                {'topic': r[0], 'completed': r[1], 'prompts': r[2]}
+                for r in cursor.fetchall()
+            ]
+
+        except Exception as e:
+            self.logger.error(f"Error getting adventure status: {e}")
+
+        return status
