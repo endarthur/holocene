@@ -337,6 +337,17 @@
 
             <!-- Files Tab (Sandbox Explorer) -->
             <div id="tab-files" class="tab-content hidden">
+                <!-- Search Box -->
+                <div class="mb-3">
+                    <input
+                        type="text"
+                        id="files-search"
+                        placeholder="Search files... (supports *.png, test_*, etc.)"
+                        class="w-full px-4 py-3 rounded-xl text-sm"
+                        style="background: var(--tg-theme-secondary-bg-color); border: none; outline: none;"
+                    >
+                </div>
+
                 <!-- Breadcrumb Navigation -->
                 <div class="flex items-center gap-2 mb-3 overflow-x-auto" id="files-breadcrumb">
                     <span class="text-sm" style="color: var(--tg-theme-hint-color);">/</span>
@@ -397,6 +408,7 @@
         let tasksData = { active: [], completed: [], stats: {} };
         let filesData = { path: '/', parent: null, items: [] };
         let currentFilesPath = '/';
+        let filesSearchQuery = '';
 
         // Auth header using Telegram init data
         function getAuthHeaders() {
@@ -861,12 +873,22 @@
             // Update breadcrumb
             renderBreadcrumb();
 
-            const items = filesData.items || [];
+            const allItems = filesData.items || [];
+            const items = filterFiles(allItems, filesSearchQuery);
 
-            if (items.length === 0) {
+            if (allItems.length === 0) {
                 document.getElementById('files-list').innerHTML = `
                     <div class="text-sm text-center py-8" style="color: var(--tg-theme-hint-color);">
                         📂 Empty folder
+                    </div>
+                `;
+                return;
+            }
+
+            if (items.length === 0 && filesSearchQuery) {
+                document.getElementById('files-list').innerHTML = `
+                    <div class="text-sm text-center py-8" style="color: var(--tg-theme-hint-color);">
+                        🔍 No files matching "${escapeHtml(filesSearchQuery)}"
                     </div>
                 `;
                 return;
@@ -958,6 +980,31 @@
             return previewable.includes(ext);
         }
 
+        // Convert glob pattern to regex
+        function globToRegex(glob) {
+            if (!glob) return null;
+            // Escape regex special chars except * and ?
+            let regex = glob
+                .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+                .replace(/\*/g, '.*')
+                .replace(/\?/g, '.');
+            return new RegExp('^' + regex + '$', 'i');
+        }
+
+        // Filter files by search query
+        function filterFiles(items, query) {
+            if (!query || !query.trim()) return items;
+            const regex = globToRegex(query.trim());
+            if (!regex) return items;
+            return items.filter(item => regex.test(item.name));
+        }
+
+        // Files search handler
+        document.getElementById('files-search')?.addEventListener('input', (e) => {
+            filesSearchQuery = e.target.value;
+            renderFiles();
+        });
+
         // Toggle file preview
         function toggleFilePreview(el, path, ext) {
             const preview = el.querySelector('.file-preview');
@@ -1028,6 +1075,10 @@
         // Navigate to folder
         function navigateToFolder(path) {
             tg.HapticFeedback.impactOccurred('light');
+            // Clear search when navigating
+            filesSearchQuery = '';
+            const searchInput = document.getElementById('files-search');
+            if (searchInput) searchInput.value = '';
             loadFiles(path);
         }
 
