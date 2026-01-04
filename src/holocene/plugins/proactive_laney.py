@@ -1190,18 +1190,27 @@ Remember: Arthur will see your updates, so keep them interesting and informative
 
     def _save_adventure_checkpoint(self, adventure_id: int, prompts_used: int,
                                    context_messages: List[Dict], items_added: List[Dict]):
-        """Save adventure progress to database."""
-        try:
-            db = self.core.db
-            db.conn.execute("""
-                UPDATE laney_adventures
-                SET prompts_used = ?, context_messages = ?, items_added = ?, updated_at = ?
-                WHERE id = ?
-            """, (prompts_used, json.dumps(context_messages[-20:]),  # Keep last 20 messages
-                  json.dumps(items_added), datetime.now().isoformat(), adventure_id))
-            db.conn.commit()
-        except Exception as e:
-            self.logger.error(f"Error saving checkpoint: {e}")
+        """Save adventure progress to database with retry for lock handling."""
+        import time
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                db = self.core.db
+                db.conn.execute("PRAGMA busy_timeout = 5000")  # Wait up to 5s for lock
+                db.conn.execute("""
+                    UPDATE laney_adventures
+                    SET prompts_used = ?, context_messages = ?, items_added = ?, updated_at = ?
+                    WHERE id = ?
+                """, (prompts_used, json.dumps(context_messages[-20:]),  # Keep last 20 messages
+                      json.dumps(items_added), datetime.now().isoformat(), adventure_id))
+                db.conn.commit()
+                return  # Success
+            except Exception as e:
+                if "locked" in str(e).lower() and attempt < max_retries - 1:
+                    self.logger.warning(f"Database locked, retry {attempt + 1}/{max_retries}")
+                    time.sleep(1)
+                else:
+                    self.logger.error(f"Error saving checkpoint: {e}")
 
     def _pause_adventure(self, adventure_id: int, context_messages: List[Dict],
                          items_added: List[Dict], reason: str):
