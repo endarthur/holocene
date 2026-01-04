@@ -1241,9 +1241,9 @@ Remember: Arthur will see your updates, so keep them interesting and informative
         try:
             db = self.core.db
 
-            # Generate a proper summary if we don't have one
-            if len(final_summary) < 100:
-                final_summary = self._generate_adventure_summary(context_messages)
+            # Always generate a proper summary from the actual findings
+            # The LLM's "final summary" is often generic - we want to summarize the tool results
+            final_summary = self._generate_adventure_summary(context_messages)
 
             db.conn.execute("""
                 UPDATE laney_adventures
@@ -1273,23 +1273,46 @@ Remember: Arthur will see your updates, so keep them interesting and informative
                 self.current_adventure_id = None
 
     def _generate_adventure_summary(self, context_messages: List[Dict]) -> str:
-        """Generate a summary of the adventure findings."""
+        """Generate a summary of the adventure findings from tool results."""
         try:
             from ..llm.nanogpt import NanoGPTClient
 
             config = self.core.config
             client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
 
-            # Extract key content from messages
-            content_parts = []
-            for msg in context_messages[-15:]:
-                if msg.get('role') == 'assistant' and msg.get('content'):
-                    content_parts.append(msg['content'][:300])
+            # Extract findings from tool results (where the actual data is)
+            findings = []
+            for msg in context_messages:
+                if msg.get('role') == 'tool':
+                    content = msg.get('content', '')
+                    try:
+                        data = json.loads(content) if content.startswith('{') else {}
+                        # Extract web search results
+                        if 'results' in data and isinstance(data['results'], list):
+                            for r in data['results'][:3]:
+                                if r.get('title') and r.get('url'):
+                                    findings.append(f"- {r['title']}: {r.get('description', '')[:150]}")
+                        # Extract fetched URLs
+                        if data.get('success') and data.get('url') and data.get('content'):
+                            url = data['url']
+                            snippet = data['content'][:300].replace('\n', ' ')
+                            findings.append(f"- Found at {url}: {snippet}")
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
-            context = "\n---\n".join(content_parts)
+            if not findings:
+                return "Adventure completed - no specific findings recorded."
+
+            findings_text = "\n".join(findings[-20:])  # Last 20 findings
 
             response = client.simple_prompt(
-                prompt=f"Summarize the key findings from this research adventure in 2-3 paragraphs:\n\n{context}",
+                prompt=f"""Summarize the key findings from this research adventure in 2-3 paragraphs.
+Focus on specific tools, libraries, projects, or resources discovered. Be concrete, not generic.
+
+FINDINGS:
+{findings_text}
+
+Write a concise summary highlighting the most important discoveries:""",
                 model=config.llm.primary_cheap or config.llm.primary,
                 temperature=0.3,
             )
