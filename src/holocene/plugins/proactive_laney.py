@@ -1259,8 +1259,10 @@ Remember: Arthur will see your updates, so keep them interesting and informative
             if items_added:
                 items_msg = f"\n\n📚 Added {len(items_added)} item(s) to collection"
 
+            # Telegram allows 4096 chars - use most of the summary
+            summary_for_msg = final_summary[:3500] if len(final_summary) > 3500 else final_summary
             self._send_adventure_notification(
-                f"✨ Adventure complete!\n\n{final_summary[:500]}{items_msg}"
+                f"✨ Adventure complete!\n\n{summary_for_msg}{items_msg}"
             )
 
             self.logger.info(f"Adventure #{adventure_id} completed. Items added: {len(items_added)}")
