@@ -692,12 +692,37 @@ This is for a daily email digest - it should be the most interesting part."""
         self._curiosity_stop = threading.Event()
         self._curiosity_thread: Optional[threading.Thread] = None
 
+    def _cleanup_orphaned_adventures(self):
+        """Mark any 'exploring' adventures as 'paused' on startup.
+
+        This handles cases where adventures crashed/interrupted without proper cleanup.
+        """
+        import sqlite3
+        try:
+            conn = sqlite3.connect(str(self.core.config.db_path), timeout=30.0)
+            cursor = conn.execute("""
+                UPDATE laney_adventures
+                SET status = 'paused', last_checkpoint = '{"reason": "orphaned on restart"}'
+                WHERE status = 'exploring'
+            """)
+            orphaned_count = cursor.rowcount
+            conn.commit()
+            conn.close()
+
+            if orphaned_count > 0:
+                self.logger.info(f"Cleaned up {orphaned_count} orphaned adventure(s)")
+        except Exception as e:
+            self.logger.error(f"Error cleaning up orphaned adventures: {e}")
+
     def _start_curiosity_engine(self):
         """Start the curiosity check loop."""
         if not self._can_run:
             return
 
         self._init_curiosity_engine()
+
+        # Clean up any orphaned adventures from previous crashes
+        self._cleanup_orphaned_adventures()
         self._curiosity_stop.clear()
         self._curiosity_thread = threading.Thread(
             target=self._curiosity_loop,
