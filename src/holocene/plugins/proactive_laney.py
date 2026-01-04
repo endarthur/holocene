@@ -1207,41 +1207,49 @@ Remember: Arthur will see your updates, so keep them interesting and informative
 
     def _save_adventure_checkpoint(self, adventure_id: int, prompts_used: int,
                                    context_messages: List[Dict], items_added: List[Dict]):
-        """Save adventure progress to database with retry for lock handling."""
+        """Save adventure progress to database using dedicated connection."""
+        import sqlite3
         import time
         max_retries = 3
+
         for attempt in range(max_retries):
             try:
-                db = self.core.db
-                db.conn.execute("PRAGMA busy_timeout = 5000")  # Wait up to 5s for lock
-                db.conn.execute("""
+                # Use dedicated connection for thread-safety
+                conn = sqlite3.connect(str(self.core.config.db_path), timeout=10.0)
+                conn.execute("PRAGMA journal_mode=WAL")  # Better concurrency
+                conn.execute("""
                     UPDATE laney_adventures
                     SET prompts_used = ?, context_messages = ?, items_added = ?, updated_at = ?
                     WHERE id = ?
                 """, (prompts_used, json.dumps(context_messages[-20:]),  # Keep last 20 messages
                       json.dumps(items_added), datetime.now().isoformat(), adventure_id))
-                db.conn.commit()
+                conn.commit()
+                conn.close()
                 return  # Success
             except Exception as e:
                 if "locked" in str(e).lower() and attempt < max_retries - 1:
                     self.logger.warning(f"Database locked, retry {attempt + 1}/{max_retries}")
-                    time.sleep(1)
+                    time.sleep(1 + attempt)  # Increasing backoff
                 else:
                     self.logger.error(f"Error saving checkpoint: {e}")
 
     def _pause_adventure(self, adventure_id: int, context_messages: List[Dict],
                          items_added: List[Dict], reason: str):
         """Pause an adventure for later resume."""
+        import sqlite3
         try:
-            db = self.core.db
-            db.conn.execute("""
+            # Use dedicated connection for thread-safety
+            conn = sqlite3.connect(str(self.core.config.db_path), timeout=10.0)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
                 UPDATE laney_adventures
                 SET status = 'paused', context_messages = ?, items_added = ?, updated_at = ?,
                     last_checkpoint = ?
                 WHERE id = ?
             """, (json.dumps(context_messages[-20:]), json.dumps(items_added),
                   datetime.now().isoformat(), json.dumps({"reason": reason}), adventure_id))
-            db.conn.commit()
+            conn.commit()
+            conn.close()
 
             self._send_adventure_notification(f"⏸️ Adventure paused\n\nReason: {reason}\n\nI'll resume later!")
 
@@ -1255,21 +1263,24 @@ Remember: Arthur will see your updates, so keep them interesting and informative
     def _complete_adventure(self, adventure_id: int, context_messages: List[Dict],
                             items_added: List[Dict], final_summary: str):
         """Complete an adventure and send summary."""
+        import sqlite3
         try:
-            db = self.core.db
-
             # Always generate a proper summary from the actual findings
             # The LLM's "final summary" is often generic - we want to summarize the tool results
             final_summary = self._generate_adventure_summary(context_messages)
 
-            db.conn.execute("""
+            # Use dedicated connection for thread-safety
+            conn = sqlite3.connect(str(self.core.config.db_path), timeout=10.0)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
                 UPDATE laney_adventures
                 SET status = 'completed', findings_summary = ?, items_added = ?,
                     completed_at = ?, updated_at = ?
                 WHERE id = ?
             """, (final_summary, json.dumps(items_added),
                   datetime.now().isoformat(), datetime.now().isoformat(), adventure_id))
-            db.conn.commit()
+            conn.commit()
+            conn.close()
 
             # Build completion message
             items_msg = ""
