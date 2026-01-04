@@ -1098,12 +1098,29 @@ This is for a daily email digest - it should be the most interesting part."""
                                 result = tool_handler.handlers[tool_name](**args)
                                 result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
 
-                                # Track items added
+                                # Track items added and notify (always - important!)
                                 if tool_name in ['add_link', 'add_paper'] and isinstance(result, dict) and result.get('success'):
+                                    item_title = args.get('title') or args.get('url', '')[:50]
                                     items_added.append({
                                         'type': 'link' if tool_name == 'add_link' else 'paper',
-                                        'title': args.get('title') or args.get('url', '')[:50],
+                                        'title': item_title,
                                     })
+                                    self._send_adventure_update(
+                                        f"📚 Added to collection: *{item_title[:60]}*",
+                                        force=True  # Always notify for collection adds
+                                    )
+
+                                # Send update on web search results (rate-limited)
+                                elif tool_name == 'web_search' and isinstance(result, dict):
+                                    results = result.get('results', [])
+                                    if results:
+                                        query = args.get('query', 'topic')[:40]
+                                        top_titles = [r.get('title', '')[:50] for r in results[:2]]
+                                        self._send_adventure_update(
+                                            f"🔍 Searched: _{query}_\n\nFound: {', '.join(top_titles)}"
+                                            # Rate-limited by default
+                                        )
+
                             except Exception as e:
                                 result_str = json.dumps({"error": str(e)})
                         else:
@@ -1350,8 +1367,17 @@ Write a concise summary highlighting the most important discoveries:""",
         except Exception as e:
             self.logger.error(f"Error sending adventure notification: {e}")
 
-    def _send_adventure_update(self, update: str):
-        """Send an interim update during adventure."""
+    def _send_adventure_update(self, update: str, force: bool = False):
+        """Send an interim update during adventure with rate limiting."""
+        import time
+        now = time.time()
+
+        # Rate limit: max one update per 30 seconds (unless forced)
+        if not force and hasattr(self, '_last_update_time'):
+            if now - self._last_update_time < 30:
+                return  # Skip this update
+
+        self._last_update_time = now
         self._send_adventure_notification(f"💡 *Discovery:*\n\n{update}")
 
     def trigger_adventure(self, topic: Optional[str] = None, budget: int = 100) -> bool:
