@@ -175,6 +175,9 @@
             <button class="tab-btn flex-1 py-3 text-sm font-medium" data-tab="conversations">
                 Chats
             </button>
+            <button class="tab-btn flex-1 py-3 text-sm font-medium" data-tab="files">
+                Files
+            </button>
         </nav>
 
         <!-- Tab Content -->
@@ -331,6 +334,40 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Files Tab (Sandbox Explorer) -->
+            <div id="tab-files" class="tab-content hidden">
+                <!-- Breadcrumb Navigation -->
+                <div class="flex items-center gap-2 mb-3 overflow-x-auto" id="files-breadcrumb">
+                    <span class="text-sm" style="color: var(--tg-theme-hint-color);">/</span>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex gap-2 mb-4">
+                    <label class="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-center cursor-pointer" style="background: var(--tg-theme-button-color); color: var(--tg-theme-button-text-color);">
+                        📤 Upload
+                        <input type="file" id="file-upload-input" class="hidden" multiple>
+                    </label>
+                    <button onclick="createFolder()" class="px-4 py-2 rounded-lg text-sm font-medium" style="background: var(--tg-theme-secondary-bg-color);">
+                        📁 New Folder
+                    </button>
+                </div>
+
+                <!-- File List -->
+                <div id="files-list">
+                    <div class="flex justify-center py-8">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+
+                <!-- Upload Progress -->
+                <div id="upload-progress" class="hidden fixed bottom-4 left-4 right-4 p-4 rounded-xl" style="background: var(--tg-theme-secondary-bg-color);">
+                    <div class="flex items-center gap-3">
+                        <div class="spinner"></div>
+                        <span class="text-sm">Uploading...</span>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -358,6 +395,8 @@
         let collectionData = { books: [], papers: [], links: [] };
         let conversationsData = [];
         let tasksData = { active: [], completed: [], stats: {} };
+        let filesData = { path: '/', parent: null, items: [] };
+        let currentFilesPath = '/';
 
         // Auth header using Telegram init data
         function getAuthHeaders() {
@@ -417,6 +456,8 @@
                 loadCollection();
             } else if (tab === 'conversations' && conversationsData.length === 0) {
                 loadConversations();
+            } else if (tab === 'files') {
+                loadFiles();
             }
         }
 
@@ -794,6 +835,233 @@
                 action: 'resume_conversation',
                 conversation_id: id
             }));
+        }
+
+        // === File Explorer Functions ===
+
+        // Load files from sandbox
+        async function loadFiles(path = currentFilesPath) {
+            try {
+                const response = await api(`/webapp/sandbox/files?path=${encodeURIComponent(path)}`);
+                filesData = response;
+                currentFilesPath = response.path;
+                renderFiles();
+            } catch (error) {
+                console.error('Failed to load files:', error);
+                document.getElementById('files-list').innerHTML = `
+                    <div class="text-sm text-center py-8" style="color: var(--tg-theme-hint-color);">
+                        ${error.message || 'Failed to load files'}
+                    </div>
+                `;
+            }
+        }
+
+        // Render file list
+        function renderFiles() {
+            // Update breadcrumb
+            renderBreadcrumb();
+
+            const items = filesData.items || [];
+
+            if (items.length === 0) {
+                document.getElementById('files-list').innerHTML = `
+                    <div class="text-sm text-center py-8" style="color: var(--tg-theme-hint-color);">
+                        📂 Empty folder
+                    </div>
+                `;
+                return;
+            }
+
+            document.getElementById('files-list').innerHTML = items.map(item => {
+                const icon = item.is_dir ? '📁' : getFileIcon(item.extension);
+                const size = item.size ? formatFileSize(item.size) : '';
+
+                return `
+                    <div class="collection-item" onclick="${item.is_dir ? `navigateToFolder('${item.path}')` : `showFileActions('${item.path}', '${escapeHtml(item.name)}')`}">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">${icon}</span>
+                            <div class="flex-1 min-w-0">
+                                <div class="font-medium text-sm truncate">${escapeHtml(item.name)}</div>
+                                <div class="text-xs" style="color: var(--tg-theme-hint-color);">
+                                    ${size}${size ? ' • ' : ''}${formatDate(item.modified)}
+                                </div>
+                            </div>
+                            ${!item.is_dir ? '<span class="text-lg" style="color: var(--tg-theme-hint-color);">⋮</span>' : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Render breadcrumb navigation
+        function renderBreadcrumb() {
+            const parts = currentFilesPath.split('/').filter(p => p);
+            let html = `<span class="text-sm cursor-pointer" style="color: var(--tg-theme-link-color);" onclick="navigateToFolder('/')">🏠</span>`;
+
+            let accumulated = '';
+            for (const part of parts) {
+                accumulated += '/' + part;
+                const path = accumulated;
+                html += `
+                    <span style="color: var(--tg-theme-hint-color);">/</span>
+                    <span class="text-sm cursor-pointer truncate max-w-[100px]" style="color: var(--tg-theme-link-color);" onclick="navigateToFolder('${path}')">${escapeHtml(part)}</span>
+                `;
+            }
+
+            document.getElementById('files-breadcrumb').innerHTML = html;
+        }
+
+        // Navigate to folder
+        function navigateToFolder(path) {
+            tg.HapticFeedback.impactOccurred('light');
+            loadFiles(path);
+        }
+
+        // Show file actions (download, rename, delete)
+        function showFileActions(path, name) {
+            tg.HapticFeedback.impactOccurred('medium');
+
+            // Use Telegram popup for actions
+            tg.showPopup({
+                title: name,
+                message: 'What would you like to do?',
+                buttons: [
+                    { id: 'download', type: 'default', text: '📥 Download' },
+                    { id: 'rename', type: 'default', text: '✏️ Rename' },
+                    { id: 'delete', type: 'destructive', text: '🗑️ Delete' },
+                    { id: 'cancel', type: 'cancel' }
+                ]
+            }, (buttonId) => {
+                if (buttonId === 'download') {
+                    downloadFile(path);
+                } else if (buttonId === 'rename') {
+                    renameFile(path, name);
+                } else if (buttonId === 'delete') {
+                    deleteFile(path, name);
+                }
+            });
+        }
+
+        // Download file
+        function downloadFile(path) {
+            const url = `${API_BASE}/webapp/sandbox/download?path=${encodeURIComponent(path)}`;
+            // Open in new tab/trigger download
+            tg.openLink(url);
+        }
+
+        // Rename file
+        function renameFile(path, currentName) {
+            const newName = prompt('Enter new name:', currentName);
+            if (newName && newName !== currentName) {
+                const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
+                const newPath = parentPath + '/' + newName;
+
+                api('/webapp/sandbox/rename', {
+                    method: 'POST',
+                    body: JSON.stringify({ old_path: path, new_path: newPath })
+                }).then(() => {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    loadFiles();
+                }).catch(error => {
+                    tg.HapticFeedback.notificationOccurred('error');
+                    alert('Rename failed: ' + error.message);
+                });
+            }
+        }
+
+        // Delete file
+        function deleteFile(path, name) {
+            tg.showPopup({
+                title: 'Delete ' + name + '?',
+                message: 'This action cannot be undone.',
+                buttons: [
+                    { id: 'delete', type: 'destructive', text: 'Delete' },
+                    { id: 'cancel', type: 'cancel' }
+                ]
+            }, (buttonId) => {
+                if (buttonId === 'delete') {
+                    api(`/webapp/sandbox/files?path=${encodeURIComponent(path)}`, {
+                        method: 'DELETE'
+                    }).then(() => {
+                        tg.HapticFeedback.notificationOccurred('success');
+                        loadFiles();
+                    }).catch(error => {
+                        tg.HapticFeedback.notificationOccurred('error');
+                        alert('Delete failed: ' + error.message);
+                    });
+                }
+            });
+        }
+
+        // Create new folder
+        function createFolder() {
+            const name = prompt('Enter folder name:');
+            if (name) {
+                // Create folder by uploading an empty file and deleting it? No...
+                // Actually we need to use run_bash or add a mkdir endpoint
+                // For now, just show info
+                tg.showAlert('Folder creation requires running a command in sandbox. Use Laney to create folders with run_bash.');
+            }
+        }
+
+        // File upload handler
+        document.getElementById('file-upload-input')?.addEventListener('change', async (e) => {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+
+            const progressEl = document.getElementById('upload-progress');
+            progressEl.classList.remove('hidden');
+
+            for (const file of files) {
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('path', currentFilesPath);
+
+                    const response = await fetch(`${API_BASE}/webapp/sandbox/upload`, {
+                        method: 'POST',
+                        headers: {
+                            'X-Telegram-Init-Data': tg.initData
+                        },
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Upload failed: ${response.status}`);
+                    }
+
+                    tg.HapticFeedback.notificationOccurred('success');
+                } catch (error) {
+                    tg.HapticFeedback.notificationOccurred('error');
+                    alert('Upload failed: ' + error.message);
+                }
+            }
+
+            progressEl.classList.add('hidden');
+            e.target.value = ''; // Reset input
+            loadFiles(); // Refresh list
+        });
+
+        // Get icon for file type
+        function getFileIcon(ext) {
+            const icons = {
+                '.png': '🖼️', '.jpg': '🖼️', '.jpeg': '🖼️', '.gif': '🖼️', '.webp': '🖼️', '.svg': '🖼️',
+                '.pdf': '📄', '.doc': '📄', '.docx': '📄', '.txt': '📄', '.md': '📄',
+                '.csv': '📊', '.xlsx': '📊', '.xls': '📊', '.json': '📋',
+                '.py': '🐍', '.js': '📜', '.html': '🌐', '.css': '🎨',
+                '.zip': '📦', '.tar': '📦', '.gz': '📦', '.rar': '📦',
+                '.mp3': '🎵', '.wav': '🎵', '.mp4': '🎬', '.mov': '🎬',
+            };
+            return icons[ext] || '📄';
+        }
+
+        // Format file size
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
         }
 
         // Connection status

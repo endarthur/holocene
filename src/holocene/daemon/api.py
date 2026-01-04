@@ -256,6 +256,13 @@ class APIServer:
         self.app.route("/webapp/links", methods=["GET"])(self._webapp_links)
         self.app.route("/webapp/tasks", methods=["GET"])(self._webapp_tasks)
 
+        # Sandbox file explorer endpoints
+        self.app.route("/webapp/sandbox/files", methods=["GET"])(self._webapp_sandbox_list)
+        self.app.route("/webapp/sandbox/files", methods=["DELETE"])(self._webapp_sandbox_delete)
+        self.app.route("/webapp/sandbox/download", methods=["GET"])(self._webapp_sandbox_download)
+        self.app.route("/webapp/sandbox/rename", methods=["POST"])(self._webapp_sandbox_rename)
+        self.app.route("/webapp/sandbox/upload", methods=["POST"])(self._webapp_sandbox_upload)
+
         # Error handlers
         self.app.errorhandler(404)(self._not_found)
         self.app.errorhandler(500)(self._internal_error)
@@ -2554,6 +2561,260 @@ class APIServer:
                 return dt.strftime('%b %d')
         except Exception:
             return ''
+
+    # === Sandbox File Explorer ===
+
+    def _get_sandbox_dir(self):
+        """Get sandbox directory path."""
+        from pathlib import Path
+        return Path.home() / ".holocene" / "sandbox"
+
+    def _safe_sandbox_path(self, requested_path: str):
+        """Resolve path safely within sandbox, preventing traversal attacks.
+
+        Returns (resolved_path, error_message). If error_message is set, path is invalid.
+        """
+        from pathlib import Path
+        sandbox_dir = self._get_sandbox_dir()
+
+        # Normalize and resolve the path
+        if not requested_path:
+            requested_path = "/"
+
+        # Remove leading slash and resolve
+        clean_path = requested_path.lstrip("/")
+        full_path = (sandbox_dir / clean_path).resolve()
+
+        # Security: ensure path is within sandbox
+        try:
+            full_path.relative_to(sandbox_dir.resolve())
+        except ValueError:
+            return None, "Access denied: path outside sandbox"
+
+        return full_path, None
+
+    def _webapp_sandbox_list(self):
+        """GET /webapp/sandbox/files - List files in sandbox directory."""
+        from pathlib import Path
+        import os
+
+        try:
+            path = request.args.get('path', '/')
+            full_path, error = self._safe_sandbox_path(path)
+
+            if error:
+                return jsonify({"error": error}), 403
+
+            sandbox_dir = self._get_sandbox_dir()
+
+            # Create sandbox dir if it doesn't exist
+            if not sandbox_dir.exists():
+                sandbox_dir.mkdir(parents=True, exist_ok=True)
+
+            if not full_path.exists():
+                return jsonify({"error": "Path not found"}), 404
+
+            if not full_path.is_dir():
+                return jsonify({"error": "Path is not a directory"}), 400
+
+            # List directory contents
+            items = []
+            for item in sorted(full_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+                stat = item.stat()
+                rel_path = str(item.relative_to(sandbox_dir))
+
+                items.append({
+                    "name": item.name,
+                    "path": "/" + rel_path,
+                    "is_dir": item.is_dir(),
+                    "size": stat.st_size if item.is_file() else None,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "extension": item.suffix.lower() if item.is_file() else None,
+                })
+
+            # Calculate current path relative to sandbox
+            if full_path == sandbox_dir:
+                current_path = "/"
+                parent_path = None
+            else:
+                current_path = "/" + str(full_path.relative_to(sandbox_dir))
+                parent = full_path.parent
+                parent_path = "/" + str(parent.relative_to(sandbox_dir)) if parent != sandbox_dir else "/"
+
+            return jsonify({
+                "path": current_path,
+                "parent": parent_path,
+                "items": items,
+                "count": len(items),
+            })
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/sandbox/files: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _webapp_sandbox_download(self):
+        """GET /webapp/sandbox/download - Download a file from sandbox."""
+        try:
+            path = request.args.get('path')
+            if not path:
+                return jsonify({"error": "Missing path parameter"}), 400
+
+            full_path, error = self._safe_sandbox_path(path)
+            if error:
+                return jsonify({"error": error}), 403
+
+            if not full_path.exists():
+                return jsonify({"error": "File not found"}), 404
+
+            if not full_path.is_file():
+                return jsonify({"error": "Path is not a file"}), 400
+
+            # Determine mime type
+            import mimetypes
+            mime_type, _ = mimetypes.guess_type(str(full_path))
+            if not mime_type:
+                mime_type = 'application/octet-stream'
+
+            return send_file(
+                full_path,
+                mimetype=mime_type,
+                as_attachment=True,
+                download_name=full_path.name
+            )
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/sandbox/download: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _webapp_sandbox_delete(self):
+        """DELETE /webapp/sandbox/files - Delete a file or empty directory."""
+        try:
+            path = request.args.get('path')
+            if not path:
+                return jsonify({"error": "Missing path parameter"}), 400
+
+            if path == "/" or path == "":
+                return jsonify({"error": "Cannot delete root directory"}), 403
+
+            full_path, error = self._safe_sandbox_path(path)
+            if error:
+                return jsonify({"error": error}), 403
+
+            if not full_path.exists():
+                return jsonify({"error": "Path not found"}), 404
+
+            if full_path.is_dir():
+                # Only delete empty directories
+                if any(full_path.iterdir()):
+                    return jsonify({"error": "Directory is not empty"}), 400
+                full_path.rmdir()
+            else:
+                full_path.unlink()
+
+            return jsonify({
+                "success": True,
+                "deleted": path,
+            })
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/sandbox/files DELETE: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _webapp_sandbox_rename(self):
+        """POST /webapp/sandbox/rename - Rename or move a file/directory."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Missing JSON body"}), 400
+
+            old_path = data.get('old_path')
+            new_path = data.get('new_path')
+
+            if not old_path or not new_path:
+                return jsonify({"error": "Missing old_path or new_path"}), 400
+
+            old_full, error = self._safe_sandbox_path(old_path)
+            if error:
+                return jsonify({"error": f"old_path: {error}"}), 403
+
+            new_full, error = self._safe_sandbox_path(new_path)
+            if error:
+                return jsonify({"error": f"new_path: {error}"}), 403
+
+            if not old_full.exists():
+                return jsonify({"error": "Source path not found"}), 404
+
+            if new_full.exists():
+                return jsonify({"error": "Destination already exists"}), 400
+
+            # Ensure parent directory exists
+            new_full.parent.mkdir(parents=True, exist_ok=True)
+
+            old_full.rename(new_full)
+
+            return jsonify({
+                "success": True,
+                "old_path": old_path,
+                "new_path": new_path,
+            })
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/sandbox/rename: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
+
+    def _webapp_sandbox_upload(self):
+        """POST /webapp/sandbox/upload - Upload a file to sandbox."""
+        try:
+            # Check for file in request
+            if 'file' not in request.files:
+                return jsonify({"error": "No file in request"}), 400
+
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({"error": "No file selected"}), 400
+
+            # Get destination path (default to root)
+            dest_dir = request.form.get('path', '/')
+
+            dest_dir_full, error = self._safe_sandbox_path(dest_dir)
+            if error:
+                return jsonify({"error": error}), 403
+
+            # Create directory if needed
+            dest_dir_full.mkdir(parents=True, exist_ok=True)
+
+            # Sanitize filename
+            from werkzeug.utils import secure_filename
+            filename = secure_filename(file.filename)
+            if not filename:
+                return jsonify({"error": "Invalid filename"}), 400
+
+            # Save file
+            dest_path = dest_dir_full / filename
+
+            # Check file size (limit to 50MB)
+            file.seek(0, 2)  # Seek to end
+            size = file.tell()
+            file.seek(0)  # Seek back to start
+
+            if size > 50 * 1024 * 1024:
+                return jsonify({"error": "File too large (max 50MB)"}), 400
+
+            file.save(str(dest_path))
+
+            sandbox_dir = self._get_sandbox_dir()
+            rel_path = "/" + str(dest_path.relative_to(sandbox_dir))
+
+            return jsonify({
+                "success": True,
+                "path": rel_path,
+                "filename": filename,
+                "size": size,
+            })
+
+        except Exception as e:
+            logger.error(f"Error in /webapp/sandbox/upload: {e}", exc_info=True)
+            return jsonify({"error": str(e)}), 500
 
     # Error handlers
 
