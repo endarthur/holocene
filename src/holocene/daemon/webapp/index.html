@@ -897,17 +897,19 @@
 
             // Add click handlers via event delegation
             document.querySelectorAll('.file-item').forEach(el => {
-                el.addEventListener('click', () => {
-                    const path = decodeURIComponent(el.dataset.path);
-                    const name = decodeURIComponent(el.dataset.name);
-                    const isDir = el.dataset.isDir === 'true';
+                el.onclick = function() {
+                    const path = decodeURIComponent(this.dataset.path);
+                    const name = decodeURIComponent(this.dataset.name);
+                    const isDir = this.dataset.isDir === 'true';
+
+                    console.log('File clicked:', path, name, isDir);
 
                     if (isDir) {
                         navigateToFolder(path);
                     } else {
                         showFileActions(path, name);
                     }
-                });
+                };
             });
         }
 
@@ -937,27 +939,50 @@
 
         // Show file actions (download, rename, delete)
         function showFileActions(path, name) {
-            tg.HapticFeedback.impactOccurred('medium');
+            console.log('showFileActions called:', path, name);
+
+            try {
+                tg.HapticFeedback.impactOccurred('medium');
+            } catch (e) {
+                console.log('HapticFeedback error:', e);
+            }
+
+            // Check if showPopup is available
+            if (typeof tg.showPopup !== 'function') {
+                console.log('showPopup not available, using confirm');
+                // Fallback to simple confirm/prompt
+                const action = prompt(`${name}\n\nChoose action:\n1 = Download\n2 = Rename\n3 = Delete\n\nEnter number:`);
+                if (action === '1') downloadFile(path);
+                else if (action === '2') renameFile(path, name);
+                else if (action === '3') deleteFile(path, name);
+                return;
+            }
 
             // Use Telegram popup for actions
-            tg.showPopup({
-                title: name,
-                message: 'What would you like to do?',
-                buttons: [
-                    { id: 'download', type: 'default', text: '📥 Download' },
-                    { id: 'rename', type: 'default', text: '✏️ Rename' },
-                    { id: 'delete', type: 'destructive', text: '🗑️ Delete' },
-                    { id: 'cancel', type: 'cancel' }
-                ]
-            }, (buttonId) => {
-                if (buttonId === 'download') {
-                    downloadFile(path);
-                } else if (buttonId === 'rename') {
-                    renameFile(path, name);
-                } else if (buttonId === 'delete') {
-                    deleteFile(path, name);
-                }
-            });
+            try {
+                tg.showPopup({
+                    title: name,
+                    message: 'What would you like to do?',
+                    buttons: [
+                        { id: 'download', type: 'default', text: '📥 Download' },
+                        { id: 'rename', type: 'default', text: '✏️ Rename' },
+                        { id: 'delete', type: 'destructive', text: '🗑️ Delete' },
+                        { id: 'cancel', type: 'cancel' }
+                    ]
+                }, (buttonId) => {
+                    console.log('Popup callback:', buttonId);
+                    if (buttonId === 'download') {
+                        downloadFile(path);
+                    } else if (buttonId === 'rename') {
+                        renameFile(path, name);
+                    } else if (buttonId === 'delete') {
+                        deleteFile(path, name);
+                    }
+                });
+            } catch (e) {
+                console.error('showPopup error:', e);
+                alert('Error: ' + e.message);
+            }
         }
 
         // Download file
