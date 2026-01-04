@@ -896,13 +896,22 @@
             }).join('');
 
             // Add click handlers via event delegation
-            document.querySelectorAll('.file-item').forEach(el => {
-                el.onclick = function() {
+            const fileItems = document.querySelectorAll('.file-item');
+            console.log('Found file items:', fileItems.length);
+
+            fileItems.forEach((el, idx) => {
+                console.log(`Setting up click for item ${idx}:`, el.dataset.name);
+                el.style.cursor = 'pointer'; // Ensure pointer cursor
+                el.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
                     const path = decodeURIComponent(this.dataset.path);
                     const name = decodeURIComponent(this.dataset.name);
                     const isDir = this.dataset.isDir === 'true';
 
                     console.log('File clicked:', path, name, isDir);
+                    alert('Clicked: ' + name); // Debug alert
 
                     if (isDir) {
                         navigateToFolder(path);
