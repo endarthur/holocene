@@ -875,9 +875,12 @@
             document.getElementById('files-list').innerHTML = items.map(item => {
                 const icon = item.is_dir ? '📁' : getFileIcon(item.extension);
                 const size = item.size ? formatFileSize(item.size) : '';
+                // Encode path and name for safe use in onclick
+                const encodedPath = encodeURIComponent(item.path);
+                const encodedName = encodeURIComponent(item.name);
 
                 return `
-                    <div class="collection-item" onclick="${item.is_dir ? `navigateToFolder('${item.path}')` : `showFileActions('${item.path}', '${escapeHtml(item.name)}')`}">
+                    <div class="collection-item file-item" data-path="${encodedPath}" data-name="${encodedName}" data-is-dir="${item.is_dir}">
                         <div class="flex items-center gap-3">
                             <span class="text-xl">${icon}</span>
                             <div class="flex-1 min-w-0">
@@ -891,6 +894,21 @@
                     </div>
                 `;
             }).join('');
+
+            // Add click handlers via event delegation
+            document.querySelectorAll('.file-item').forEach(el => {
+                el.addEventListener('click', () => {
+                    const path = decodeURIComponent(el.dataset.path);
+                    const name = decodeURIComponent(el.dataset.name);
+                    const isDir = el.dataset.isDir === 'true';
+
+                    if (isDir) {
+                        navigateToFolder(path);
+                    } else {
+                        showFileActions(path, name);
+                    }
+                });
+            });
         }
 
         // Render breadcrumb navigation
