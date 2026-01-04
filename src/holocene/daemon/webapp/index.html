@@ -910,49 +910,46 @@
                 `;
             }).join('');
 
-            // Add click handlers
-            document.querySelectorAll('.file-item').forEach((el) => {
-                const path = decodeURIComponent(el.dataset.path);
-                const name = decodeURIComponent(el.dataset.name);
-                const isDir = el.dataset.isDir === 'true';
-                const ext = el.dataset.ext;
+            // Use event delegation on container for reliable click handling
+            const filesList = document.getElementById('files-list');
+            filesList.onclick = function(e) {
+                // Find which file-item was clicked
+                const fileItem = e.target.closest('.file-item');
+                if (!fileItem) return;
 
-                el.style.cursor = 'pointer';
+                const path = decodeURIComponent(fileItem.dataset.path);
+                const name = decodeURIComponent(fileItem.dataset.name);
+                const isDir = fileItem.dataset.isDir === 'true';
+                const ext = fileItem.dataset.ext;
 
-                // Main row click - folders navigate, files expand
-                const row = el.querySelector('.file-row');
-                row.onclick = function(e) {
-                    if (e.target.closest('.file-actions-btn')) return; // Let ⋮ handle itself
+                // Check what was clicked
+                if (e.target.closest('.file-actions-btn')) {
+                    // ⋮ button - show popup
                     e.preventDefault();
                     e.stopPropagation();
-
+                    showFileActions(path, name);
+                } else if (e.target.closest('.preview-download')) {
+                    // Download button in preview
+                    e.stopPropagation();
+                    downloadFile(path);
+                } else if (e.target.closest('.preview-delete')) {
+                    // Delete button in preview
+                    e.stopPropagation();
+                    deleteFile(path, name);
+                } else if (e.target.closest('.file-row')) {
+                    // File row - navigate or expand
+                    e.preventDefault();
                     if (isDir) {
                         navigateToFolder(path);
                     } else {
-                        toggleFilePreview(el, path, ext);
+                        toggleFilePreview(fileItem, path, ext);
                     }
-                };
-
-                // ⋮ button click - show popup
-                const actionsBtn = el.querySelector('.file-actions-btn');
-                if (actionsBtn) {
-                    actionsBtn.onclick = function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        showFileActions(path, name);
-                    };
+                } else if (e.target.closest('.file-preview') && !e.target.closest('button')) {
+                    // Clicking on preview area (but not buttons) collapses it
+                    const preview = fileItem.querySelector('.file-preview');
+                    if (preview) preview.classList.add('hidden');
                 }
-
-                // Preview action buttons
-                const downloadBtn = el.querySelector('.preview-download');
-                const deleteBtn = el.querySelector('.preview-delete');
-                if (downloadBtn) {
-                    downloadBtn.onclick = (e) => { e.stopPropagation(); downloadFile(path); };
-                }
-                if (deleteBtn) {
-                    deleteBtn.onclick = (e) => { e.stopPropagation(); deleteFile(path, name); };
-                }
-            });
+            };
         }
 
         // Check if file can be previewed
