@@ -2831,7 +2831,7 @@ class APIServer:
         """
         try:
             # Get proactive_laney plugin
-            proactive_plugin = self.core.plugins.get('proactive_laney')
+            proactive_plugin = self.registry.get_plugin('proactive_laney')
             if not proactive_plugin:
                 return jsonify({"error": "Curiosity engine not available"}), 503
 
@@ -2883,7 +2883,7 @@ class APIServer:
     def _adventure_status(self):
         """GET /adventure/status - Get current adventure status."""
         try:
-            proactive_plugin = self.core.plugins.get('proactive_laney')
+            proactive_plugin = self.registry.get_plugin('proactive_laney')
             if not proactive_plugin:
                 return jsonify({"error": "Curiosity engine not available"}), 503
 
