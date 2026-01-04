@@ -875,13 +875,13 @@
             document.getElementById('files-list').innerHTML = items.map(item => {
                 const icon = item.is_dir ? '📁' : getFileIcon(item.extension);
                 const size = item.size ? formatFileSize(item.size) : '';
-                // Encode path and name for safe use in onclick
                 const encodedPath = encodeURIComponent(item.path);
                 const encodedName = encodeURIComponent(item.name);
+                const isPreviewable = isPreviewableFile(item.extension);
 
                 return `
-                    <div class="collection-item file-item" data-path="${encodedPath}" data-name="${encodedName}" data-is-dir="${item.is_dir}">
-                        <div class="flex items-center gap-3">
+                    <div class="collection-item file-item" data-path="${encodedPath}" data-name="${encodedName}" data-is-dir="${item.is_dir}" data-ext="${item.extension || ''}">
+                        <div class="flex items-center gap-3 file-row">
                             <span class="text-xl">${icon}</span>
                             <div class="flex-1 min-w-0">
                                 <div class="font-medium text-sm truncate">${escapeHtml(item.name)}</div>
@@ -889,30 +889,125 @@
                                     ${size}${size ? ' • ' : ''}${formatDate(item.modified)}
                                 </div>
                             </div>
-                            ${!item.is_dir ? '<span class="text-lg" style="color: var(--tg-theme-hint-color);">⋮</span>' : ''}
+                            ${!item.is_dir ? `<span class="file-actions-btn text-lg px-2" style="color: var(--tg-theme-hint-color);">⋮</span>` : '<span class="text-lg" style="color: var(--tg-theme-hint-color);">›</span>'}
                         </div>
+                        ${!item.is_dir ? `
+                        <div class="file-preview hidden mt-3 pt-3" style="border-top: 1px solid var(--tg-theme-hint-color); opacity: 0.3;">
+                            <div class="preview-content flex justify-center items-center py-4" style="min-height: 100px;">
+                                <div class="spinner"></div>
+                            </div>
+                            <div class="flex gap-2 mt-3">
+                                <button class="preview-download flex-1 px-3 py-2 rounded-lg text-sm" style="background: var(--tg-theme-button-color); color: var(--tg-theme-button-text-color);">
+                                    📥 Download
+                                </button>
+                                <button class="preview-delete px-3 py-2 rounded-lg text-sm" style="background: var(--tg-theme-secondary-bg-color); color: #ef4444;">
+                                    🗑️ Delete
+                                </button>
+                            </div>
+                        </div>
+                        ` : ''}
                     </div>
                 `;
             }).join('');
 
             // Add click handlers
             document.querySelectorAll('.file-item').forEach((el) => {
+                const path = decodeURIComponent(el.dataset.path);
+                const name = decodeURIComponent(el.dataset.name);
+                const isDir = el.dataset.isDir === 'true';
+                const ext = el.dataset.ext;
+
                 el.style.cursor = 'pointer';
-                el.onclick = function(e) {
+
+                // Main row click - folders navigate, files expand
+                const row = el.querySelector('.file-row');
+                row.onclick = function(e) {
+                    if (e.target.closest('.file-actions-btn')) return; // Let ⋮ handle itself
                     e.preventDefault();
                     e.stopPropagation();
-
-                    const path = decodeURIComponent(this.dataset.path);
-                    const name = decodeURIComponent(this.dataset.name);
-                    const isDir = this.dataset.isDir === 'true';
 
                     if (isDir) {
                         navigateToFolder(path);
                     } else {
-                        showFileActions(path, name);
+                        toggleFilePreview(el, path, ext);
                     }
                 };
+
+                // ⋮ button click - show popup
+                const actionsBtn = el.querySelector('.file-actions-btn');
+                if (actionsBtn) {
+                    actionsBtn.onclick = function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        showFileActions(path, name);
+                    };
+                }
+
+                // Preview action buttons
+                const downloadBtn = el.querySelector('.preview-download');
+                const deleteBtn = el.querySelector('.preview-delete');
+                if (downloadBtn) {
+                    downloadBtn.onclick = (e) => { e.stopPropagation(); downloadFile(path); };
+                }
+                if (deleteBtn) {
+                    deleteBtn.onclick = (e) => { e.stopPropagation(); deleteFile(path, name); };
+                }
             });
+        }
+
+        // Check if file can be previewed
+        function isPreviewableFile(ext) {
+            const previewable = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.txt', '.md', '.json', '.csv', '.py', '.js', '.html', '.css'];
+            return previewable.includes(ext);
+        }
+
+        // Toggle file preview
+        function toggleFilePreview(el, path, ext) {
+            const preview = el.querySelector('.file-preview');
+            if (!preview) return;
+
+            const isHidden = preview.classList.contains('hidden');
+
+            // Collapse all other previews
+            document.querySelectorAll('.file-preview').forEach(p => {
+                if (p !== preview) p.classList.add('hidden');
+            });
+
+            if (isHidden) {
+                preview.classList.remove('hidden');
+                loadPreviewContent(preview, path, ext);
+                try { tg.HapticFeedback.impactOccurred('light'); } catch(e) {}
+            } else {
+                preview.classList.add('hidden');
+            }
+        }
+
+        // Load preview content
+        async function loadPreviewContent(previewEl, path, ext) {
+            const contentEl = previewEl.querySelector('.preview-content');
+            const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'];
+            const textExts = ['.txt', '.md', '.json', '.csv', '.py', '.js', '.html', '.css', '.xml', '.yaml', '.yml'];
+
+            const downloadUrl = `${API_BASE}/webapp/sandbox/download?path=${encodeURIComponent(path)}`;
+
+            if (imageExts.includes(ext)) {
+                contentEl.innerHTML = `<img src="${downloadUrl}" style="max-width: 100%; max-height: 300px; border-radius: 8px;" onerror="this.parentElement.innerHTML='Failed to load image'">`;
+            } else if (textExts.includes(ext)) {
+                try {
+                    const response = await fetch(downloadUrl, { headers: getAuthHeaders() });
+                    if (response.ok) {
+                        let text = await response.text();
+                        if (text.length > 2000) text = text.substring(0, 2000) + '\n\n... (truncated)';
+                        contentEl.innerHTML = `<pre style="font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; background: var(--tg-theme-secondary-bg-color); padding: 8px; border-radius: 8px; margin: 0;">${escapeHtml(text)}</pre>`;
+                    } else {
+                        contentEl.innerHTML = `<span style="color: var(--tg-theme-hint-color);">Failed to load preview</span>`;
+                    }
+                } catch (e) {
+                    contentEl.innerHTML = `<span style="color: var(--tg-theme-hint-color);">Failed to load preview</span>`;
+                }
+            } else {
+                contentEl.innerHTML = `<span style="color: var(--tg-theme-hint-color);">Preview not available for this file type</span>`;
+            }
         }
 
         // Render breadcrumb navigation
