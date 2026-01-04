@@ -171,6 +171,7 @@ class Database:
             # Create new connection for this thread
             self._local.conn = sqlite3.connect(
                 str(self.db_path),
+                timeout=30.0,  # Wait up to 30s for locks
                 check_same_thread=True  # Each thread has its own connection
             )
             self._local.conn.row_factory = sqlite3.Row
@@ -178,6 +179,8 @@ class Database:
             # CRITICAL: Enable foreign keys on EVERY connection
             # (This setting is not persistent across connections)
             self._local.conn.execute("PRAGMA foreign_keys = ON")
+            # Set busy timeout for better concurrency with background threads
+            self._local.conn.execute("PRAGMA busy_timeout = 30000")
 
             logger.debug(f"Created SQLite connection for thread {threading.current_thread().name}")
 
