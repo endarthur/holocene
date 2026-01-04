@@ -2038,10 +2038,15 @@ class LaneyToolHandler:
         Returns:
             Dict with stdout, stderr, and exit code
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         timeout = min(timeout, 300)  # Cap at 5 minutes
+        logger.info(f"[run_bash] sandbox_container={self.sandbox_container!r}, command={command[:100]!r}")
 
         # Check if sandbox is configured
         if not self.sandbox_container:
+            logger.warning("[run_bash] Sandbox not configured!")
             return {
                 "success": False,
                 "error": "Sandbox not configured. Set sandbox_container in config.",
@@ -2058,6 +2063,7 @@ class LaneyToolHandler:
                 self.sandbox_container,
                 "bash", "-c", command
             ]
+            logger.info(f"[run_bash] Running: {' '.join(podman_command[:6])}...")
 
             # Run via Podman
             result = subprocess.run(
@@ -2066,10 +2072,14 @@ class LaneyToolHandler:
                 text=True,
                 timeout=timeout,
             )
+            logger.info(f"[run_bash] Completed with exit_code={result.returncode}")
 
             # Truncate long output
             stdout = result.stdout[:10000] if result.stdout else ""
             stderr = result.stderr[:5000] if result.stderr else ""
+
+            if stderr:
+                logger.warning(f"[run_bash] stderr: {stderr[:200]}")
 
             return {
                 "success": result.returncode == 0,
@@ -2080,6 +2090,7 @@ class LaneyToolHandler:
             }
 
         except subprocess.TimeoutExpired:
+            logger.error(f"[run_bash] Command timed out after {timeout}s")
             return {
                 "success": False,
                 "error": f"Command timed out after {timeout} seconds",
@@ -2087,6 +2098,7 @@ class LaneyToolHandler:
                 "stderr": "",
             }
         except FileNotFoundError:
+            logger.error("[run_bash] Podman not found!")
             return {
                 "success": False,
                 "error": "Podman not found. Is podman installed?",
@@ -2094,6 +2106,7 @@ class LaneyToolHandler:
                 "stderr": "",
             }
         except Exception as e:
+            logger.exception(f"[run_bash] Exception: {e}")
             return {
                 "success": False,
                 "error": f"Execution failed: {str(e)}",
