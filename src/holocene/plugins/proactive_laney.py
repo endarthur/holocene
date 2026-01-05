@@ -1168,6 +1168,9 @@ This is for a daily email digest - it should be the most interesting part."""
                             "content": result_str,
                         })
 
+                    # Check for any files/images to send (from attach_file, generate_image)
+                    self._send_adventure_attachments(tool_handler, topic)
+
                     # Save checkpoint
                     self._save_adventure_checkpoint(adventure_id, prompts_used, context_messages, items_added)
 
@@ -1461,6 +1464,88 @@ Your message:"""
         self._last_update_time = now
         # Just send Laney's message directly - no robotic prefix
         self._send_adventure_notification(update)
+
+    def _send_adventure_attachments(self, tool_handler, topic: str):
+        """Send any pending attachments (files, images) during adventure."""
+        from pathlib import Path
+
+        # Check for created documents (from attach_file)
+        if hasattr(tool_handler, 'created_documents') and tool_handler.created_documents:
+            for doc_path in tool_handler.created_documents:
+                try:
+                    doc_path = Path(doc_path)
+                    if doc_path.exists():
+                        # Determine file type and send appropriately
+                        suffix = doc_path.suffix.lower()
+                        is_image = suffix in ['.png', '.jpg', '.jpeg', '.gif', '.webp']
+
+                        # Get owner chat_id
+                        config = self.core.config
+                        owner_chat_id = getattr(config, 'telegram_owner_chat_id', None)
+                        if not owner_chat_id:
+                            cursor = self.core.db.conn.execute(
+                                "SELECT telegram_user_id FROM users WHERE is_admin = 1 LIMIT 1"
+                            )
+                            row = cursor.fetchone()
+                            if row:
+                                owner_chat_id = row[0]
+
+                        if owner_chat_id:
+                            # Generate a caption
+                            caption = self._generate_excited_update(
+                                "file created",
+                                f"Created: {doc_path.name} while exploring {topic}",
+                                topic
+                            )
+
+                            if is_image:
+                                self.publish('telegram.send_photo', {
+                                    'chat_id': owner_chat_id,
+                                    'photo_path': str(doc_path),
+                                    'caption': caption[:1024],  # Telegram caption limit
+                                })
+                            else:
+                                self.publish('telegram.send_document', {
+                                    'chat_id': owner_chat_id,
+                                    'document_path': str(doc_path),
+                                    'caption': caption[:1024],
+                                })
+
+                            self.logger.info(f"Sent adventure attachment: {doc_path.name}")
+
+                except Exception as e:
+                    self.logger.error(f"Error sending adventure attachment: {e}")
+
+            # Clear the list after sending
+            tool_handler.created_documents.clear()
+
+        # Check for generated images (from generate_image)
+        if hasattr(tool_handler, 'generated_images') and tool_handler.generated_images:
+            for img_data in tool_handler.generated_images:
+                try:
+                    # Get owner chat_id
+                    config = self.core.config
+                    owner_chat_id = getattr(config, 'telegram_owner_chat_id', None)
+                    if not owner_chat_id:
+                        cursor = self.core.db.conn.execute(
+                            "SELECT telegram_user_id FROM users WHERE is_admin = 1 LIMIT 1"
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            owner_chat_id = row[0]
+
+                    if owner_chat_id:
+                        caption = img_data.get('prompt', '')[:500]
+                        self.publish('telegram.send_photo', {
+                            'chat_id': owner_chat_id,
+                            'photo_base64': img_data.get('data'),
+                            'caption': f"🎨 {caption}",
+                        })
+
+                except Exception as e:
+                    self.logger.error(f"Error sending generated image: {e}")
+
+            tool_handler.generated_images.clear()
 
     def trigger_adventure(self, topic: Optional[str] = None, budget: int = 100) -> bool:
         """Manually trigger an adventure (for testing or /adventure command).

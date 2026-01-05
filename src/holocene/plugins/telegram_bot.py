@@ -571,6 +571,8 @@ class TelegramBotPlugin(Plugin):
         self.subscribe('classification.complete', self._on_classification_complete)
         self.subscribe('link.checked', self._on_link_checked)
         self.subscribe('telegram.send', self._on_telegram_send)
+        self.subscribe('telegram.send_photo', self._on_telegram_send_photo)
+        self.subscribe('telegram.send_document', self._on_telegram_send_document)
         self.subscribe('task.completed', self._on_task_completed)
 
         # Start bot in dedicated thread (not ThreadPoolExecutor - bot is long-lived)
@@ -3299,6 +3301,78 @@ URL: {url[:50]}...
             return
 
         self._send_notification(text, chat_id=chat_id)
+
+    def _on_telegram_send_photo(self, msg: Message):
+        """Handle telegram.send_photo event - send a photo via Telegram."""
+        import asyncio
+        import base64
+        from pathlib import Path
+
+        chat_id = msg.data.get('chat_id')
+        photo_path = msg.data.get('photo_path')
+        photo_base64 = msg.data.get('photo_base64')
+        caption = msg.data.get('caption', '')
+
+        if not chat_id:
+            return
+
+        try:
+            async def send():
+                if photo_path:
+                    path = Path(photo_path)
+                    if path.exists():
+                        await self.application.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=open(path, 'rb'),
+                            caption=caption[:1024] if caption else None,
+                        )
+                elif photo_base64:
+                    import io
+                    photo_data = base64.b64decode(photo_base64)
+                    await self.application.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=io.BytesIO(photo_data),
+                        caption=caption[:1024] if caption else None,
+                    )
+
+            # Run in the bot's event loop
+            asyncio.run_coroutine_threadsafe(send(), self.bot_loop)
+            self.logger.info(f"Sent photo to {chat_id}")
+
+        except Exception as e:
+            self.logger.error(f"Error sending photo: {e}")
+
+    def _on_telegram_send_document(self, msg: Message):
+        """Handle telegram.send_document event - send a document via Telegram."""
+        import asyncio
+        from pathlib import Path
+
+        chat_id = msg.data.get('chat_id')
+        document_path = msg.data.get('document_path')
+        caption = msg.data.get('caption', '')
+
+        if not chat_id or not document_path:
+            return
+
+        try:
+            path = Path(document_path)
+            if not path.exists():
+                self.logger.error(f"Document not found: {document_path}")
+                return
+
+            async def send():
+                await self.application.bot.send_document(
+                    chat_id=chat_id,
+                    document=open(path, 'rb'),
+                    caption=caption[:1024] if caption else None,
+                    filename=path.name,
+                )
+
+            asyncio.run_coroutine_threadsafe(send(), self.bot_loop)
+            self.logger.info(f"Sent document {path.name} to {chat_id}")
+
+        except Exception as e:
+            self.logger.error(f"Error sending document: {e}")
 
     def _on_task_completed(self, msg: Message):
         """Handle task.completed event - notify user about completed task."""
