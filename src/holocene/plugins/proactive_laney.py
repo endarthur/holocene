@@ -679,7 +679,7 @@ This is for a daily email digest - it should be the most interesting part."""
 
     def _init_curiosity_engine(self):
         """Initialize the curiosity engine state."""
-        self.curiosity_check_interval = 300  # 5 minutes default
+        self.curiosity_check_interval = 900  # 15 minutes between checks
         self.daily_adventure_budget = 600  # prompts per day for adventures
         self.adventure_budget_used_today = 0
         self.last_adventure_reset = datetime.now().date()
@@ -1148,7 +1148,9 @@ This is for a daily email digest - it should be the most interesting part."""
                                         # Build details from top results
                                         details = f"Search: {query}\nResults:\n"
                                         for r in results[:3]:
-                                            details += f"- {r.get('title', '')}: {r.get('description', '')[:100]}\n"
+                                            desc = r.get('description', '')[:200]  # Keep more context
+                                            url = r.get('url', '')
+                                            details += f"- {r.get('title', '')}: {desc}\n  {url}\n"
 
                                         # Generate excited message (rate-limited)
                                         excited_msg = self._generate_excited_update(
@@ -1187,7 +1189,7 @@ This is for a daily email digest - it should be the most interesting part."""
 
                     # Send interim update if interesting
                     if iteration % 5 == 0 or "found" in content.lower() or "interesting" in content.lower():
-                        self._send_adventure_update(content[:300])
+                        self._send_adventure_update(content[:2000])  # Telegram allows 4096
 
                     # Save checkpoint
                     self._save_adventure_checkpoint(adventure_id, prompts_used, context_messages, items_added)
@@ -1452,8 +1454,8 @@ Your message:"""
 
         except Exception as e:
             self.logger.error(f"Error generating excited update: {e}")
-            # Fallback to simple format
-            return f"Found something on {topic}: {details[:100]}"
+            # Fallback to simple format (keep more context - Telegram allows 4096 chars)
+            return f"Found something on {topic}: {details[:1000]}"
 
     def _send_adventure_update(self, update: str, force: bool = False):
         """Send an interim update during adventure with rate limiting."""
