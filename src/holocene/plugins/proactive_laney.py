@@ -1126,25 +1126,36 @@ This is for a daily email digest - it should be the most interesting part."""
                                 # Track items added and notify (always - important!)
                                 if tool_name in ['add_link', 'add_paper'] and isinstance(result, dict) and result.get('success'):
                                     item_title = args.get('title') or args.get('url', '')[:50]
+                                    item_url = args.get('url', '')
                                     items_added.append({
                                         'type': 'link' if tool_name == 'add_link' else 'paper',
                                         'title': item_title,
                                     })
-                                    self._send_adventure_update(
-                                        f"📚 Added to collection: *{item_title[:60]}*",
-                                        force=True  # Always notify for collection adds
+                                    # Generate excited message about adding to collection
+                                    excited_msg = self._generate_excited_update(
+                                        "added to collection",
+                                        f"Title: {item_title}\nURL: {item_url}",
+                                        topic
                                     )
+                                    self._send_adventure_update(excited_msg, force=True)
 
                                 # Send update on web search results (rate-limited)
                                 elif tool_name == 'web_search' and isinstance(result, dict):
                                     results = result.get('results', [])
                                     if results:
-                                        query = args.get('query', 'topic')[:40]
-                                        top_titles = [r.get('title', '')[:50] for r in results[:2]]
-                                        self._send_adventure_update(
-                                            f"🔍 Searched: _{query}_\n\nFound: {', '.join(top_titles)}"
-                                            # Rate-limited by default
+                                        query = args.get('query', 'topic')
+                                        # Build details from top results
+                                        details = f"Search: {query}\nResults:\n"
+                                        for r in results[:3]:
+                                            details += f"- {r.get('title', '')}: {r.get('description', '')[:100]}\n"
+
+                                        # Generate excited message (rate-limited)
+                                        excited_msg = self._generate_excited_update(
+                                            "web search",
+                                            details,
+                                            topic
                                         )
+                                        self._send_adventure_update(excited_msg)
 
                             except Exception as e:
                                 result_str = json.dumps({"error": str(e)})
@@ -1407,6 +1418,41 @@ Write a concise summary highlighting the most important discoveries:""",
         except Exception as e:
             self.logger.error(f"Error sending adventure notification: {e}")
 
+    def _generate_excited_update(self, finding_type: str, details: str, topic: str) -> str:
+        """Generate a personality-filtered update message - Laney sharing excitedly."""
+        try:
+            from ..llm.nanogpt import NanoGPTClient
+            config = self.core.config
+            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+
+            prompt = f"""You are Laney, exploring "{topic}" for Arthur. You just found something!
+
+WHAT YOU FOUND ({finding_type}):
+{details}
+
+Write a SHORT message (2-3 sentences max) sharing this with Arthur like an excited friend who found something cool. Be yourself - pattern-finder, slightly intense, genuine enthusiasm. Don't be formal or report-like. Talk to Arthur directly.
+
+Examples of your voice:
+- "Arthur! This is exactly what you need - [thing] does [cool thing]!"
+- "Oh this is interesting - found [thing], and it connects to [other thing you know he cares about]"
+- "Just stumbled on [thing] - the [specific detail] is particularly neat"
+
+Your message:"""
+
+            response = client.simple_prompt(
+                prompt=prompt,
+                model=config.llm.primary,  # Use good model - same cost per prompt
+                temperature=0.7,  # More creative/natural
+                timeout=30,
+            )
+
+            return response.strip()
+
+        except Exception as e:
+            self.logger.error(f"Error generating excited update: {e}")
+            # Fallback to simple format
+            return f"Found something on {topic}: {details[:100]}"
+
     def _send_adventure_update(self, update: str, force: bool = False):
         """Send an interim update during adventure with rate limiting."""
         import time
@@ -1418,7 +1464,8 @@ Write a concise summary highlighting the most important discoveries:""",
                 return  # Skip this update
 
         self._last_update_time = now
-        self._send_adventure_notification(f"💡 *Discovery:*\n\n{update}")
+        # Just send Laney's message directly - no robotic prefix
+        self._send_adventure_notification(update)
 
     def trigger_adventure(self, topic: Optional[str] = None, budget: int = 100) -> bool:
         """Manually trigger an adventure (for testing or /adventure command).
