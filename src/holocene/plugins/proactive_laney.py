@@ -680,7 +680,7 @@ This is for a daily email digest - it should be the most interesting part."""
     def _init_curiosity_engine(self):
         """Initialize the curiosity engine state."""
         self.curiosity_check_interval = 900  # 15 minutes between checks
-        self.daily_adventure_budget = 600  # prompts per day for adventures
+        self.daily_adventure_budget = 0  # DISABLED - set to 600 to re-enable adventures
         self.adventure_budget_used_today = 0
         self.last_adventure_reset = datetime.now().date()
 
