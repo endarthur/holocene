@@ -494,6 +494,28 @@ LANEY_TOOLS = [
             }
         }
     },
+    # === Image Download ===
+    {
+        "type": "function",
+        "function": {
+            "name": "download_image",
+            "description": "Download an image from the web to share with Arthur. Use when you find an interesting diagram, photo, or figure during research that would be useful to share.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Direct URL to the image file (must end in .jpg, .png, .gif, .webp, or be a direct image link)"
+                    },
+                    "caption": {
+                        "type": "string",
+                        "description": "Brief description of what the image shows and why it's interesting"
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
     # === Document Export ===
     {
         "type": "function",
@@ -1290,8 +1312,9 @@ class LaneyToolHandler:
             # Code execution (sandbox)
             "run_bash": self.run_bash,
             "attach_file": self.attach_file,
-            # Image generation
+            # Image generation/download
             "generate_image": self.generate_image,
+            "download_image": self.download_image,
             # Document export
             "write_document": self.write_document,
             # Progress updates
@@ -2246,6 +2269,113 @@ class LaneyToolHandler:
             return {
                 "success": False,
                 "error": f"Image generation failed: {str(e)}",
+            }
+
+    def download_image(self, url: str, caption: Optional[str] = None) -> Dict[str, Any]:
+        """Download an image from the web to share with Arthur.
+
+        Args:
+            url: Direct URL to the image
+            caption: Description of what the image shows
+
+        Returns:
+            Download status and file info
+        """
+        import requests
+        import time
+        from pathlib import Path
+        from urllib.parse import urlparse, unquote
+
+        try:
+            # Validate URL looks like an image
+            parsed = urlparse(url)
+            path_lower = parsed.path.lower()
+
+            # Common image extensions
+            valid_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp']
+            has_image_ext = any(path_lower.endswith(ext) for ext in valid_extensions)
+
+            # Also allow URLs that might be direct image links without extension
+            # (like some CDN URLs or image services)
+
+            # Set up headers to look like a browser
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'image/*,*/*;q=0.8',
+            }
+
+            # Download the image
+            response = requests.get(url, headers=headers, timeout=30, stream=True)
+            response.raise_for_status()
+
+            # Check content type
+            content_type = response.headers.get('content-type', '').lower()
+            if not any(img_type in content_type for img_type in ['image/', 'octet-stream']):
+                return {
+                    "success": False,
+                    "error": f"URL doesn't appear to be an image (content-type: {content_type})",
+                    "hint": "Make sure the URL points directly to an image file"
+                }
+
+            # Determine filename and extension
+            if has_image_ext:
+                # Extract filename from URL
+                original_name = unquote(parsed.path.split('/')[-1])
+                ext = Path(original_name).suffix.lower()
+            else:
+                # Guess extension from content-type
+                ext_map = {
+                    'image/jpeg': '.jpg',
+                    'image/png': '.png',
+                    'image/gif': '.gif',
+                    'image/webp': '.webp',
+                    'image/svg+xml': '.svg',
+                }
+                ext = ext_map.get(content_type.split(';')[0], '.jpg')
+
+            # Create unique filename
+            timestamp = int(time.time())
+            filename = f"downloaded_{timestamp}{ext}"
+
+            # Save to sandbox directory
+            sandbox_dir = Path.home() / ".holocene" / "sandbox"
+            sandbox_dir.mkdir(parents=True, exist_ok=True)
+            output_path = sandbox_dir / filename
+
+            # Write the image
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            file_size = output_path.stat().st_size
+
+            # Add to created_documents for sending
+            self.created_documents.append(output_path)
+
+            return {
+                "success": True,
+                "path": str(output_path),
+                "filename": filename,
+                "size_bytes": file_size,
+                "source_url": url,
+                "caption": caption,
+                "message": f"Downloaded image ({file_size // 1024}KB) - will be sent with the response"
+            }
+
+        except requests.exceptions.Timeout:
+            return {
+                "success": False,
+                "error": "Download timed out after 30 seconds",
+            }
+        except requests.exceptions.RequestException as e:
+            return {
+                "success": False,
+                "error": f"Failed to download image: {str(e)}",
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Error saving image: {str(e)}",
             }
 
     # === Document Export ===
