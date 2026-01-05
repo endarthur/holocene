@@ -700,6 +700,7 @@ This is for a daily email digest - it should be the most interesting part."""
         import sqlite3
         try:
             conn = sqlite3.connect(str(self.core.config.db_path), timeout=30.0)
+            conn.execute("PRAGMA busy_timeout = 30000")  # Wait up to 30s for locks
             cursor = conn.execute("""
                 UPDATE laney_adventures
                 SET status = 'paused', last_checkpoint = '{"reason": "orphaned on restart"}'
@@ -1256,6 +1257,7 @@ Remember: Arthur will see your updates, so keep them interesting and informative
             try:
                 # Use dedicated connection with long timeout for thread-safety
                 conn = sqlite3.connect(str(self.core.config.db_path), timeout=30.0)
+                conn.execute("PRAGMA busy_timeout = 30000")  # Wait up to 30s for locks
                 conn.execute("""
                     UPDATE laney_adventures
                     SET prompts_used = ?, context_messages = ?, items_added = ?, updated_at = ?
@@ -1282,6 +1284,7 @@ Remember: Arthur will see your updates, so keep them interesting and informative
         try:
             # Use dedicated connection with long timeout
             conn = sqlite3.connect(str(self.core.config.db_path), timeout=30.0)
+            conn.execute("PRAGMA busy_timeout = 30000")  # Wait up to 30s for locks
             conn.execute("""
                 UPDATE laney_adventures
                 SET status = 'paused', context_messages = ?, items_added = ?, updated_at = ?,
@@ -1314,6 +1317,7 @@ Remember: Arthur will see your updates, so keep them interesting and informative
 
             # Use dedicated connection with long timeout
             conn = sqlite3.connect(str(self.core.config.db_path), timeout=30.0)
+            conn.execute("PRAGMA busy_timeout = 30000")  # Wait up to 30s for locks
             conn.execute("""
                 UPDATE laney_adventures
                 SET status = 'completed', findings_summary = ?, items_added = ?,
