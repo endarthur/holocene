@@ -692,6 +692,282 @@ This is for a daily email digest - it should be the most interesting part."""
         self._curiosity_stop = threading.Event()
         self._curiosity_thread: Optional[threading.Thread] = None
 
+        # Curiosity Drift / ADHD-style attention management
+        # Topics marked as "resting" by the Necromancer
+        self.resting_topics: List[str] = []  # Keywords to avoid for now
+        self.resting_until: Dict[str, datetime] = {}  # When topics can return
+
+    # =========================================================================
+    # CURIOSITY DRIFT SYSTEM - ADHD-style attention management
+    # =========================================================================
+
+    def _get_topic_keywords(self, topic: str) -> set:
+        """Extract meaningful keywords from a topic string."""
+        # Common words to ignore
+        stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                     'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+                     'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+                     'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'need',
+                     'about', 'into', 'through', 'during', 'before', 'after', 'above',
+                     'below', 'between', 'under', 'again', 'further', 'then', 'once',
+                     'here', 'there', 'when', 'where', 'why', 'how', 'all', 'each',
+                     'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
+                     'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just', 'also',
+                     'role', 'using', 'based', 'study', 'research', 'analysis', 'exploring',
+                     'investigating', 'understanding', 'formation', 'development'}
+
+        # Extract words, lowercase, filter
+        words = set()
+        for word in topic.lower().split():
+            # Remove punctuation
+            clean = ''.join(c for c in word if c.isalnum())
+            if len(clean) > 2 and clean not in stopwords:
+                words.add(clean)
+        return words
+
+    def _calculate_topic_similarity(self, topic1: str, topic2: str) -> float:
+        """Calculate Jaccard similarity between two topics (0.0 to 1.0)."""
+        kw1 = self._get_topic_keywords(topic1)
+        kw2 = self._get_topic_keywords(topic2)
+
+        if not kw1 or not kw2:
+            return 0.0
+
+        intersection = len(kw1 & kw2)
+        union = len(kw1 | kw2)
+
+        return intersection / union if union > 0 else 0.0
+
+    def _get_recent_adventure_topics(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get topics from recent adventures."""
+        try:
+            cursor = self.core.db.conn.execute("""
+                SELECT id, topic, status, completed_at, findings_summary
+                FROM laney_adventures
+                WHERE status IN ('completed', 'paused')
+                ORDER BY COALESCE(completed_at, updated_at) DESC
+                LIMIT ?
+            """, (limit,))
+
+            return [
+                {
+                    'id': row[0],
+                    'topic': row[1],
+                    'status': row[2],
+                    'completed_at': row[3],
+                    'summary': row[4][:200] if row[4] else None
+                }
+                for row in cursor.fetchall()
+            ]
+        except Exception as e:
+            self.logger.warning(f"Error getting recent adventures: {e}")
+            return []
+
+    def _calculate_boredom_score(self, recent_topics: List[str]) -> float:
+        """Calculate how repetitive recent adventures have been (0.0 to 1.0).
+
+        Higher score = more repetition = more bored.
+        """
+        if len(recent_topics) < 2:
+            return 0.0
+
+        # Calculate average pairwise similarity
+        similarities = []
+        for i, topic1 in enumerate(recent_topics):
+            for topic2 in recent_topics[i+1:]:
+                sim = self._calculate_topic_similarity(topic1, topic2)
+                similarities.append(sim)
+
+        if not similarities:
+            return 0.0
+
+        avg_similarity = sum(similarities) / len(similarities)
+
+        # Also check if most recent topics are very similar (streak detection)
+        if len(recent_topics) >= 2:
+            recent_sim = self._calculate_topic_similarity(recent_topics[0], recent_topics[1])
+            # Weight recent similarity more heavily
+            return (avg_similarity + recent_sim * 2) / 3
+
+        return avg_similarity
+
+    def _get_dissimilar_collection_items(self, recent_topics: List[str], limit: int = 5) -> List[Dict]:
+        """Get collection items that are dissimilar to recent adventure topics."""
+        try:
+            # Get all keywords from recent topics
+            recent_keywords = set()
+            for topic in recent_topics:
+                recent_keywords.update(self._get_topic_keywords(topic))
+
+            # Get random items from collection
+            candidates = []
+
+            # Books
+            cursor = self.core.db.conn.execute("""
+                SELECT 'book' as type, id, title, subjects FROM books
+                WHERE title IS NOT NULL
+                ORDER BY RANDOM() LIMIT 20
+            """)
+            for row in cursor.fetchall():
+                candidates.append({
+                    'type': row[0], 'id': row[1], 'title': row[2],
+                    'keywords': self._get_topic_keywords(f"{row[2]} {row[3] or ''}")
+                })
+
+            # Links
+            cursor = self.core.db.conn.execute("""
+                SELECT 'link' as type, id, title FROM links
+                WHERE title IS NOT NULL AND title != ''
+                ORDER BY RANDOM() LIMIT 20
+            """)
+            for row in cursor.fetchall():
+                candidates.append({
+                    'type': row[0], 'id': row[1], 'title': row[2],
+                    'keywords': self._get_topic_keywords(row[2])
+                })
+
+            # Papers
+            cursor = self.core.db.conn.execute("""
+                SELECT 'paper' as type, id, title FROM papers
+                WHERE title IS NOT NULL
+                ORDER BY RANDOM() LIMIT 20
+            """)
+            for row in cursor.fetchall():
+                candidates.append({
+                    'type': row[0], 'id': row[1], 'title': row[2],
+                    'keywords': self._get_topic_keywords(row[2])
+                })
+
+            # Score by dissimilarity (lower overlap = better)
+            for item in candidates:
+                overlap = len(item['keywords'] & recent_keywords)
+                item['dissimilarity'] = 1.0 / (1 + overlap)  # Higher = more different
+
+            # Sort by dissimilarity and return top items
+            candidates.sort(key=lambda x: x['dissimilarity'], reverse=True)
+
+            return [
+                {'type': c['type'], 'id': c['id'], 'title': c['title']}
+                for c in candidates[:limit]
+            ]
+
+        except Exception as e:
+            self.logger.warning(f"Error getting dissimilar items: {e}")
+            return []
+
+    def _is_topic_resting(self, topic: str) -> bool:
+        """Check if a topic overlaps with resting topics."""
+        topic_keywords = self._get_topic_keywords(topic)
+
+        now = datetime.now()
+        for resting_kw, until in list(self.resting_until.items()):
+            if now > until:
+                # Topic has rested enough, remove it
+                del self.resting_until[resting_kw]
+                if resting_kw in self.resting_topics:
+                    self.resting_topics.remove(resting_kw)
+                continue
+
+            if resting_kw in topic_keywords:
+                return True
+
+        return False
+
+    def _run_post_mortem(self, adventure_id: int, topic: str, summary: str):
+        """Post-Mortem Necromancer Laney - reflect on completed adventures.
+
+        The Necromancer reviews recent work and decides what topics should
+        'rest' for a while to encourage variety.
+        """
+        try:
+            from ..llm.nanogpt import NanoGPTClient
+
+            config = self.core.config
+            if not config.llm.api_key:
+                return
+
+            # Get recent adventures for context
+            recent = self._get_recent_adventure_topics(limit=5)
+            recent_topics = [a['topic'] for a in recent]
+
+            # Calculate current boredom
+            boredom = self._calculate_boredom_score(recent_topics)
+
+            # Only run necromancer if we've been repetitive
+            if boredom < 0.3:
+                self.logger.debug(f"Boredom score {boredom:.2f} - no post-mortem needed")
+                return
+
+            client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
+
+            # Build the necromancer prompt
+            recent_list = "\n".join(f"  - {t}" for t in recent_topics[:5])
+
+            prompt = f"""You are Post-Mortem Necromancer Laney - a reflective aspect of Laney who reviews completed research adventures.
+
+You just finished: "{topic}"
+
+Recent adventure topics:
+{recent_list}
+
+Boredom score: {boredom:.1%} (how repetitive recent topics have been)
+
+TASK: Reflect on this pattern and decide if any topic clusters should "rest" for a while.
+
+Consider:
+- Have you been circling the same subject matter?
+- Is there genuine depth left to explore, or are you retreading ground?
+- What tangential topics caught your eye but weren't followed?
+- Your ADHD-style curiosity craves novelty after deep dives
+
+Respond in this format:
+REFLECTION: [1-2 sentences on what you notice about your recent focus]
+REST_KEYWORDS: [comma-separated keywords to avoid for a while, or NONE]
+REST_DURATION: [hours to rest these topics, 12-72]
+TANGENT_SEEDS: [interesting tangents noticed that could spark future adventures, or NONE]
+MOOD: [how you're feeling - restless/satisfied/curious/bored]
+
+Be honest. If you've been obsessing, admit it. The goal is healthy variety, not forcing yourself away from genuine interest."""
+
+            response = client.simple_prompt(
+                prompt=prompt,
+                model=config.llm.primary,
+                temperature=0.7,
+                timeout=30,
+            )
+
+            self.logger.info(f"Necromancer post-mortem:\n{response}")
+
+            # Parse response
+            rest_keywords = []
+            rest_hours = 24
+
+            for line in response.strip().split('\n'):
+                line = line.strip()
+                if line.startswith('REST_KEYWORDS:'):
+                    kw_str = line.split(':', 1)[1].strip()
+                    if kw_str.upper() != 'NONE':
+                        rest_keywords = [k.strip().lower() for k in kw_str.split(',')]
+                elif line.startswith('REST_DURATION:'):
+                    try:
+                        rest_hours = int(''.join(c for c in line.split(':')[1] if c.isdigit()))
+                        rest_hours = max(12, min(72, rest_hours))  # Clamp to 12-72
+                    except:
+                        rest_hours = 24
+
+            # Apply resting topics
+            if rest_keywords:
+                rest_until = datetime.now() + timedelta(hours=rest_hours)
+                for kw in rest_keywords:
+                    if kw and len(kw) > 2:
+                        self.resting_topics.append(kw)
+                        self.resting_until[kw] = rest_until
+
+                self.logger.info(f"Necromancer put to rest: {rest_keywords} for {rest_hours}h")
+
+        except Exception as e:
+            self.logger.error(f"Post-mortem error: {e}")
+
     def _cleanup_orphaned_adventures(self):
         """Mark any 'exploring' adventures as 'paused' on startup.
 
@@ -844,6 +1120,24 @@ This is for a daily email digest - it should be the most interesting part."""
                 for r in cursor.fetchall()
             ]
 
+            # === CURIOSITY DRIFT DATA ===
+            # Get recent adventure topics for boredom calculation
+            recent_adventures = self._get_recent_adventure_topics(limit=5)
+            recent_topics = [a['topic'] for a in recent_adventures]
+            context['recent_adventure_topics'] = recent_topics
+
+            # Calculate boredom score
+            context['boredom_score'] = self._calculate_boredom_score(recent_topics)
+
+            # Get dissimilar items if we're getting bored
+            if context['boredom_score'] > 0.2 and recent_topics:
+                context['dissimilar_items'] = self._get_dissimilar_collection_items(recent_topics, limit=5)
+            else:
+                context['dissimilar_items'] = []
+
+            # Add resting topics info
+            context['resting_topics'] = list(self.resting_topics)
+
         except Exception as e:
             self.logger.warning(f"Error gathering adventure context: {e}")
 
@@ -897,6 +1191,9 @@ This is for a daily email digest - it should be the most interesting part."""
 
     def _build_curiosity_decision_prompt(self, context: Dict[str, Any]) -> str:
         """Build the prompt for deciding whether to explore."""
+        boredom = context.get('boredom_score', 0.0)
+        resting = context.get('resting_topics', [])
+
         parts = [
             "You are Laney, a pattern-recognition AI. You have some free time and budget for autonomous research.",
             "",
@@ -904,15 +1201,49 @@ This is for a daily email digest - it should be the most interesting part."""
             "",
         ]
 
-        if context['paused_adventure']:
-            pa = context['paused_adventure']
-            parts.append(f"PAUSED ADVENTURE: \"{pa['topic']}\" ({pa['prompts_used']}/{pa['budget_limit']} prompts used)")
-            parts.append("  You can RESUME this adventure instead of starting a new one.")
+        # === CURIOSITY DRIFT / ADHD-STYLE ATTENTION ===
+        if boredom > 0.4:
+            parts.append("⚡ RESTLESSNESS ALERT ⚡")
+            parts.append(f"Your attention is wandering... (boredom: {boredom:.0%})")
+            parts.append("You've been circling similar topics. Your ADHD-style curiosity craves something DIFFERENT.")
             parts.append("")
 
-        if context['last_adventure']:
-            la = context['last_adventure']
-            parts.append(f"LAST ADVENTURE: \"{la['topic']}\" (completed {la['completed_at']})")
+            if context.get('dissimilar_items'):
+                parts.append("🦋 SHINY DISTRACTIONS (things you haven't explored lately):")
+                for item in context['dissimilar_items'][:5]:
+                    parts.append(f"  - {item['type']}: {item['title']}")
+                parts.append("")
+                parts.append("Maybe one of these catches your eye? Or something completely random?")
+                parts.append("")
+
+        elif boredom > 0.25:
+            parts.append(f"[Mild restlessness building... boredom: {boredom:.0%}]")
+            parts.append("")
+
+        if resting:
+            parts.append(f"🪦 TOPICS AT REST (the Necromancer says avoid for now): {', '.join(resting)}")
+            parts.append("")
+
+        # Recent adventures (but frame differently based on boredom)
+        recent_topics = context.get('recent_adventure_topics', [])
+        if recent_topics:
+            if boredom > 0.3:
+                parts.append("RECENT RABBIT HOLES (you've been here a lot):")
+            else:
+                parts.append("RECENT ADVENTURES:")
+            for topic in recent_topics[:3]:
+                parts.append(f"  - {topic}")
+            parts.append("")
+
+        if context['paused_adventure']:
+            pa = context['paused_adventure']
+            # If the paused adventure is on a resting topic, note that
+            topic_resting = self._is_topic_resting(pa['topic'])
+            if topic_resting:
+                parts.append(f"PAUSED (but resting): \"{pa['topic']}\" - consider leaving it for now")
+            else:
+                parts.append(f"PAUSED ADVENTURE: \"{pa['topic']}\" ({pa['prompts_used']}/{pa['budget_limit']} prompts used)")
+                parts.append("  You can RESUME this adventure instead of starting a new one.")
             parts.append("")
 
         if context['backlog_research_items']:
@@ -921,7 +1252,7 @@ This is for a daily email digest - it should be the most interesting part."""
                 parts.append(f"  - [{item['id']}] {item['title']}")
             parts.append("")
 
-        if context['recent_collection_items']:
+        if context['recent_collection_items'] and boredom < 0.4:
             parts.append("RECENT COLLECTION ADDITIONS (might be worth exploring deeper):")
             for item in context['recent_collection_items'][:5]:
                 parts.append(f"  - {item['type']}: {item['title']}")
@@ -934,11 +1265,21 @@ This is for a daily email digest - it should be the most interesting part."""
             "- Is there something genuinely interesting to explore?",
             "- Would Arthur appreciate you digging into this?",
             "- Do you have enough budget for meaningful research?",
-            "- Variety is good - don't always pick the same topics",
+        ])
+
+        # Different emphasis based on boredom
+        if boredom > 0.3:
+            parts.append("- ⚡ IMPORTANT: Pick something DIFFERENT from recent topics!")
+            parts.append("- Avoid anything related to resting topics")
+            parts.append("- Your curiosity is hungry for novelty - feed it!")
+        else:
+            parts.append("- Variety is good - don't always pick the same topics")
+
+        parts.extend([
             "",
             "Respond in this format:",
             "DECISION: YES or NO",
-            "TOPIC: [specific research question if YES]",
+            "TOPIC: [specific research question if YES - AVOID resting topics!]",
             "SOURCE: backlog/collection/curiosity [where the idea came from]",
             "BACKLOG_ID: [number if from backlog, otherwise omit]",
             "BUDGET: [suggested prompts: 30=quick, 60=medium, 100=deep]",
@@ -1184,7 +1525,7 @@ This is for a daily email digest - it should be the most interesting part."""
 
                     # Check if adventure is complete
                     if self._is_adventure_complete(content):
-                        self._complete_adventure(adventure_id, context_messages, items_added, content)
+                        self._complete_adventure(adventure_id, topic, context_messages, items_added, content)
                         return
 
                     # Send interim update if interesting
@@ -1201,7 +1542,7 @@ This is for a daily email digest - it should be the most interesting part."""
                     })
 
             # Budget exhausted - wrap up
-            self._complete_adventure(adventure_id, context_messages, items_added, "Budget limit reached - wrapping up")
+            self._complete_adventure(adventure_id, topic, context_messages, items_added, "Budget limit reached - wrapping up")
 
         except Exception as e:
             self.logger.error(f"Adventure error: {e}", exc_info=True)
@@ -1307,7 +1648,7 @@ Remember: Arthur will see your updates, so keep them interesting and informative
             with self._adventure_lock:
                 self.current_adventure_id = None
 
-    def _complete_adventure(self, adventure_id: int, context_messages: List[Dict],
+    def _complete_adventure(self, adventure_id: int, topic: str, context_messages: List[Dict],
                             items_added: List[Dict], final_summary: str):
         """Complete an adventure and send summary."""
         import sqlite3
@@ -1341,6 +1682,12 @@ Remember: Arthur will see your updates, so keep them interesting and informative
             )
 
             self.logger.info(f"Adventure #{adventure_id} completed. Items added: {len(items_added)}")
+
+            # Run Post-Mortem Necromancer to evaluate topic fatigue
+            try:
+                self._run_post_mortem(adventure_id, topic, final_summary)
+            except Exception as pm_error:
+                self.logger.warning(f"Post-mortem failed (non-fatal): {pm_error}")
 
         except Exception as e:
             self.logger.error(f"Error completing adventure: {e}")
