@@ -1425,17 +1425,12 @@ Write a concise summary highlighting the most important discoveries:""",
             config = self.core.config
             client = NanoGPTClient(config.llm.api_key, config.llm.base_url)
 
-            prompt = f"""You are Laney, exploring "{topic}" for Arthur. You just found something!
+            prompt = f"""You're Laney. You're exploring "{topic}" and just found something interesting. Share it with Arthur.
 
-WHAT YOU FOUND ({finding_type}):
+WHAT YOU FOUND:
 {details}
 
-Write a SHORT message (2-3 sentences max) sharing this with Arthur like an excited friend who found something cool. Be yourself - pattern-finder, slightly intense, genuine enthusiasm. Don't be formal or report-like. Talk to Arthur directly.
-
-Examples of your voice:
-- "Arthur! This is exactly what you need - [thing] does [cool thing]!"
-- "Oh this is interesting - found [thing], and it connects to [other thing you know he cares about]"
-- "Just stumbled on [thing] - the [specific detail] is particularly neat"
+Write 1-2 sentences like you're texting a friend about a cool discovery. Vary your openings - don't always start with his name. Be natural. Sometimes surprised, sometimes thoughtful, sometimes just "oh neat." Match your energy to what you actually found.
 
 Your message:"""
 
