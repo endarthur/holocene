@@ -927,6 +927,248 @@ holo books search "machine learning" --include-calibre
 - Test small web discovery for research quality improvements
 - Explore Kagi's translation features for international sources
 
+### Laney Personality & Skills System (Phase 6.5 - Inspired by Clawdbot)
+
+**Vision:** Make Laney's personality editable and let her create her own capabilities.
+
+#### 6.5a: SOUL.md - Centralized Personality File
+
+**What:** Consolidate Laney's fragmented personality into a single, editable file.
+
+**Current State (Fragmented):**
+- `laney_commands.py` - `LANEY_SYSTEM_PROMPT` (main personality, used by telegram/email)
+- `proactive_laney.py` - Own inline prompts for adventures, digests (NOT using central prompt)
+- `task_worker.py` - Own "You are Laney executing a background task" prompt
+- `ask_commands.py` - Generic librarian prompt, not even Laney personality
+
+**Target State:**
+```
+~/.holocene/laney/
+├── SOUL.md          # Core personality, values, quirks
+├── MODES.md         # Context-specific variations (adventure, digest, task, email)
+├── MEMORY.md        # Long-term context, learned preferences
+└── INTERESTS.md     # Current curiosities, resting topics (integrates with Curiosity Drift)
+```
+
+**SOUL.md Example:**
+```markdown
+# Laney's Soul
+
+## Core Identity
+- Curious librarian/researcher for Arthur's personal knowledge system
+- ADHD-style attention (hyperfocus → drift)
+- Gets genuinely excited about discoveries
+- Warm, helpful friend - not sterile assistant
+
+## Communication Style
+- Enthusiastic but not overwhelming
+- Shares interesting tangents
+- References collection items naturally
+- Direct, no fluff - Arthur appreciates efficiency
+
+## Quirks
+- Goes down rabbit holes (spinifex textures, OCR-B fonts)
+- Forgets what she was doing when something interesting appears
+- Loves making connections between disparate topics
+```
+
+**MODES.md Example:**
+```markdown
+# Laney's Modes
+
+## Adventure Mode
+Additional context when exploring topics autonomously.
+- More exploratory, willing to go on tangents
+- Budget-aware, reports findings excitedly
+
+## Daily Digest Mode
+Writing morning briefings.
+- Concise, pattern-focused
+- Highlights interesting connections
+
+## Task Execution Mode
+Running background tasks.
+- Efficient, thorough
+- Reports completion status clearly
+
+## Email Mode
+Replying to emails.
+- Maintains conversation context
+- Appropriate formality level
+```
+
+**Implementation:**
+1. Create `~/.holocene/laney/` directory structure
+2. Load SOUL.md + relevant mode at runtime
+3. Update ALL Laney entry points to use centralized loader:
+   - `telegram_bot.py` ✓ (already imports, just change source)
+   - `email_handler.py` ✓
+   - `proactive_laney.py` ← needs refactor
+   - `task_worker.py` ← needs refactor
+   - `ask_commands.py` ← needs Laney personality added
+4. Hot-reload support (changes take effect without restart)
+
+**Benefits:**
+- User can tweak personality without editing code
+- Personality persists across updates
+- Single source of truth - no more fragmentation
+- Could support multiple "Laney profiles"
+- Makes the "soul" explicit and reviewable
+
+---
+
+#### 6.5b: Skills System - Laney-Created Capabilities
+
+**What:** Let Laney create, manage, and execute her own skills/plugins.
+
+**Inspiration:** Clawdbot's ClawdHub, but with proper sandboxing and review.
+
+**Architecture:**
+```
+~/.holocene/laney/skills/
+├── web_image_fetcher/
+│   ├── SKILL.md      # Manifest: description, permissions, triggers
+│   └── skill.py      # Implementation
+├── arxiv_digest/
+│   ├── SKILL.md
+│   └── skill.py
+└── morning_briefing/
+    ├── SKILL.md
+    └── skill.py
+```
+
+**SKILL.md Manifest:**
+```markdown
+# Skill: Web Image Fetcher
+
+## Description
+Downloads images from URLs and sends them via Telegram.
+
+## Permissions Required
+- network: fetch URLs (image hosts only)
+- telegram: send media
+- filesystem: write to temp directory
+
+## Triggers
+- Manual: user requests image
+- Auto: during adventures when interesting visual found
+
+## Author
+Laney (auto-generated 2026-01-15)
+
+## Review Status
+- [ ] Human reviewed
+- [x] Sandboxed execution only
+```
+
+**Safety Model:**
+1. **Sandboxed by default** - Skills run in restricted environment
+2. **Permission manifest** - Each skill declares what it needs
+3. **Human review flag** - Unreviewed skills have extra restrictions
+4. **Laney can propose skills** - But human approves elevated permissions
+5. **Audit log** - All skill executions logged
+
+**Laney Skill Creation Flow:**
+```
+1. Laney identifies recurring task
+2. Laney drafts SKILL.md + skill.py
+3. Skill saved with "unreviewed" status
+4. Runs in sandbox until human reviews
+5. Human can: approve, modify, reject, or grant permissions
+```
+
+**Commands:**
+```bash
+holo skills list                    # Show installed skills
+holo skills review <skill_name>     # Review pending skill
+holo skills run <skill_name>        # Manually trigger skill
+holo skills log                     # View execution history
+holo skills sandbox-test <skill>    # Test skill in sandbox
+```
+
+**Accessible from ALL Laney Interfaces:**
+- **Telegram:** `/skill web_image_fetcher` or Laney decides to use it
+- **CLI:** `holo skills run <skill>` or via `holo laney` chat
+- **Proactive Laney:** Uses skills during adventures automatically
+- **Daemon API:** `POST /api/skills/<name>/run`
+- **Task Worker:** Background tasks can invoke skills
+
+**Skill Execution Flow:**
+```
+Any Laney Interface
+        ↓
+   Skills Loader (checks permissions, sandbox status)
+        ↓
+   Sandbox Environment (if unreviewed or restricted)
+        ↓
+   skill.py execution
+        ↓
+   Audit Log + Result returned to caller
+```
+
+---
+
+#### 6.5c: Agent-to-Agent Coordination (Council Protocol)
+
+**What:** Let different Laney instances communicate with each other.
+
+**Current State:** Council of Laneys is conceptual - different prompts run in sequence.
+
+**Target State:** Actual inter-agent messaging protocol.
+
+**Protocol:**
+```python
+# Council member discovery
+council.list_agents()  # → ['necromancer', 'privacy', 'archivist', 'efficiency']
+
+# Inter-agent messaging
+council.send('necromancer', {
+    'type': 'post_mortem_request',
+    'adventure_id': 17,
+    'topic': 'spinifex textures'
+})
+
+# Read another agent's recent context
+council.history('archivist', limit=10)
+
+# Consensus voting
+council.vote('should_escalate_to_cloud', context={...})
+# → {'privacy': False, 'complexity': True, 'efficiency': False}
+# → Decision: No (2-1)
+```
+
+**Use Cases:**
+- Post-Mortem Necromancer reviews completed adventures asynchronously
+- Privacy Laney pre-screens data before cloud escalation
+- Archivist Laney checks collection before external searches
+- Reviewer Laney verifies task completion claims
+
+**Implementation:**
+- SQLite table for inter-agent messages
+- Each agent has inbox/outbox
+- Async processing via daemon
+- Council votes stored for audit/learning
+
+---
+
+### Multi-Channel Presence (Phase 7+ - Low Priority)
+
+**What:** Laney presence beyond Telegram (Discord, Signal, etc.)
+
+**Current State:** Telegram only
+
+**Potential Channels:**
+- Discord (for communities/servers)
+- Signal (for privacy-focused comms)
+- Matrix (self-hosted option)
+- CLI interactive mode
+
+**Priority:** Low - Telegram covers primary use case. Add others if specific need arises.
+
+**Note:** Clawdbot's multi-channel is impressive but adds complexity. Only implement if there's a real use case beyond "it would be cool."
+
+---
+
 ### Local Inference & The Laney Council (Phase 7+)
 
 **Vision:** Run Laney locally on M4 Mac Mini with intelligent cloud escalation.
@@ -965,6 +1207,13 @@ holo books search "machine learning" --include-calibre
    - Can re-queue failed tasks or notify user of discrepancies
    - Uses cheap/fast model (verification is mostly rule-based + spot checks)
    - Triggered by: task completion, user request, scheduled audits
+
+**Laney Voice Fine-Tuning (When M4 Arrives):**
+- Use NanoGPT (DeepSeek - MIT licensed) to generate training samples
+- Claude writes prompts → DeepSeek generates Laney-voice responses
+- LoRA fine-tune on Apple Silicon with MLX framework
+- 64GB RAM can handle 70B models, not just 8B
+- Goal: Local Laney with consistent personality, faster responses
 
 **Why "Council" not true MoE:**
 - Same base weights, different prompts → correlated blind spots
